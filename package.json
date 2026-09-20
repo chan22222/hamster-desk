@@ -1,0 +1,68 @@
+{
+  "name": "hamster-desk",
+  "version": "0.1.0",
+  "description": "Pixel hamsters that show what Claude Code is doing — embedded terminal + live desk",
+  "main": "./out/main/main.js",
+  "private": true,
+  "scripts": {
+    "dev": "electron-vite dev",
+    "build": "electron-vite build",
+    "preview": "electron-vite preview",
+    "start": "electron-vite preview",
+    "watch:cli": "tsx scripts/watch-cli.ts",
+    "replay": "tsx scripts/replay.ts",
+    "typecheck": "tsc --noEmit -p tsconfig.json",
+    "test:office": "tsx --test scripts/office-world.test.ts",
+    "smoke:bubble": "tsx scripts/bubble-smoke.ts",
+    "preview:studio": "vite --config scripts/vite.studio.mjs",
+    "test:office:ui": "electron scripts/office-smoke.cjs",
+    "shot:studio": "electron scripts/office-shot.cjs",
+    "rebuild": "electron-rebuild -f -w node-pty",
+    "dist": "electron-vite build && electron-builder --win portable"
+  },
+  "build": {
+    "appId": "kr.amag.hamsterdesk",
+    "productName": "Hamster Desk",
+    "directories": {
+      "output": "release"
+    },
+    "files": [
+      "out/**",
+      "package.json"
+    ],
+    "win": {
+      "target": [
+        "portable"
+      ]
+    },
+    "npmRebuild": false,
+    "nodeGypRebuild": false,
+    "asarUnpack": [
+      "node_modules/node-pty/**"
+    ]
+  },
+  "devDependencies": {
+    "@electron/rebuild": "^4.2.0",
+    "@types/node": "^26.6.2",
+    "@types/react": "^19.3.0",
+    "@types/react-dom": "^19.3.0",
+    "@types/three": "^0.185.4",
+    "@vitejs/plugin-react": "^5.2.0",
+    "electron": "^44.4.3",
+    "electron-builder": "^26.15.3",
+    "electron-vite": "^5.0.0",
+    "tsx": "^4.23.13",
+    "typescript": "5.9",
+    "vite": "^7.3.6"
+  },
+  "dependencies": {
+    "@xterm/addon-fit": "^0.11.0",
+    "@xterm/addon-webgl": "^0.19.0",
+    "@xterm/xterm": "^6.0.0",
+    "node-pty": "^1.1.0",
+    "react": "^19.3.0",
+    "react-dom": "^19.3.0",
+    "three": "^0.185.1",
+    "zustand": "^5.0.15"
+  }
+}

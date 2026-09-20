@@ -1,0 +1,94 @@
+import { useEffect, useLayoutEffect, useRef, useState, type ReactNode } from 'react'
+
+interface PopoverProps {
+  /** what the trigger button shows */
+  label: ReactNode
+  /** extra classes for the trigger button (`pill`, `icon-btn`, …) */
+  className?: string
+  title?: string
+  ariaLabel?: string
+  disabled?: boolean
+  width?: number
+  /** the panel body; a function gets a `close` callback */
+  children: ReactNode | ((close: () => void) => ReactNode)
+}
+
+/**
+ * The one popover in the app: opens under its trigger, closes on Esc or an outside click,
+ * and flips to right-aligned when it would run off the window.
+ */
+export function Popover({ label, className = '', title, ariaLabel, disabled, width, children }: PopoverProps) {
+  const [open, setOpen] = useState(false)
+  const [pos, setPos] = useState<{ left: number; top: number } | null>(null)
+  const btnRef = useRef<HTMLButtonElement>(null)
+  const panelRef = useRef<HTMLDivElement>(null)
+
+  const close = (): void => setOpen(false)
+
+  useLayoutEffect(() => {
+    if (!open) {
+      setPos(null)
+      return
+    }
+    const btn = btnRef.current
+    const panel = panelRef.current
+    if (!btn || !panel) return
+    const r = btn.getBoundingClientRect()
+    const w = panel.offsetWidth
+    const left = r.left + w > window.innerWidth - 8 ? Math.max(8, r.right - w) : Math.max(8, r.left)
+    setPos({ left, top: Math.round(r.bottom + 6) })
+    panel.querySelector<HTMLElement>('button, select, input, [tabindex]')?.focus()
+  }, [open])
+
+  useEffect(() => {
+    if (!open) return
+    const onDown = (e: MouseEvent): void => {
+      const target = e.target as Node
+      if (panelRef.current?.contains(target) || btnRef.current?.contains(target)) return
+      setOpen(false)
+    }
+    const onKey = (e: KeyboardEvent): void => {
+      if (e.key !== 'Escape') return
+      setOpen(false)
+      btnRef.current?.focus()
+    }
+    const onScroll = (): void => setOpen(false)
+    document.addEventListener('mousedown', onDown)
+    document.addEventListener('keydown', onKey)
+    window.addEventListener('resize', onScroll)
+    return () => {
+      document.removeEventListener('mousedown', onDown)
+      document.removeEventListener('keydown', onKey)
+      window.removeEventListener('resize', onScroll)
+    }
+  }, [open])
+
+  return (
+    <>
+      <button
+        ref={btnRef}
+        type="button"
+        className={`${className} ${open ? 'is-open' : ''}`}
+        title={title}
+        aria-label={ariaLabel}
+        aria-haspopup="dialog"
+        aria-expanded={open}
+        disabled={disabled}
+        onClick={() => setOpen((v) => !v)}
+      >
+        {label}
+      </button>
+      {open && (
+        <div
+          ref={panelRef}
+          className="pop"
+          role="dialog"
+          aria-label={ariaLabel ?? title}
+          style={{ left: pos?.left ?? 0, top: pos?.top ?? 0, width, visibility: pos ? 'visible' : 'hidden' }}
+        >
+          {typeof children === 'function' ? children(close) : children}
+        </div>
+      )}
+    </>
+  )
+}
