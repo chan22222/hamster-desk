@@ -1,8 +1,7 @@
 // The hamster. The rig grammar is the reference game's standing cat (voxel.js `buildCat` with
 // biped = true) — a quadruped body stood upright, one limb geometry shared by both arms and both
 // legs, a head group that never rotates — but the proportions are a rodent's, not a cat's: a short
-// deep barrel of a torso, stubby legs, small round ears, cheek pouches, two front teeth and a
-// blunt tail tuft instead of a mast.
+// deep barrel of a torso, stubby legs, small round ears and a blunt tail tuft instead of a mast.
 //
 // The body is authored in quadruped coordinates and then stood upright, so local +y becomes the
 // back and local +z becomes up. Origin is between the feet, the hamster faces +z, and every part
@@ -56,25 +55,21 @@ interface Palette {
   dark: number
   belly: number
   eye: number
-  /** cheek blush — deliberately not skin-driven, so every fur colour keeps the same rosy cheeks */
-  cheek: number
 }
 
 /**
  * Fur and back stripes keep the studio's hamster tan (skins.ts overrides them per model); the
- * belly, eye and cheek tones are fixed so the face reads the same under every skin.
+ * belly and eye tones are fixed so the face reads the same under every skin.
  */
 const BASE: Palette = {
   fur: 0xf6d19b,
   dark: 0xd99e58,
   belly: 0xf9e2c0,
   eye: 0x252a33,
-  cheek: 0xf79a93,
 }
-/** fixed accent colours (inner ear, nose, incisors) — the same on every hamster */
+/** fixed accent colours (inner ear, nose) — the same on every hamster */
 const INNER_EAR = 0xe8a0b0
 const NOSE = 0xd97a8a
-const TOOTH = 0xfdfaf2
 
 /**
  * Colour strings from skins.ts are either `#rrggbb` or CSS Color 4 `hsl(H S% L%)`, which
@@ -153,18 +148,10 @@ function buildGeos(skin: Skin, tint: string, key: string): Geos {
     head.box(sx * 7.2, 20, 0, 5, 2.5, 4.5, P.fur) // cap, y 18.75..21.25
     head.box(sx * 7.2, 17.5, 2.2, 4, 3, 3, INNER_EAR) // 0.7 proud of the ear's front face
   }
-  // cheek pouches: the rodent tell. They bulge 1.5 past the skull's sides, with a fixed blush
-  for (const sx of [-1, 1]) {
-    head.box(sx * 10.5, 5.5, 5, 4, 8, 11, P.belly) // x 8.5..12.5, y 1.5..9.5, z -0.5..10.5
-    head.box(sx * 12.8, 5.5, 6, 1.2, 3.4, 6, P.cheek)
-  }
   head.box(-5.5, 10, 12.3, 4.4, 5.4, 1.6, P.eye)
   head.box(5.5, 10, 12.3, 4.4, 5.4, 1.6, P.eye)
   head.box(0, 4.5, 12.6, 10, 6, 2.4, P.belly) // muzzle
   head.box(0, 6.8, 13.6, 3.2, 2.4, 1.6, NOSE)
-  // two incisors under the nose, 0.3 proud of the muzzle
-  head.box(-1.2, 3.2, 13.6, 1.8, 2.2, 1, TOOTH)
-  head.box(1.2, 3.2, 13.6, 1.8, 2.2, 1, TOOTH)
 
   // ---- one limb geometry, shared by both arms and both legs ----
   // Short: 11.6 from hip to sole. The column reaches 1 above its pivot so the hip stays buried in
@@ -205,9 +192,9 @@ function tieGeo(tint: number): THREE.BufferGeometry {
 }
 
 // Head space: the skull is 22 wide (x ±11), its top is y 17 and its front face z 12. The round
-// ears stand at x ±7.2, y 15..21.25, z -3..3, with the pink inner ear reaching z 3.7; the cheek
-// pouches fill x 8.5..12.5, y 1.5..9.5 (blush out to x 13.4, y 7.2). Everything below sits either
-// in front of z 3.7 or clear of those blocks in y, so nothing intersects an ear or a pouch.
+// ears stand at x ±7.2, y 15..21.25, z -3..3, with the pink inner ear reaching z 3.7. Everything
+// below sits in front of z 3.7, so nothing intersects an ear or lands on one of its faces, and
+// anything hanging off the side bites 0.4 into the skull so it never floats.
 function buildAccessory(kind: SkinAccessory): THREE.BufferGeometry | null {
   if (kind === 'none') return null
   const h = new VoxBuilder()
@@ -227,7 +214,7 @@ function buildAccessory(kind: SkinAccessory): THREE.BufferGeometry | null {
     h.box(0, 18.8, 12.0, 2.6, 2.2, 1.4, 0xd8434e, { shade: 1.5 }) // jewel over the brow
   } else if (kind === 'glasses') {
     // lenses 0.2 in front of the eyes (eye front face z 13.1), rims a little further out; the
-    // temple arms ride at y 10.6, just above the cheek pouches (whose top is y 9.5)
+    // temple arms run straight back from the lens centre, straddling the skull's x ±11 side
     const frame = 0x3a3330
     for (const sx of [-1, 1]) {
       h.box(sx * 5.5, 10, 13.7, 6.4, 6.4, 0.8, 0xd7ecf8, { shade: 1.3 }) // lens
@@ -235,17 +222,17 @@ function buildAccessory(kind: SkinAccessory): THREE.BufferGeometry | null {
       h.box(sx * 5.5, 6.6, 14.1, 8, 1.2, 1.2, frame)
       h.box(sx * 8.9, 10, 14.1, 1.2, 8, 1.2, frame)
       h.box(sx * 2.1, 10, 14.1, 1.2, 8, 1.2, frame)
-      h.box(sx * 10.9, 10.6, 10.5, 1.6, 1.4, 7, frame) // temple arm back along the skull
+      h.box(sx * 10.9, 10, 10.5, 1.6, 1.4, 7, frame) // temple arm back along the skull
     }
     h.box(0, 10, 14.1, 3.4, 1.2, 1.2, frame) // bridge
   } else if (kind === 'headphones') {
-    // band, posts and cups all live at z ≥ 4, in front of the ears (which stop at z 3.7); the cups
-    // start at y 10, above the cheek pouches, and bite 0.4 into the skull's sides
+    // band, posts and cups all live at z ≥ 4, in front of the ears (which stop at z 3.7). The cups
+    // hang y 8.5..16.5 — clear of the skull's own top face at 17 — and bite 0.4 into its sides
     const band = 0x33383f
     h.box(0, 18.6, 6.5, 18, 3, 5, band)
     h.box(-10, 16.5, 6.5, 3.2, 6, 5, band)
     h.box(10, 16.5, 6.5, 3.2, 6, 5, band)
-    for (const sx of [-1, 1]) h.box(sx * 13.6, 13.5, 7.5, 6, 7, 6, band)
+    for (const sx of [-1, 1]) h.box(sx * 13.6, 12.5, 7.5, 6, 8, 6, band)
   } else if (kind === 'leaf') {
     // a sprout in front of the ears, 0.2 into the skull
     h.box(0, 18.6, 5, 2.2, 3.6, 2.2, 0x6e4a33, W1)
