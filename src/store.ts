@@ -171,7 +171,10 @@ interface DeskStore {
   version: VersionInfo | null
   prefs: Prefs
   toast: { text: string; ts: number } | null
+  /** the last request to put the caret back in a terminal, so `TerminalPane` can act on it */
+  focusTerminal: { ptyId: number; at: number } | null
   setToast(text: string): void
+  requestTerminalFocus(ptyId: number): void
   apply(e: DeskEvent): void
   setActiveTab(id: string | null): void
   addWorkspace(cwd: string, title?: string, initialCommand?: string): Workspace
@@ -586,7 +589,9 @@ export const useDesk = create<DeskStore>((set, get) => {
     version: null,
     prefs: loadPrefs(),
     toast: null,
+    focusTerminal: null,
     setToast: (text) => set({ toast: { text, ts: Date.now() } }),
+    requestTerminalFocus: (ptyId) => set({ focusTerminal: { ptyId, at: Date.now() } }),
 
     setActiveTab: (id) => set({ activeTab: id }),
     addWorkspace(cwd, title, initialCommand) {
@@ -887,3 +892,33 @@ export function externalSessions(sessions: Record<string, SessionState>): Sessio
 export function isEffortLevel(v: string | null | undefined): v is EffortLevel {
   return v === 'low' || v === 'medium' || v === 'high' || v === 'xhigh' || v === 'max'
 }
+
+// ---- running a command in an embedded terminal --------------------------------------------
+const CR = '\r'
+
+/**
+ * Type `command` into a terminal and run it.
+ *
+ * The text and the Enter have to be two separate writes. PowerShell's PSReadLine turns on
+ * bracketed paste, and a single write carrying both is one pasted block: the CR inside it becomes
+ * a line break in the editing buffer instead of accepting the line, so the command sits at the
+ * prompt and the user has to press Enter themselves. Two writes arrive at ConPTY as two input
+ * chunks, which puts the Enter outside the paste block where it is a real Enter.
+ *
+ * Without the desktop bridge (the browser preview) there is nothing to type into: do nothing.
+ */
+export function runInTerminal(ptyId: number, command: string, delayMs = 60): void {
+  const bridge = window.desk
+  if (!bridge) return
+  bridge.pty.input(ptyId, command)
+  // whoever pressed the button is done with it — the caret belongs in the terminal now
+  useDesk.getState().requestTerminalFocus(ptyId)
+  setTimeout(() => bridge.pty.input(ptyId, CR), delayMs)
+}
+
+/** debug/e2e only: the button `HAMSTER_CLICK` asked the UI to press for itself, once. */
+let debugClickName: string | null = null
+export const setDebugClick = (name: string | null): void => {
+  debugClickName = name
+}
+export const debugClick = (): string | null => debugClickName

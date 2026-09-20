@@ -113,7 +113,6 @@ button:focus-visible, select:focus-visible, input:focus-visible { outline: 2px s
 /* ---- top bar ------------------------------------------------------------------------- */
 .topbar { display: flex; align-items: center; gap: 8px; height: 44px; padding: 0 10px; background: var(--surface); border-bottom: 1px solid var(--line); -webkit-app-region: drag; }
 .topbar button, .topbar select, .topbar input, .pop, .ctx-menu { -webkit-app-region: no-drag; }
-.brand { font-size: 15px; line-height: 1; }
 .bar-sep, .tab-sep { width: 1px; height: 18px; flex: none; background: var(--line); }
 .icon-btn { display: inline-flex; align-items: center; justify-content: center; width: 28px; height: 28px; flex: none; border-radius: var(--radius); color: var(--text-2); }
 .icon-btn:hover:not(:disabled) { background: var(--surface-2); color: var(--text); }

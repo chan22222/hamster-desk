@@ -3,7 +3,7 @@ import { Terminal as XTerm } from '@xterm/xterm'
 import { FitAddon } from '@xterm/addon-fit'
 import { WebglAddon } from '@xterm/addon-webgl'
 import '@xterm/xterm/css/xterm.css'
-import { useDesk, type Workspace } from './store'
+import { runInTerminal, useDesk, type Workspace } from './store'
 import { usePainted, type Painted } from './widgets/theme'
 
 // The terminal is dark in *both* themes: Claude Code paints this pane with its own palette, and a
@@ -27,8 +27,6 @@ const THEME: Record<Painted, Record<string, string>> = {
     brightBlack: '#8f9a91',
   },
 }
-
-const CR = String.fromCharCode(13)
 
 /** The desktop app owns the clipboard; the browser preview falls back to the async clipboard API. */
 function writeClipboard(text: string): void {
@@ -164,7 +162,9 @@ export function TerminalPane({ ws, visible }: { ws: Workspace; visible: boolean 
       id = info.id
       bind(ws.id, info.id, info.cwd)
       bridge.pty.resize(info.id, term.cols, term.rows)
-      if (ws.initialCommand) setTimeout(() => bridge.pty.input(info.id, ws.initialCommand + CR), 1200)
+      const first = ws.initialCommand
+      // give the shell a moment to print its prompt before typing into it
+      if (first) setTimeout(() => runInTerminal(info.id, first), 1200)
       if (visible) term.focus()
     })
 
@@ -198,6 +198,14 @@ export function TerminalPane({ ws, visible }: { ws: Workspace; visible: boolean 
     }, 30)
     return () => clearTimeout(t)
   }, [visible])
+
+  // Something outside the pane ran a command in this terminal (the welcome card, an update tab):
+  // put the caret back here so the next keystroke goes to the program that just started.
+  const focusReq = useDesk((s) => s.focusTerminal)
+  useEffect(() => {
+    if (!focusReq || focusReq.ptyId !== ws.ptyId) return
+    fitRef.current?.focus()
+  }, [focusReq, ws.ptyId])
 
   // follow the app's theme: only the background really moves, but it has to match --term-bg or the
   // pane draws a seam against the surface behind it

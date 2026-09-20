@@ -351,6 +351,9 @@ ipcMain.handle('app:info', () => {
     platform: process.platform,
     home: app.getPath('home'),
     debugPrefs,
+    // debug/e2e only: names one button the UI should press by itself once it exists, so a blind
+    // capture run can prove a click really does what it claims (see scheduleCapture below)
+    debugClick: app.isPackaged ? null : process.env.HAMSTER_CLICK ?? null,
     claudeLanguage: claudeLanguage(),
     uiPath: uiPath(),
   }

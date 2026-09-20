@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
-import { externalSessions, freezePrefs, hydrateUi, sessionForTab, useDesk } from './store'
+import { externalSessions, freezePrefs, hydrateUi, sessionForTab, setDebugClick, useDesk } from './store'
 import { setLang } from './i18n'
 import { DeskStudio } from './desk/DeskStudio'
 import { TerminalPane } from './Terminal'
@@ -95,6 +95,7 @@ export default function App() {
       .then((info) => {
         if (!info) return
         setLang(useDesk.getState().prefs.lang, info.claudeLanguage)
+        setDebugClick(info.debugClick)
         if (info.debugPrefs) {
           // forced prefs are for this run only: freeze the store so nothing reaches ~/.hamster-desk/ui.json
           const { demoAgents, ...rest } = info.debugPrefs as { demoAgents?: number } & Partial<typeof prefs>
@@ -207,9 +208,6 @@ export default function App() {
         <button className="icon-btn" onClick={() => setPrefs({ showSidebar: !prefs.showSidebar })} title="사이드바 (Ctrl+B)" aria-label="사이드바" aria-pressed={prefs.showSidebar}>
           <IconSidebar />
         </button>
-        <span className="brand" title="Hamster Desk">
-          🐹
-        </span>
         <span className="bar-sep" />
         <div className="tabs">
           {workspaces.map((w) => {

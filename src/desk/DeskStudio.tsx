@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState } from 'react'
 import * as THREE from 'three'
-import { feedLife, setFeedLife, useDesk, type Hamster, type HamsterState, type SessionState } from '../store'
+import { debugClick, feedLife, runInTerminal, setFeedLife, useDesk, type Hamster, type HamsterState, type SessionState } from '../store'
 import { animFor, screenColor, statusDot, tintFor, type IsoAnim } from './anim'
 import { modelSkin } from './skins'
 import { IconHome, IconMap, IconMinus, IconPlus, IconTarget } from '../widgets/icons'
@@ -440,10 +440,18 @@ export function DeskStudio({ session, height }: { session: SessionState | null; 
   const workspaces = useDesk((s) => s.workspaces)
   const welcomePty = workspaces.find((w) => `ws:${w.id}` === activeTab)?.ptyId ?? null
   const runInShell = (cmd: string): void => {
-    if (welcomePty === null) return
-    window.desk?.pty.input(welcomePty, `${cmd}
-`)
+    if (welcomePty !== null) runInTerminal(welcomePty, cmd)
   }
+  // debug/e2e: `HAMSTER_CLICK=welcome-run` presses `claude 실행` by itself once the tab has a pty
+  // and the shell has had time to print a prompt, so a blind capture run can prove it really
+  // starts Claude Code. Never armed in a packaged build (main.ts drops the env var there).
+  const autoClicked = useRef(false)
+  useEffect(() => {
+    if (autoClicked.current || welcomePty === null || debugClick() !== 'welcome-run') return
+    autoClicked.current = true
+    const t = setTimeout(() => wrapRef.current?.querySelector<HTMLButtonElement>('.owa-run')?.click(), 3000)
+    return () => clearTimeout(t)
+  }, [welcomePty])
   const size = useRef({ w: 800, h: height })
   const sessionRef = useRef(session)
   sessionRef.current = session

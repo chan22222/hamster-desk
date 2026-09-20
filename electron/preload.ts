@@ -59,7 +59,7 @@ export interface DeskBridge {
     alwaysOnTop(on: boolean): void
     opacity(v: number): void
   }
-  info(): Promise<{ version: string; platform: string; home: string; debugPrefs: Record<string, unknown> | null; claudeLanguage: string | null; uiPath: string }>
+  info(): Promise<{ version: string; platform: string; home: string; debugPrefs: Record<string, unknown> | null; debugClick: string | null; claudeLanguage: string | null; uiPath: string }>
   /** smoke tests only: text to feed through xterm as if typed */
   onDebugType(cb: (ptyId: number, text: string) => void): () => void
 }
