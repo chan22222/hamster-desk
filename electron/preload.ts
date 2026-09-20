@@ -1,20 +1,6 @@
 import { contextBridge, ipcRenderer } from 'electron'
 import type { BubbleRequest, BubbleResult, BubbleState, DeskEvent, DirEntry, FileEntry, PtyInfo, RecentProject, SessionInfo, VersionInfo } from '../shared/events'
 
-export type ImplEffort = 'xhigh' | 'max' | 'ultracode'
-/** 'app' = only terminals this app opens (shell wrapper); 'global' = settings.json, every session. */
-export type HarnessScope = 'app' | 'global'
-export interface HarnessConfig {
-  implEffort: ImplEffort
-  scope: HarnessScope
-  on: boolean
-}
-export interface HarnessState {
-  on: boolean
-  config: HarnessConfig
-  foreignAgent: string | null
-}
-
 export interface SeqEvent {
   seq: number
   ev: DeskEvent
@@ -40,12 +26,6 @@ export interface DeskBridge {
     uninstall(): Promise<StatusLineState>
   }
   version: { check(force?: boolean): Promise<VersionInfo> }
-  harness: {
-    state(): Promise<HarnessState>
-    enable(c: Partial<HarnessConfig>): Promise<HarnessState>
-    disable(): Promise<HarnessState>
-    saveConfig(c: Partial<HarnessConfig>): Promise<HarnessState>
-  }
   dialog: { pickFolder(defaultPath?: string): Promise<string | null> }
   /** short speech-bubble lines summarized by a headless `claude -p --model haiku` (electron/summarize.ts) */
   bubble: {
@@ -104,12 +84,6 @@ const bridge: DeskBridge = {
     uninstall: () => ipcRenderer.invoke('statusline:uninstall'),
   },
   version: { check: (force) => ipcRenderer.invoke('version:check', force) },
-  harness: {
-    state: () => ipcRenderer.invoke('harness:state'),
-    enable: (c) => ipcRenderer.invoke('harness:enable', c),
-    disable: () => ipcRenderer.invoke('harness:disable'),
-    saveConfig: (c) => ipcRenderer.invoke('harness:saveConfig', c),
-  },
   dialog: { pickFolder: (d) => ipcRenderer.invoke('dialog:pickFolder', d) },
   bubble: {
     summarize: (req) => ipcRenderer.invoke('bubble:summarize', req),

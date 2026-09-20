@@ -3,7 +3,6 @@ import { externalSessions, sessionForTab, useDesk } from './store'
 import { setLang } from './i18n'
 import { DeskStudio } from './desk/DeskStudio'
 import { TerminalPane } from './Terminal'
-import { HarnessPill } from './widgets/Harness'
 import { FileLog } from './log/FileLog'
 import { Sidebar } from './sidebar/Sidebar'
 import { rememberRecent } from './sidebar/recent'
@@ -198,7 +197,6 @@ export default function App() {
         </div>
         <div className="status">
           <UsagePill />
-          <HarnessPill />
           {changed > 0 && (
             <button className={`pill ${prefs.showLog ? 'on' : ''}`} onClick={() => setPrefs({ showLog: !prefs.showLog })} title="바뀐 파일 목록 열기">
               바뀐 파일 {changed}

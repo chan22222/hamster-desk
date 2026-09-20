@@ -6,8 +6,8 @@ import type { BubbleRequest, DeskEvent, FileEntry, RecentProject, StatusSnapshot
 import { spawnPty, PromptDetector, type PtyHandle } from './pty'
 import { StatusWatcher, installStatusLine, uninstallStatusLine, statusLineState } from './statusline'
 import { checkVersion } from './version'
-import { harnessState, enableHarness, disableHarness, migrateHarness, readHarnessConfig, refreshHarnessFiles, saveHarnessConfig, type HarnessConfig } from './harness'
 import { BubbleSummarizer } from './summarize'
+import { cleanupLegacyHarness } from './legacy'
 import { claudeDir } from './watcher/paths'
 
 // The portable exe, `npm run dev` and the smoke runs all landed on the same %APPDATA%\hamster-desk
@@ -175,7 +175,7 @@ ipcMain.on('pty:kill', (_e, id: number) => {
 ipcMain.handle('desk:sessions', () => watcher?.liveSessions ?? [])
 ipcMain.handle('desk:backlog', (_e, after: number) => backlog.filter((b) => b.seq > after))
 
-// ---- IPC: status line (usage), version, effort advice, dialogs
+// ---- IPC: status line (usage), version, dialogs
 
 ipcMain.handle('statusline:state', () => statusLineState())
 ipcMain.handle('statusline:install', () => {
@@ -192,14 +192,6 @@ ipcMain.handle('version:check', async (_e, force?: boolean) => {
   emitDesk({ kind: 'version', ...v })
   return v
 })
-
-ipcMain.handle('harness:state', () => harnessState())
-ipcMain.handle('harness:enable', (_e, c: Partial<HarnessConfig>) => {
-  const cur = readHarnessConfig()
-  return enableHarness({ ...cur, implEffort: c?.implEffort ?? cur.implEffort, scope: c?.scope ?? cur.scope })
-})
-ipcMain.handle('harness:disable', () => disableHarness())
-ipcMain.handle('harness:saveConfig', (_e, c: Partial<HarnessConfig>) => saveHarnessConfig(c ?? {}))
 
 // ---- IPC: folder browser
 
@@ -433,7 +425,7 @@ function scheduleCapture(): void {
     }
     if (process.env.HAMSTER_CAPTURE_QUIT === '1') {
       app.quit()
-      // Safety net for the blind smoke harness: if anything still holds the process 5 s after the
+      // Safety net for the blind smoke test: if anything still holds the process 5 s after the
       // quit sequence, take it down rather than leaving an invisible electron.exe behind.
       setTimeout(() => app.exit(0), 5000).unref()
     }
@@ -474,10 +466,9 @@ if (gotLock) {
   })
 
   app.whenReady().then(() => {
-    // first run after the update: hand back the global settings.json `agent` key (see harness.ts)
-    if (migrateHarness()) console.log('[harness] moved collaboration mode to this app only')
-    // agent files from an older build still carry the old prompts; bring them up to date
-    if (refreshHarnessFiles()) console.log('[harness] agent prompts updated')
+    // this app used to write agent files and settings.agent; take those back out once
+    const legacy = cleanupLegacyHarness()
+    if (legacy.length) console.log(`[legacy] removed collaboration-mode leftovers: ${legacy.join(', ')}`)
     createWindow()
     startWatchers()
     scheduleCapture()

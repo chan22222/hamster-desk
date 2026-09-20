@@ -54,7 +54,6 @@ export function statusDot(state: HamsterState): string {
 
 export const AGENT_TINT: Record<string, string> = {
   main: '#c98a45',
-  'hd-implementer': '#e07a5f',
   Explore: '#5aa9e6',
   Plan: '#9b7bff',
   'general-purpose': '#4cd4a4',
