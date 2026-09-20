@@ -17,13 +17,15 @@ export function tileToWorld(i: number, j: number): { x: number; z: number } {
   return { x: (OFFICE_TILE.i + i + 0.5) * T, z: (OFFICE_TILE.j + j + 0.5) * T }
 }
 
-// The office is a fixed place: a dozen desks in three rows. Claude Code rarely runs more than a
-// handful of subagents at once, so extra hamsters wait by the door instead of growing the room.
+// The office is a fixed place: the boss's desk alone along the north wall, then a dozen staff
+// desks in three rows. Claude Code rarely runs more than a handful of subagents at once, so extra
+// hamsters wait by the door instead of growing the room.
 export const DESK_COLS = 4
 export const DESK_ROWS = 3
 const PITCH_I = 4
 const PITCH_J = 4
-const ORIGIN = { i: 3, j: 3 }
+/** the staff grid starts three tiles below the boss's row */
+const ORIGIN = { i: 3, j: 6 }
 
 /**
  * Where a hamster sits relative to its desk's near tile: half a tile along i (the desk spans two)
@@ -32,16 +34,25 @@ const ORIGIN = { i: 3, j: 3 }
  */
 export const SEAT = { di: 0.5, dj: -0.75 } as const
 
-const slots: Seat[] = Array.from({ length: DESK_COLS * DESK_ROWS }, (_, k) => {
-  const i = ORIGIN.i + (k % DESK_COLS) * PITCH_I
-  const j = ORIGIN.j + Math.floor(k / DESK_COLS) * PITCH_J
-  return {
-    i,
-    j,
-    seat: { i: i + SEAT.di, j: j + SEAT.dj },
-    chair: { i: i + SEAT.di, j: j + SEAT.dj },
-  }
-}).sort((a, b) => a.i + a.j - b.i - b.j || a.j - b.j)
+const seatAt = (i: number, j: number): Seat => ({
+  i,
+  j,
+  seat: { i: i + SEAT.di, j: j + SEAT.dj },
+  chair: { i: i + SEAT.di, j: j + SEAT.dj },
+})
+
+/**
+ * Slot 0 is the boss's desk: two tiles wide at i 9..10 on the row j = 2, with the chair on the
+ * walkway at j 1.25, facing +z like everyone else so the whole staff grid lies in front of it.
+ */
+export const BOSS_SLOT: Seat = seatAt(9, 2)
+
+const slots: Seat[] = [
+  BOSS_SLOT,
+  ...Array.from({ length: DESK_COLS * DESK_ROWS }, (_, k) =>
+    seatAt(ORIGIN.i + (k % DESK_COLS) * PITCH_I, ORIGIN.j + Math.floor(k / DESK_COLS) * PITCH_J),
+  ).sort((a, b) => a.i + a.j - b.i - b.j || a.j - b.j),
+]
 
 export const OFFICE = {
   W: ORIGIN.i + DESK_COLS * PITCH_I + 1,
@@ -50,9 +61,11 @@ export const OFFICE = {
   door: { i: 0.5, j: 6.5 },
   /** where hamsters without a desk wait (near the door, along the left wall) */
   lobby: { i: 1.2, j: 8.5 },
+  /** how many staff desks there are (every slot but the boss's) */
+  staff: DESK_COLS * DESK_ROWS,
 } as const
 
-/** Reuse vacancies without ever compacting or reordering occupied seats. Main owns seat 0. */
+/** Reuse vacancies without ever compacting or reordering occupied seats. Main owns the boss's seat 0; agents only ever take 1 and up. */
 export function reconcileSeats(seats: Map<string, number>, ids: readonly string[]): void {
   const live = new Set(ids)
   for (const id of seats.keys()) if (!live.has(id)) seats.delete(id)
@@ -78,7 +91,10 @@ export function makeWalker(at: Point): Walker {
   return { ...at, target: { ...at }, path: [], facing: 'se', moving: false }
 }
 
-/** Travel through the left corridor and the aisle behind each row, never through desks. */
+/**
+ * Travel through the left corridor and the aisle behind each row, never through desks. The boss's
+ * seat is reached the same way: up the corridor to the north walkway (j 1.25), then east along it.
+ */
 export function walkTo(walker: Walker, goal: Point): void {
   if (walker.target.i === goal.i && walker.target.j === goal.j) return
   walker.target = { ...goal }

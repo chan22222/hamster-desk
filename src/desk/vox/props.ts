@@ -46,12 +46,92 @@ export const DESK_PARTS: { screen: LocalBox; keys: LocalBox; lamp: LocalBox; spi
   spill: { x: MON_X, y: 40.6, z: -1, w: 54, h: 0.8, d: 24 },
 }
 
+// ---- the boss's desk: wider, two monitors, its own dynamic parts ---------------------------
+// The lit (dynamic) monitor moves right to x -10 so the second, static one fits on its left; with
+// the camera south-east of the room both stay clear of the head, which sits behind the desk at
+// x 0. The keyboard is centred under the lit screen, in front of the chair.
+export const BOSS_DESK_W = 160
+const BMON_X = -10
+const BMON2_X = -57
+
+export const BOSS_DESK_PARTS: typeof DESK_PARTS = {
+  screen: { x: BMON_X, y: 62, z: MON_Z, w: 44, h: 30, d: 4 },
+  keys: { x: 0, y: 41.4, z: -13, w: 34, h: 2.5, d: 12 },
+  lamp: { x: BMON_X, y: 79.4, z: MON_Z, w: 8, h: 2.6, d: 4 },
+  spill: { x: BMON_X, y: 40.6, z: -1, w: 54, h: 0.8, d: 24 },
+}
+
 const WOOD = 0xc79b61
 const WOOD_D = 0xa87c48
 const METAL = 0x455f5a
+/** the boss's furniture is darker wood and dark leather */
+const WALNUT = 0x8f6238
+const WALNUT_D = 0x6e4826
+
+/** monitor foot, neck and bezel — the lit slab itself is a dynamic part */
+function monitor(b: BoxSink, x: number, z: number, lit: boolean): void {
+  b.box(x, 42, z, 26, 4, 14, 0x3b4550, S3)
+  b.box(x, 50, z, 7, 16, 6, 0x49535e, S3)
+  b.box(x, 62, z, 46, 32, 3.6, 0x2a323b)
+  b.box(x, 78.4, z, 40, 1.6, 4, 0x3b4550)
+  // a static monitor still needs a face, or it reads as a slab of bezel: a dim, sleeping screen
+  if (!lit) b.box(x, 62, z, 44, 30, 4, 0x1c2a2e)
+}
 
 export const PROPS: Record<string, PropDef> = {
   // ---- office -----------------------------------------------------------------------------
+  bossDesk: {
+    r: 82, h: 80,
+    fn(b) {
+      b.box(0, 37, 0, BOSS_DESK_W, 6, DESK_D, WALNUT, W1) // top, y 34..40
+      b.box(0, 40.6, 0, BOSS_DESK_W - 8, 1.2, DESK_D - 8, 0xa87c48, W1) // inlay
+      b.box(0, 22, 24, BOSS_DESK_W - 8, 24, 4, WALNUT_D, W1) // modesty panel (+z, faces the room)
+      for (const sx of [-1, 1]) b.box(sx * 76, 17, 0, 6, 34, DESK_D - 4, WALNUT_D, W1) // side panels
+      b.box(0, 12, 0, BOSS_DESK_W - 20, 3, 22, WALNUT_D, W1) // shelf under the top
+      b.box(-60, 26, -6, 24, 16, 30, WALNUT_D, W1) // drawer pedestal on the left
+      b.box(-60, 30, 9.4, 8, 1.6, 1.6, 0xe8c86a, { shade: 1.3 }) // drawer handle
+      monitor(b, BMON_X, MON_Z, true)
+      monitor(b, BMON2_X, MON_Z, false)
+      // desk lamp on the right: base, stem, arm, shade with a warm underside
+      b.box(62, 41.2, 8, 12, 2.4, 12, 0x3b4550, S3)
+      b.box(62, 53, 8, 3, 22, 3, 0x49535e, S3)
+      b.box(58, 63.6, 8, 12, 2.4, 3, 0x49535e, S3)
+      b.box(52, 65.6, 8, 16, 7, 12, 0xe8c86a, { shade: 1.15 })
+      b.box(52, 62.4, 8, 12, 0.8, 8, 0xfff1c0, { shade: 1.5 })
+      b.box(48, 44, -4, 11, 8, 11, 0x2f6da8) // the boss's mug
+      b.box(55.4, 44, -4, 3.4, 5, 3.4, 0x2f6da8)
+      b.box(28, 41.2, 8, 24, 2.4, 17, 0xf2ece0, W1) // paper stack
+      b.box(28, 42.6, 8, 20, 0.8, 13, 0xe2d9c6, W1)
+      b.box(-70, 45, -8, 7, 10, 7, METAL, S3) // pen holder
+      b.box(-71, 51.4, -9, 1.6, 6, 1.6, 0xd8434e)
+      b.box(-68.6, 51.8, -7, 1.6, 6, 1.6, 0x4c8fd6)
+    },
+  },
+  bossChair: {
+    r: 17, h: 66,
+    fn(b) {
+      b.box(0, 15, 0, 30, 6, 30, 0x3b3a44) // seat, top at y 18
+      b.box(0, 38, -15.5, 30, 40, 5, 0x3b3a44) // tall back, on the -z side (behind the hamster)
+      b.box(0, 61.6, -15.5, 20, 8, 5.4, 0x4a4954) // headrest, sunk 0.4 into the back
+      b.box(0, 18.6, -13.6, 26, 2, 2.4, 0x4a4954) // back trim
+      for (const sx of [-1, 1]) {
+        b.box(sx * 16.4, 26, -2, 4, 3, 20, 0x4a4954) // armrests
+        b.box(sx * 16.4, 21.6, -2, 3, 6, 3, METAL, S3)
+      }
+      b.box(0, 12.4, 0, 22, 2, 22, METAL, S3) // under-seat plate
+      b.box(0, 6, 0, 6, 12, 6, METAL, S3) // column
+      // cross-shaped base: the z bars sit 0.2 higher so the two never share a top face where they cross
+      for (const [sx, sz] of [[1, 0], [-1, 0], [0, 1], [0, -1]]) b.box(sx * 9, sz ? 1.8 : 1.6, sz * 9, sx ? 16 : 4, 3.2, sz ? 16 : 4, METAL, S3)
+    },
+  },
+  bossRug: {
+    r: 90, h: 2,
+    fn(b) {
+      b.box(0, 0.6, 0, 180, 1.2, 130, 0x8a5a4a)
+      b.box(0, 1.0, 0, 188, 1.2, 118, 0x6e4a3e)
+      b.box(0, 1.4, 0, 160, 1.2, 98, 0x9a6a58)
+    },
+  },
   desk: {
     r: 62, h: 80,
     fn(b) {

@@ -17,6 +17,7 @@ import {
   applyTo,
   createCamera,
   focusCamera,
+  frameCamera,
   orbitCamera,
   overviewCamera,
   panCamera,
@@ -28,6 +29,7 @@ import {
 import { skyDome, swayDepthMaterial, voxMaterial, waterMaterial } from './vox/material'
 import { buildHamster, type HamsterRig } from './vox/hamster'
 import { buildStudioWorld, COLS, ROWS, WATER_Y, WORLD_D, WORLD_W, type StudioWorld } from './vox/world'
+import { BOSS_DESK_W, DESK_W } from './vox/props'
 
 const STATE_LABEL: Record<Hamster['state'], string> = {
   idle: '쉬는 중', thinking: '생각 중', reading: '읽는 중', searching: '찾는 중', writing: '작성 중',
@@ -38,6 +40,9 @@ const GLYPH: Partial<Record<IsoAnim, string>> = { think: '···', wave: '!', sl
 /** the chair's seat top, so a sitting hamster's feet rest on it rather than in it */
 const SEAT_TOP = 18
 const FOG = 0xcfe3f2
+/** auto-framing: room around each hamster, and how fast the camera eases towards its target */
+const FRAME_PAD = 80
+const FRAME_EASE = 6
 
 /** Camera scripting for the capture script, only wired up in the `?studio-demo` preview. */
 export interface StudioDebug {
@@ -46,6 +51,10 @@ export interface StudioDebug {
   orbit(dyaw: number, dpitch: number): void
   setStates(map: Record<string, { state: HamsterState; since?: number }>): void
   addArriving(id: string, model: string, agentType: string): void
+  /** the hamster says a sentence, exactly as a `text` transcript event would make it */
+  say(id: string, text: string): void
+  /** turn the automatic framing on or off (the `자동` button) */
+  autoFrame(on: boolean): void
 }
 declare global {
   interface Window { __studio?: StudioDebug }
@@ -58,15 +67,26 @@ interface RigState {
   yaw: number
 }
 
+/**
+ * Automatic framing, per session scene so it survives folding the desk and switching tabs like
+ * the camera does. `target` is where the camera is heading; `key` the occupancy it was computed for.
+ */
+interface AutoFrame {
+  on: boolean
+  key: string
+  target: { tx: number; tz: number; scale: number } | null
+}
+
 interface Scene {
   seats: Map<string, number>
   walkers: Map<string, Walker>
   camera: Camera
   rigs: Map<string, RigState>
+  auto: AutoFrame
   width: number
   height: number
 }
-const makeScene = (): Scene => ({ seats: new Map(), walkers: new Map(), camera: createCamera(), rigs: new Map(), width: 0, height: 0 })
+const makeScene = (): Scene => ({ seats: new Map(), walkers: new Map(), camera: createCamera(), rigs: new Map(), auto: { on: true, key: '', target: null }, width: 0, height: 0 })
 // Folding the desk unmounts this component. Keep each session's world across that toggle too.
 const scenes = new Map<string, Scene>()
 
@@ -264,7 +284,7 @@ function getStudio(): Studio | null {
 /** Pose the rig for one frame. Rhythms are lifted from the game's cat animation. */
 function poseRig(st: RigState, anim: IsoAnim, seated: boolean, t: number): void {
   const { rig } = st
-  const { bodyM, scarfG, headG, tailG, legs, headY, armY, legY, tailY, bodyY } = rig
+  const { bodyM, tieG, headG, tailG, legs, headY, armY, legY, tailY, bodyY } = rig
   // reset what the previous frame may have bent
   headG.position.set(0, headY, -1)
   headG.rotation.set(0, 0, 0)
@@ -276,7 +296,7 @@ function poseRig(st: RigState, anim: IsoAnim, seated: boolean, t: number): void 
   legs[3].position.set(6, legY, 0)
   for (const l of legs) l.rotation.set(0, 0, 0)
   bodyM.position.set(0, bodyY, 21.5)
-  scarfG.position.y = 0
+  tieG.position.y = 0
 
   // shared breathing
   bodyM.position.y = bodyY + Math.sin(t * 2.2) * 0.8
@@ -292,7 +312,7 @@ function poseRig(st: RigState, anim: IsoAnim, seated: boolean, t: number): void 
     legs[3].rotation.x = s
     bodyM.position.y = bodyY + Math.abs(Math.sin(t * 9)) * 1.6
     headG.rotation.x = Math.sin(t * 9) * 0.05
-    scarfG.position.y = bodyM.position.y - bodyY
+    tieG.position.y = bodyM.position.y - bodyY
     return
   }
 
@@ -310,7 +330,8 @@ function poseRig(st: RigState, anim: IsoAnim, seated: boolean, t: number): void 
     legs[1].position.y = armY - 12
   }
 
-  scarfG.position.y = bodyM.position.y - bodyY
+  // the tie rides the chest: it drops with the torso when seated and bobs with it
+  tieG.position.y = bodyM.position.y - bodyY
 
   switch (anim) {
     case 'type': {
@@ -325,7 +346,7 @@ function poseRig(st: RigState, anim: IsoAnim, seated: boolean, t: number): void 
       legs[0].rotation.x = -1.3 + tap
       legs[1].rotation.x = -1.3 - tap
       bodyM.position.y += Math.abs(Math.sin(t * 10)) * 1.2
-      scarfG.position.y = bodyM.position.y - bodyY
+      tieG.position.y = bodyM.position.y - bodyY
       headG.rotation.x += Math.sin(t * 10) * 0.05
       break
     }
@@ -378,6 +399,17 @@ export function DeskStudio({ session, height }: { session: SessionState | null; 
   const [showMap, setShowMap] = useState(false)
   const [dragging, setDragging] = useState(false)
   const [noGl, setNoGl] = useState(false)
+  // Automatic framing keeps every present hamster in view. Any manual gesture switches it off;
+  // ⌂ switches it back on. The scene holds the truth (the render loop reads it); this state only
+  // draws the button.
+  const [autoFrame, setAutoFrameState] = useState(true)
+  const setAuto = (on: boolean): void => {
+    sceneFor().auto.on = on
+    setAutoFrameState(on)
+  }
+  const manual = (): void => { if (sceneFor().auto.on) setAuto(false) }
+  /** DOM nodes the render loop has already hidden once, so a re-render does not blank them again */
+  const primed = useRef(new WeakSet<HTMLElement>())
   const dismissBubble = useDesk((s) => s.dismissBubble)
   // The welcome card can start claude for the user, but only in a terminal this window owns:
   // an external session's tab has no pty of ours to type into.
@@ -386,7 +418,8 @@ export function DeskStudio({ session, height }: { session: SessionState | null; 
   const welcomePty = workspaces.find((w) => `ws:${w.id}` === activeTab)?.ptyId ?? null
   const runInShell = (cmd: string): void => {
     if (welcomePty === null) return
-    window.desk?.pty.input(welcomePty, `${cmd}`)
+    window.desk?.pty.input(welcomePty, `${cmd}
+`)
   }
   const size = useRef({ w: 800, h: height })
   const sessionRef = useRef(session)
@@ -407,24 +440,41 @@ export function DeskStudio({ session, height }: { session: SessionState | null; 
   const active = list.filter((h) => !['idle', 'waiting', 'leaving'].includes(h.state)).length
   const waiting = list.filter((h) => h.state === 'waiting').length
 
-  const updateZoom = (): void => setZoom(Math.round(sceneFor().camera.scale * 100))
+  const zoomShown = useRef(250)
+  const updateZoom = (): void => {
+    const z = Math.round(sceneFor().camera.scale * 100)
+    if (z === zoomShown.current) return
+    zoomShown.current = z
+    setZoom(z)
+  }
+  /** Look at one hamster's seat (the follow menu, double-click): a manual view. */
   const focus = (id = 'main'): void => {
     const s = sceneFor()
     const k = s.seats.get(id)
     if (k === undefined && id !== 'main') return
+    manual()
     const slot = OFFICE.slots[k ?? 0]
     const w = tileToWorld(slot.seat.i, slot.seat.j)
     focusCamera(s.camera, w, size.current.w, size.current.h)
     setSelected(id)
     updateZoom()
   }
+  /** ⌂: back to automatic framing. With only the main hamster present that is the 250% desk view. */
+  const home = (): void => {
+    const s = sceneFor()
+    s.auto.target = null
+    setAuto(true)
+    setSelected('main')
+  }
   const overview = (): void => {
+    manual()
     const st = getStudio()
     const bounds = st ? st.world.bounds : { minX: 0, maxX: WORLD_W, minZ: 0, maxZ: WORLD_D }
     overviewCamera(sceneFor().camera, bounds, size.current.w, size.current.h)
     updateZoom()
   }
   const zoomBy = (factor: number): void => {
+    manual()
     const s = size.current
     const c = sceneFor().camera
     zoomCamera(c, c.scale * factor, s.w / 2, s.h / 2, s.w, s.h)
@@ -433,6 +483,8 @@ export function DeskStudio({ session, height }: { session: SessionState | null; 
 
   useEffect(() => {
     setSelected('main')
+    // a session's scene keeps its own camera and framing mode; a fresh one starts automatic
+    setAutoFrameState(sceneFor().auto.on)
     updateZoom()
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [session?.info.sessionId])
@@ -445,18 +497,30 @@ export function DeskStudio({ session, height }: { session: SessionState | null; 
     window.__studio = {
       focus(idOrTile, scale) {
         const s = sceneFor()
+        manual()
         const at = typeof idOrTile === 'string' ? OFFICE.slots[s.seats.get(idOrTile) ?? 0].seat : idOrTile
         focusCamera(s.camera, tileToWorld(at.i, at.j), size.current.w, size.current.h, scale ?? 2.5)
         if (typeof idOrTile === 'string') setSelected(idOrTile)
         updateZoom()
       },
       zoom(scale) {
+        manual()
         const { w, h } = size.current
         zoomCamera(sceneFor().camera, scale, w / 2, h / 2, w, h)
         updateZoom()
       },
       orbit(dyaw, dpitch) {
+        manual()
         orbitCamera(sceneFor().camera, dyaw, dpitch)
+      },
+      say(id, text) {
+        const sid = sessionId()
+        if (!sid) return
+        useDesk.getState().apply({ kind: 'text', sessionId: sid, agentId: id === 'main' ? null : id, text, ts: Date.now() })
+      },
+      autoFrame(on) {
+        if (on) home()
+        else manual()
       },
       setStates(map) {
         const id = sessionId()
@@ -516,6 +580,7 @@ export function DeskStudio({ session, height }: { session: SessionState | null; 
       e.preventDefault()
       const rect = el.getBoundingClientRect()
       const c = sceneFor().camera
+      manual()
       zoomCamera(c, c.scale * Math.exp(-e.deltaY * 0.0015), e.clientX - rect.left, e.clientY - rect.top, size.current.w, size.current.h)
       updateZoom()
     }
@@ -529,6 +594,7 @@ export function DeskStudio({ session, height }: { session: SessionState | null; 
       if (!drag || e.pointerId !== drag.id) return
       const rect = el.getBoundingClientRect()
       const c = sceneFor().camera
+      if (e.clientX !== drag.x || e.clientY !== drag.y) manual()
       if (drag.orbit) orbitCamera(c, -(e.clientX - drag.x) * 0.005, (e.clientY - drag.y) * 0.005)
       else {
         panCamera(c, { x: drag.x - rect.left, y: drag.y - rect.top }, { x: e.clientX - rect.left, y: e.clientY - rect.top }, size.current.w, size.current.h)
@@ -707,6 +773,52 @@ export function DeskStudio({ session, height }: { session: SessionState | null; 
     }
     for (const id of world.walkers.keys()) if (!seen.has(id)) world.walkers.delete(id)
 
+    // ---- automatic framing: only the hamsters that are actually here ------------------------
+    if (world.auto.on) {
+      const pts: { x: number; z: number }[] = []
+      const ids: string[] = []
+      let moving = false
+      let seatedOne: { i: number; j: number } | null = null
+      for (const h of hams) {
+        const k = world.seats.get(h.id)
+        const walker = world.walkers.get(h.id)
+        if (k === undefined || !walker) continue
+        ids.push(h.id)
+        if (walker.path.length) {
+          moving = true
+          pts.push(tileToWorld(walker.i, walker.j))
+        } else {
+          const seat = OFFICE.slots[k].seat
+          seatedOne = seat
+          pts.push(tileToWorld(seat.i, seat.j), tileToWorld(seat.i, seat.j + 1)) // the seat and the desk in front
+        }
+      }
+      // recompute only when the occupancy changes or somebody is walking; otherwise keep easing
+      const sig = `${ids.sort().join(',')}${moving ? '|walk' : ''}`
+      if (!world.auto.target || moving || sig !== world.auto.key) {
+        world.auto.key = sig
+        const target: Camera = { ...c }
+        if (ids.length === 1 && !moving && seatedOne) focusCamera(target, tileToWorld(seatedOne.i, seatedOne.j), W, H)
+        else if (!pts.length) focusCamera(target, tileToWorld(OFFICE.slots[0].seat.i, OFFICE.slots[0].seat.j), W, H)
+        else {
+          const b = { minX: Infinity, maxX: -Infinity, minZ: Infinity, maxZ: -Infinity }
+          for (const p of pts) {
+            b.minX = Math.min(b.minX, p.x - FRAME_PAD); b.maxX = Math.max(b.maxX, p.x + FRAME_PAD)
+            b.minZ = Math.min(b.minZ, p.z - FRAME_PAD); b.maxZ = Math.max(b.maxZ, p.z + FRAME_PAD)
+          }
+          frameCamera(target, b, W, H)
+        }
+        world.auto.target = { tx: target.tx, tz: target.tz, scale: target.scale }
+      }
+      const goal = world.auto.target
+      // ease towards the target — never snap, so a colleague arriving pulls the view over smoothly
+      const k = 1 - Math.exp(-dt * FRAME_EASE)
+      c.tx += (goal.tx - c.tx) * k
+      c.tz += (goal.tz - c.tz) * k
+      c.scale += (goal.scale - c.scale) * k
+      updateZoom()
+    }
+
     applyTo(st.camera, c, W, H)
     st.sky.position.copy(st.camera.position)
     if (!document.hidden) st.renderer.render(st.scene, st.camera)
@@ -739,25 +851,45 @@ export function DeskStudio({ session, height }: { session: SessionState | null; 
       <div className="office-vignette" />
       <div className="desk3d-overlay">
         {list.map((h) => (
-          <div key={`plate:${session?.info.sessionId}:${h.id}`} className={`office-nameplate ${h.id === selected ? 'is-selected' : ''}`} data-id={h.id} ref={(el) => { if (el) { el.style.display = 'none'; plates.current.set(h.id, el) } else plates.current.delete(h.id) }}>
+          <div key={`plate:${session?.info.sessionId}:${h.id}`} className={`office-nameplate ${h.id === selected ? 'is-selected' : ''}`} data-id={h.id} ref={(el) => {
+            if (!el) return
+            if (!primed.current.has(el)) { el.style.display = 'none'; primed.current.add(el) }
+            plates.current.set(h.id, el)
+            return () => { if (plates.current.get(h.id) === el) plates.current.delete(h.id) }
+          }}>
             <span className="np-dot" style={{ background: statusDot(h.state) }} />
             <span className={`np-name ${h.id === 'main' ? 'is-main' : ''}`}>{h.id === 'main' ? '메인' : h.name.length > 13 ? `${h.name.slice(0, 12)}…` : h.name}</span>
             <span className="np-sub">{[modelSkin(h.model).label, h.effort].filter(Boolean).join(' · ') || STATE_LABEL[h.state]}</span>
           </div>
         ))}
         {list.map((h) => (
-          <div key={`glyph:${session?.info.sessionId}:${h.id}`} className="office-glyph" ref={(el) => { if (el) { el.style.display = 'none'; glyphs.current.set(h.id, el) } else glyphs.current.delete(h.id) }} />
+          <div key={`glyph:${session?.info.sessionId}:${h.id}`} className="office-glyph" ref={(el) => {
+            if (!el) return
+            if (!primed.current.has(el)) { el.style.display = 'none'; primed.current.add(el) }
+            glyphs.current.set(h.id, el)
+            return () => { if (glyphs.current.get(h.id) === el) glyphs.current.delete(h.id) }
+          }} />
         ))}
+        {/* One bubble element per hamster, keyed by the hamster alone. A new sentence must not
+            replace the element: the render loop finds it through `tags`, and swapping DOM nodes
+            under that map is how a fresh bubble used to get stuck at the mount-time opacity 0.
+            The pop-in comes from the inner speech element, which is re-keyed per sentence. */}
         {list.map((h) => (h.bubble || h.activity) && (
           <div
-            key={`bubble:${session?.info.sessionId}:${h.id}:${h.bubble?.ts ?? 0}:${h.bubble?.summarized ?? false}`}
+            key={`bubble:${session?.info.sessionId}:${h.id}`}
             className={`office-bubble ${h.bubble ? `tone-${h.bubble.tone} is-speech` : 'is-activity-only'}`}
             data-office-ui
             title={h.bubble?.raw ?? h.activity?.text}
-            ref={(el) => { if (el) { el.style.opacity = '0'; tags.current.set(h.id, el) } else tags.current.delete(h.id) }}
+            ref={(el) => {
+              if (!el) return
+              if (!primed.current.has(el)) { el.style.opacity = '0'; primed.current.add(el) }
+              tags.current.set(h.id, el)
+              // only forget the element we registered: a stale cleanup must never drop a newer node
+              return () => { if (tags.current.get(h.id) === el) tags.current.delete(h.id) }
+            }}
             onClick={() => { if (h.bubble && session) dismissBubble(session.info.sessionId, h.id) }}
           >
-            {h.bubble && <div className="ob-speech">{h.bubble.text}</div>}
+            {h.bubble && <div key={`${h.bubble.ts}:${h.bubble.summarized}`} className="ob-speech">{h.bubble.text}</div>}
             {h.activity && <div className={`ob-activity ${h.activity.tone === 'edit' ? 'is-edit' : ''}`}>{h.activity.text}</div>}
             {h.bubble && (
               <button className="ob-check" aria-label="확인" title="확인" onClick={(e) => { e.stopPropagation(); if (session) dismissBubble(session.info.sessionId, h.id) }}>✓</button>
@@ -770,7 +902,7 @@ export function DeskStudio({ session, height }: { session: SessionState | null; 
           <span className="office-eyebrow"><span className="office-live-dot" /> THE HAMSTER STUDIO <span className="office-floor">01F</span></span>
           <span className="office-title" title={session?.info.cwd}>{session?.title || session?.info.name || '작은 동료들의 작업실'}</span>
         </div>
-        <div className="office-status"><span><i className="status-active" />작업 {active}</span><span><i />휴식 {list.length - active - waiting}</span>{waiting > 0 && <span className="needs-attention"><i />확인 {waiting}</span>}<span className="office-occupancy">{Math.min(list.length, OFFICE.slots.length)} <small>/ {OFFICE.slots.length}</small></span></div>
+        <div className="office-status"><span><i className="status-active" />작업 {active}</span><span><i />휴식 {list.length - active - waiting}</span>{waiting > 0 && <span className="needs-attention"><i />확인 {waiting}</span>}<span className="office-occupancy" title="사장 자리를 뺀 동료 자리">동료 {Math.min(list.filter((h) => h.id !== 'main').length, OFFICE.staff)} <small>/ {OFFICE.staff}</small></span></div>
       </div>
       {!session && (
         <div className="office-welcome" data-office-ui>
@@ -800,7 +932,8 @@ export function DeskStudio({ session, height }: { session: SessionState | null; 
           {overflow > 0 && <span className="office-overflow" role="status">{overflow}마리 빈자리 대기</span>}
         </div>
         <div className="office-controls">
-          <button onClick={() => focus()} title="메인 햄스터로 이동" aria-label="메인 햄스터로 이동">⌂</button>
+          <button onClick={home} title="메인 햄스터로 이동 (자동 카메라 켜기)" aria-label="메인 햄스터로 이동">⌂</button>
+          <button className={autoFrame ? 'is-on' : ''} aria-pressed={autoFrame} title="있는 햄스터들만 화면에 담는 자동 카메라" onClick={() => (autoFrame ? manual() : home())}>자동</button>
           <span className="control-divider" />
           <button onClick={() => zoomBy(0.8)} aria-label="축소">−</button>
           <span className="office-zoom">{zoom}%</span>
@@ -815,13 +948,15 @@ export function DeskStudio({ session, height }: { session: SessionState | null; 
         <svg viewBox="0 0 100 100" role="img" aria-label="사무실 지도" onClick={(e) => {
           const r = e.currentTarget.getBoundingClientRect()
           const c = sceneFor().camera
+          manual()
           focusCamera(c, { x: ((e.clientX - r.left) / r.width) * WORLD_W, z: ((e.clientY - r.top) / r.height) * WORLD_D }, size.current.w, size.current.h, c.scale)
         }}>
           <rect width="100" height="100" fill="#1d4a68" />
           {studioRef?.minimapUrl && <image href={studioRef.minimapUrl} x="0" y="0" width="100" height="100" preserveAspectRatio="none" />}
           {OFFICE.slots.map((slot, k) => {
             const p = tileToWorld(slot.i + 0.5, slot.j)
-            return <rect key={k} x={((p.x - 60) / WORLD_W) * 100} y={((p.z - 26) / WORLD_D) * 100} width={(120 / WORLD_W) * 100} height={(52 / WORLD_D) * 100} rx="0.4" fill={[...scene.seats.values()].includes(k) ? '#d6bc85' : '#8b7f63'} />
+            const w = k === 0 ? BOSS_DESK_W : DESK_W
+            return <rect key={k} x={((p.x - w / 2) / WORLD_W) * 100} y={((p.z - 26) / WORLD_D) * 100} width={(w / WORLD_W) * 100} height={(52 / WORLD_D) * 100} rx="0.4" fill={[...scene.seats.values()].includes(k) ? '#d6bc85' : '#8b7f63'} />
           })}
           <polygon ref={viewportPolygon} fill="#c9e3b516" stroke="#d7edbf" strokeWidth="0.8" />
         </svg>

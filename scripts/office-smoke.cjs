@@ -39,6 +39,27 @@ app.whenReady().then(async () => {
     // roomful of name plates to compare positions against.
     await evaluate(`const select=document.querySelector('.office-follow select');select.value='studio-6';select.dispatchEvent(new Event('change',{bubbles:true}));`)
     await settle()
+    // Regression: two sentences 300 ms apart must leave ONE visible bubble holding the second one.
+    // The bubble element used to be re-keyed per sentence, and the replaced node's ref cleanup
+    // could run after the new node registered — the fresh bubble then stayed at opacity 0 until
+    // ✓ was pressed. The camera is on studio-6 at 250%, so the bubble is allowed to show.
+    assert.equal(await evaluate("return document.querySelector('.office-controls button[aria-pressed]').getAttribute('aria-pressed')"), 'false', 'locating a colleague must switch automatic framing off')
+    await evaluate("window.__studio.say('studio-6', '첫 번째 문장입니다')")
+    await new Promise(r => setTimeout(r, 300))
+    await evaluate("window.__studio.say('studio-6', '두 번째 문장이 자동으로 떠야 해요')")
+    await settle()
+    const bubbles = await evaluate(`
+      const els = Array.from(document.querySelectorAll('.office-bubble.is-speech')).filter(e => e.title === '두 번째 문장이 자동으로 떠야 해요' || (e.querySelector('.ob-speech') || {}).textContent === '두 번째 문장이 자동으로 떠야 해요');
+      const all = Array.from(document.querySelectorAll('.office-bubble.is-speech')).map(e => (e.querySelector('.ob-speech') || {}).textContent);
+      return { count: els.length, all, text: els[0] ? els[0].querySelector('.ob-speech').textContent : null, opacity: els[0] ? getComputedStyle(els[0]).opacity : null };
+    `)
+    assert.equal(bubbles.count, 1, `expected one bubble for studio-6, got ${JSON.stringify(bubbles)}`)
+    assert.ok(!bubbles.all.includes('첫 번째 문장입니다'), `the first sentence is still on screen: ${JSON.stringify(bubbles.all)}`)
+    assert.equal(bubbles.text, '두 번째 문장이 자동으로 떠야 해요')
+    assert.equal(bubbles.opacity, '1', `the replaced bubble stayed hidden (opacity ${bubbles.opacity})`)
+    await evaluate(`Array.from(document.querySelectorAll('.office-bubble.is-speech')).find(e => e.querySelector('.ob-speech').textContent === '두 번째 문장이 자동으로 떠야 해요').querySelector('.ob-check').click()`)
+    await settle()
+    assert.equal(await evaluate("return Array.from(document.querySelectorAll('.office-bubble.is-speech')).some(e => e.querySelector('.ob-speech').textContent === '두 번째 문장이 자동으로 떠야 해요')"), false, '✓ did not remove the bubble')
     const before = await plates()
     assert.ok(Object.keys(before).length >= 4, `expected visible occupied desks, got ${JSON.stringify(before)}`)
     const art = await evaluate(`
@@ -47,10 +68,11 @@ app.whenReady().then(async () => {
       const {modelSkin} = await import('/desk/skins.ts');
       const rig = buildHamster({skin: modelSkin('claude-opus-5'), tint: '#c98a45', main: true}, voxMaterial({localDetail: true}));
       const legGeo = rig.legs.map(l => l.children[0].geometry);
-      return {parts: rig.group.children.length, head: rig.headG.children.length, legs: rig.legs.length, sharedLegs: legGeo.every(g => g === legGeo[0]), headY: rig.headY};
+      return {parts: rig.group.children.length, head: rig.headG.children.length, legs: rig.legs.length, sharedLegs: legGeo.every(g => g === legGeo[0]), headY: rig.headY, tie: !!rig.tieG && !('scarfG' in rig)};
     `)
     assert.equal(art.legs, 4, 'the rig needs two arms and two legs')
-    assert.ok(art.parts >= 7, 'the rig needs a body, scarf, head, four limbs and a tail')
+    assert.ok(art.parts >= 8, 'the rig needs a body, tie, head, four limbs and a tail')
+    assert.equal(art.tie, true, 'the rig carries a tie group (no scarf)')
     assert.ok(art.head >= 2, 'the Opus skin wears glasses')
     assert.equal(art.sharedLegs, true, 'limbs must share one geometry')
     const deskCount = await evaluate(`const {OFFICE}=await import('/desk/office-world.ts'); return OFFICE.slots.length`)
@@ -120,12 +142,13 @@ app.whenReady().then(async () => {
     await evaluate(`const store=window.testStore,s=store.getState().sessions['studio-preview'];const extras=Object.fromEntries(Array.from({length:47},(_,i)=>['full-'+i,{...s.hamsters.main,id:'full-'+i,name:'만석'+i}]));store.setState({sessions:{'studio-preview':{...s,hamsters:{main:s.hamsters.main,...extras},order:['main',...Object.keys(extras)]}}});`)
     await settle()
     assert.equal(await evaluate("return document.querySelector('.office-overflow').textContent"), `${48 - deskCount}마리 빈자리 대기`)
+    assert.equal(await evaluate("return document.querySelector('.office-occupancy').textContent"), `동료 ${deskCount - 1} / ${deskCount - 1}`, 'occupancy counts colleagues only, without the boss')
     await evaluate('window.testStore.setState({sessions:{},activeTab:null})')
     await settle()
     assert.ok(await evaluate("return document.querySelector('.office-welcome').textContent.includes('자리는 준비되어 있어요')"))
     assert.deepEqual(errors, [])
-    fs.writeFileSync(path.resolve('work/office-smoke-result.json'),JSON.stringify({passed:true,checks:['webgl context','voxel hamster rig','add/remove/reorder stability','stationary animation','drag pan','minimap click','zoom','wheel','overview','locate agent','session camera isolation','fold camera persistence','compact viewport','48-agent overflow','empty office','no renderer errors'],art},null,2))
-    console.log('PASS: renderer, voxel rig, occupancy changes, navigation, session switches, folding, compact layout')
+    fs.writeFileSync(path.resolve('work/office-smoke-result.json'),JSON.stringify({passed:true,checks:['webgl context','voxel hamster rig','bubble replacement (one element per hamster)','add/remove/reorder stability','stationary animation','drag pan','minimap click','zoom','wheel','overview','locate agent','session camera isolation','fold camera persistence','compact viewport','48-agent overflow','empty office','no renderer errors'],art},null,2))
+    console.log('PASS: renderer, voxel rig, bubble replacement, occupancy changes, navigation, session switches, folding, compact layout')
   } catch(e) { console.error(e); process.exitCode=1 }
   finally { win.destroy(); app.quit() }
 })

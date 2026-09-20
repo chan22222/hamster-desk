@@ -263,7 +263,10 @@ button:focus-visible, select:focus-visible, input:focus-visible { outline: 2px s
 .office-bubble.tone-warn { background: #f5d5bf; }
 .office-bubble.tone-name { background: #e6e3f2; }
 .office-bubble.is-activity-only { padding: 4px 9px; background: #edf1e3f2; color: #44523f; cursor: default; pointer-events: none; }
-.ob-speech { display: -webkit-box; -webkit-line-clamp: 3; -webkit-box-orient: vertical; overflow: hidden; max-width: 240px; font-size: 11px; line-height: 1.45; white-space: pre-wrap; word-break: break-word; }
+/* The bubble element itself lives as long as its hamster has anything to show; each new sentence
+   remounts only this inner block (keyed per sentence), which is what replays the pop-in. */
+.ob-speech { display: -webkit-box; -webkit-line-clamp: 3; -webkit-box-orient: vertical; overflow: hidden; max-width: 240px; font-size: 11px; line-height: 1.45; white-space: pre-wrap; word-break: break-word; animation: ob-say 160ms ease-out; }
+@keyframes ob-say { from { opacity: 0; translate: 0 3px; } }
 .ob-activity { max-width: 220px; margin-top: 3px; font-size: 10px; line-height: 1.4; color: #6c7a64; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .ob-activity.is-edit { color: #43704e; }
 .is-activity-only .ob-activity { margin-top: 0; color: #46543f; }

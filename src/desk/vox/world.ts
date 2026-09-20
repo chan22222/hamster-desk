@@ -7,7 +7,7 @@
 // the DOM, so the node test can build the whole world and measure it.
 import * as THREE from 'three'
 import { VoxBuilder, W1, S3, type BoxOpt, type BoxSink, type HideFaces } from './builder'
-import { PROPS, DESK_PARTS, type LocalBox } from './props'
+import { PROPS, DESK_PARTS, BOSS_DESK_PARTS, type LocalBox } from './props'
 import { OFFICE, OFFICE_TILE, H_OFFICE, T, tileToWorld } from '../office-world'
 
 export const COLS = 40
@@ -303,26 +303,31 @@ export function buildStudioWorld(): StudioWorld {
   put('clock', WALL_IN_X, tileToWorld(0, 2.6).z, deck + 92, 1)
   for (const j of [4.8, 12, 16]) put('poster', WALL_IN_X, tileToWorld(0, j).z, deck + 76, 1)
 
-  // desks, chairs, rugs
+  // desks, chairs, rugs — slot 0 is the boss's set along the north wall, the rest the staff grid
   const deskParts: DeskParts[] = []
   OFFICE.slots.forEach((slot, k) => {
+    const boss = k === 0
     const dx = (OFFICE_TILE.i + slot.i + 1) * T
     const dz = (OFFICE_TILE.j + slot.j + 0.5) * T
-    put('rug', dx, dz, deck + 0.2, 0)
-    put('desk', dx, dz, deck, 0)
+    put(boss ? 'bossRug' : 'rug', dx, dz, deck + 0.2, 0)
+    put(boss ? 'bossDesk' : 'desk', dx, dz, deck, 0)
     const seat = tileToWorld(slot.chair.i, slot.chair.j)
-    put('chair', seat.x, seat.z, deck, 0)
+    put(boss ? 'bossChair' : 'chair', seat.x, seat.z, deck, 0)
+    const parts = boss ? BOSS_DESK_PARTS : DESK_PARTS
     const w = (b: LocalBox): WorldBox => ({ x: dx + b.x, y: deck + b.y, z: dz + b.z, w: b.w, h: b.h, d: b.d })
-    deskParts.push({ slot: k, screen: w(DESK_PARTS.screen), keys: w(DESK_PARTS.keys), lamp: w(DESK_PARTS.lamp), spill: w(DESK_PARTS.spill) })
+    deskParts.push({ slot: k, screen: w(parts.screen), keys: w(parts.keys), lamp: w(parts.lamp), spill: w(parts.spill) })
   })
 
-  // the fixtures inherited from the 2D office, at the same tile coordinates
+  // the fixtures inherited from the 2D office, at the same tile coordinates (the coffee table
+  // moved west so the boss's corner is not crowded)
   put('shelf', WALL_IN_X + 4, tileToWorld(0, 1.8).z, deck, 0)
-  for (const [id, pi, pj] of [['cooler', 0.6, 8.5], ['coffee', 8, 0.7], ['printer', 16, 0.7]] as [string, number, number][]) {
+  for (const [id, pi, pj] of [['cooler', 0.6, 8.5], ['coffee', 5.5, 0.7], ['printer', 16, 0.7]] as [string, number, number][]) {
     const p = tileToWorld(pi, pj)
     put(id, p.x, p.z, deck, 0)
   }
-  for (const [pi, pj] of [[4.8, 0.8], [OFFICE.W - 1.5, 0.8], [0.8, 11], [OFFICE.W - 1.5, OFFICE.D - 2.5]]) {
+  // plants: the room's corners, plus one either side of the boss's desk
+  const bossI = OFFICE.slots[0].i + 0.5, bossJ = OFFICE.slots[0].j
+  for (const [pi, pj] of [[2.6, 0.8], [OFFICE.W - 1.5, 0.8], [0.8, 11], [OFFICE.W - 1.5, OFFICE.D - 2.5], [bossI - 2, bossJ], [bossI + 2, bossJ]]) {
     const p = tileToWorld(pi, pj)
     put('plant', p.x, p.z, deck, 0)
   }

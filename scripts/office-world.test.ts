@@ -2,7 +2,7 @@ import { test } from 'node:test'
 import assert from 'node:assert/strict'
 import * as THREE from 'three'
 import { H_OFFICE, OFFICE, advanceWalker, makeWalker, reconcileSeats, tileToWorld, walkTo } from '../src/desk/office-world'
-import { createCamera, focusCamera, groundHit, overviewCamera, worldToScreen, zoomCamera } from '../src/desk/office-camera'
+import { FRAME_MAX_SCALE, FRAME_MIN_SCALE, createCamera, focusCamera, frameCamera, groundHit, overviewCamera, worldToScreen, zoomCamera } from '../src/desk/office-camera'
 import { buildHamster } from '../src/desk/vox/hamster'
 import { voxMaterial } from '../src/desk/vox/material'
 import { buildStudioWorld, COLS, ROWS } from '../src/desk/vox/world'
@@ -45,6 +45,22 @@ test('capacity is explicit and waiting agents take a vacancy without shifting an
   const released = seats.get('agent-3')
   reconcileSeats(seats, ids.filter(id => id !== 'agent-3'))
   assert.equal(seats.get(waiting), released)
+  assert.equal(seats.get('main'), 0)
+})
+
+test("the boss's seat is slot 0, alone along the north wall, and agents never take it", () => {
+  const boss = OFFICE.slots[0]
+  const staff = OFFICE.slots.slice(1)
+  assert.equal(staff.length, OFFICE.staff)
+  assert.equal(staff.length, 12)
+  // three clear tiles between the boss's desk row and the first staff row
+  assert.ok(staff.every((s) => s.j >= boss.j + 4), `staff desk in the boss's rows: ${JSON.stringify(staff.map((s) => s.j))}`)
+  assert.ok(boss.seat.j < boss.j, 'the boss sits north of the desk, facing +z like everyone else')
+  assert.ok(boss.j + 1 < OFFICE.D && boss.i + 2 <= OFFICE.W, 'the boss desk is inside the room')
+  const seats = new Map<string, number>()
+  reconcileSeats(seats, ['a', 'b', 'c'])
+  assert.ok([...seats.values()].every((k) => k >= 1), 'an agent took the boss seat while main was away')
+  reconcileSeats(seats, ['a', 'b', 'main', 'c'])
   assert.equal(seats.get('main'), 0)
 })
 
@@ -92,6 +108,40 @@ test('independent session maps never confuse their shared main hamster id', () =
   reconcileSeats(b, ['main', 'alice'])
   assert.deepEqual(a, aBefore)
   assert.notEqual(a.get('alice'), b.get('alice'))
+})
+
+test('auto framing: one hamster gets the full 250% desk view, a full room stays in frame or at the floor scale', () => {
+  const pad = 80
+  const boundsOf = (pts: { x: number; z: number }[]) => ({
+    minX: Math.min(...pts.map((p) => p.x)) - pad, maxX: Math.max(...pts.map((p) => p.x)) + pad,
+    minZ: Math.min(...pts.map((p) => p.z)) - pad, maxZ: Math.max(...pts.map((p) => p.z)) + pad,
+  })
+  for (const [w, h] of [[900, 420], [1280, 700], [420, 220]]) {
+    // one hamster at the boss's desk: never closer than the manual focus, centred on it
+    const one = createCamera()
+    const seat = tileToWorld(OFFICE.slots[0].seat.i, OFFICE.slots[0].seat.j)
+    frameCamera(one, boundsOf([seat, { x: seat.x, z: seat.z + 64 }]), w, h)
+    // (a 420x220 viewport is too small even for one desk at 250%, so only the real sizes must clamp)
+    if (h >= 400) assert.equal(one.scale, FRAME_MAX_SCALE, `one hamster should sit at the max scale, got ${one.scale}`)
+    else assert.ok(one.scale > 2 && one.scale <= FRAME_MAX_SCALE, `one hamster in a tiny viewport: ${one.scale}`)
+    assert.equal(FRAME_MAX_SCALE, 2.5)
+    const p = worldToScreen(one, { x: seat.x, y: H_OFFICE, z: seat.z + 32 }, w, h)
+    assert.ok(Math.abs(p.x - w / 2) < w * 0.03 && Math.abs(p.y - (h / 2 + 10)) < h * 0.03, `off centre: ${p.x},${p.y}`)
+    assert.equal(one.initialized, true)
+
+    // every seat taken: either every point is on screen, or the camera stopped at the floor scale
+    const all = createCamera()
+    const pts = OFFICE.slots.flatMap((s) => [tileToWorld(s.seat.i, s.seat.j), tileToWorld(s.seat.i, s.seat.j + 1)])
+    frameCamera(all, boundsOf(pts), w, h)
+    assert.ok(all.scale >= FRAME_MIN_SCALE && all.scale <= FRAME_MAX_SCALE, `scale out of range: ${all.scale}`)
+    assert.ok(all.scale < one.scale, 'a full room must zoom out from the single-hamster view')
+    const inside = pts.every((q) => {
+      const sp = worldToScreen(all, { x: q.x, y: H_OFFICE, z: q.z }, w, h)
+      return !sp.behind && sp.x >= 0 && sp.x <= w && sp.y >= 0 && sp.y <= h
+    })
+    assert.ok(inside || all.scale === FRAME_MIN_SCALE, `hamsters cut off at scale ${all.scale} in ${w}x${h}`)
+    if (w === 1280) assert.ok(inside, 'the wide viewport must hold the whole room')
+  }
 })
 
 test('zoom keeps the ground point under the cursor exactly where it was', () => {

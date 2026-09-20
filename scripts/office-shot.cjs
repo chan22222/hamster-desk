@@ -1,7 +1,8 @@
 // Visual review shots. Same setup as office-smoke.cjs (offscreen Electron against the local
 // renderer preview), but it only drives the camera and the hamsters and saves PNGs — no asserts.
 // The scenes are the ones that are hard to judge from the default view: the seated pose from
-// three sides, one desk per state, and a hamster walking in through the door.
+// three sides, one desk per state, a hamster walking in through the door, and the automatic
+// framing with a full room versus a lone main hamster.
 //
 //   npm run preview:studio     # in another terminal
 //   npm run shot:studio        # → work/shot-*.png
@@ -42,7 +43,8 @@ app.whenReady().then(async () => {
     if (!(await evaluate('return !!window.__studio'))) throw new Error('window.__studio missing — is this the ?studio-demo preview?')
     if (await evaluate("return !!document.querySelector('.office-nogl')")) throw new Error('WebGL context could not be created')
 
-    // 1. the view the studio opens on: the main hamster's desk
+    // 1. the boss's desk at 250% — where ⌂ lands when only the main hamster is in
+    await studio("focus('main')")
     await shot('main-focus')
 
     // 2..4. the seated pose from the front, the back and the side
@@ -88,6 +90,19 @@ app.whenReady().then(async () => {
     // 7. the whole island
     await evaluate("Array.from(document.querySelectorAll('.office-controls button')).find(b => b.textContent === '전체 보기').click()")
     await shot('overview', 400)
+
+    // 8. automatic framing: ⌂ turns it on; with nine hamsters in the room it eases out until
+    // every occupied desk is in view, and with only the main hamster it eases back to its desk
+    await evaluate("Array.from(document.querySelectorAll('.office-controls button')).find(b => b.textContent === '⌂').click()")
+    await wait(1800)
+    await shot('autoframe-8', 0)
+    await evaluate(`
+      const { useDesk } = await import('/store.ts');
+      const st = useDesk.getState(), s = st.sessions['studio-preview'];
+      useDesk.setState({ sessions: { ...st.sessions, 'studio-preview': { ...s, hamsters: { main: s.hamsters.main }, order: ['main'] } } });
+    `)
+    await wait(1800)
+    await shot('autoframe-1', 0)
 
     if (errors.length) {
       console.error('renderer errors:')

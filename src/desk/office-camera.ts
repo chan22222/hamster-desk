@@ -150,6 +150,28 @@ export function overviewCamera(c: Camera, bounds: Bounds, w: number, h: number, 
   c.initialized = true
 }
 
+/** auto-framing never zooms in past the desk view, and never out past what a full room needs */
+export const FRAME_MAX_SCALE = 2.5
+/**
+ * A full room (every seat and the desk in front of it, padded) fits at 0.60–0.66 in the usual
+ * desk viewports; 1.0 would push the far rows off screen, so the floor sits just under that.
+ */
+export const FRAME_MIN_SCALE = 0.6
+
+/**
+ * Frame a set of hamsters: the tightest overview that shows all of `bounds`, but never closer than
+ * `maxScale` (one hamster gets the same 250% desk view as a manual focus) and never farther than
+ * `minScale` (a room too big for a tiny viewport spills past the edges rather than shrinking to
+ * specks). After clamping, the centre of the bounds goes back to the middle of the viewport, just
+ * below centre like `focusCamera`, so a lone hamster ends up exactly where the ⌂ button would put it.
+ */
+export function frameCamera(c: Camera, bounds: Bounds, w: number, h: number, minScale = FRAME_MIN_SCALE, maxScale = FRAME_MAX_SCALE): void {
+  overviewCamera(c, bounds, w, h)
+  c.scale = Math.max(minScale, Math.min(maxScale, c.scale))
+  centerOn(c, (bounds.minX + bounds.maxX) / 2, (bounds.minZ + bounds.maxZ) / 2, w / 2, h / 2 + 10, w, h)
+  c.initialized = true
+}
+
 /** Zoom about the cursor: the ground point under it must not move. */
 export function zoomCamera(c: Camera, scale: number, sx: number, sy: number, w: number, h: number): void {
   const before = groundHit(c, sx, sy, w, h)
