@@ -703,7 +703,11 @@ export function DeskStudio({ session, height }: { session: SessionState | null; 
       const typing = state === 'writing' || state === 'running'
       dyn.screen.material = flat(h ? sc.bg : '#243c36')
       dyn.keys.material = flat(typing && Math.floor(t / 180) % 2 ? '#ccddc3' : '#8892aa')
-      dyn.lamp.material = flat(h ? statusDot(state) : '#506358')
+      // The screen faces the hamster, so from the room you only see the monitor's back: the light
+      // bar across its top is what carries the state to this side. It wears the same accent the
+      // screen's own text does, and blinks with a running command the way the screen behind it does.
+      const bar = state === 'running' && Math.floor(t / 300) % 2 ? '#166534' : sc.fg
+      dyn.lamp.material = flat(h ? bar : '#506358')
       dyn.spill.material = flat(h ? spillOf(sc.bg) : 0x142219)
     })
 

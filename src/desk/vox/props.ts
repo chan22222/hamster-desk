@@ -28,8 +28,13 @@ export interface LocalBox {
 
 // ---- desk geometry shared with DeskStudio ------------------------------------------------
 // The hamster sits on the -z side and faces +z, so the monitor stands on the far (+z) edge with
-// its screen turned back towards -z. It is pushed left so it never hides the head from the
-// default south-east camera; the keyboard, mug and status lamp fill the rest of the top.
+// its screen turned back towards -z — i.e. a real monitor, with a picture on one face only. It is
+// pushed left so it never hides the head from the default south-east camera; the keyboard, mug and
+// light bar fill the rest of the top.
+//
+// The default camera is on the other side of the desk and sees the monitor's *back*, so the state
+// colour has to reach it some other way: the light bar across the top of the bezel (visible from
+// every angle, the way a real monitor's does) and the glow the screen spills on the desk top.
 export const DESK_W = 120
 export const DESK_D = 52
 export const DESK_TOP = 40
@@ -38,11 +43,14 @@ const MON_X = -34
 const MON_Z = 13
 
 export const DESK_PARTS: { screen: LocalBox; keys: LocalBox; lamp: LocalBox; spill: LocalBox } = {
-  // 0.2 deeper than the bezel so a lit rectangle shows on both faces (the studio camera would
-  // otherwise only ever see the monitor's back)
-  screen: { x: MON_X, y: 62, z: MON_Z, w: 44, h: 30, d: 4 },
+  // Inside the bezel (which spans MON_Z ± 1.8): the slab runs MON_Z − 2.0 … MON_Z + 1.2, so it
+  // stands 0.2 proud on the hamster's side and is buried 0.6 on the camera's. No shared plane
+  // either way, so nothing z-fights and the picture is on one face, like a real screen.
+  screen: { x: MON_X, y: 62, z: MON_Z - 0.4, w: 44, h: 30, d: 3.2 },
   keys: { x: 2, y: 41.4, z: -13, w: 34, h: 2.5, d: 12 },
-  lamp: { x: MON_X, y: 79.4, z: MON_Z, w: 8, h: 2.6, d: 4 },
+  // the status light bar across the top of the bezel: inside its 46 width, 0.4 proud front and
+  // back, so the state colour reads from either side of the desk
+  lamp: { x: MON_X, y: 79.4, z: MON_Z, w: 40, h: 2.4, d: 4.4 },
   spill: { x: MON_X, y: 40.6, z: -1, w: 54, h: 0.8, d: 24 },
 }
 
@@ -55,9 +63,9 @@ const BMON_X = -10
 const BMON2_X = -57
 
 export const BOSS_DESK_PARTS: typeof DESK_PARTS = {
-  screen: { x: BMON_X, y: 62, z: MON_Z, w: 44, h: 30, d: 4 },
+  screen: { x: BMON_X, y: 62, z: MON_Z - 0.4, w: 44, h: 30, d: 3.2 },
   keys: { x: 0, y: 41.4, z: -13, w: 34, h: 2.5, d: 12 },
-  lamp: { x: BMON_X, y: 79.4, z: MON_Z, w: 8, h: 2.6, d: 4 },
+  lamp: { x: BMON_X, y: 79.4, z: MON_Z, w: 40, h: 2.4, d: 4.4 },
   spill: { x: BMON_X, y: 40.6, z: -1, w: 54, h: 0.8, d: 24 },
 }
 
@@ -68,14 +76,18 @@ const METAL = 0x455f5a
 const WALNUT = 0x8f6238
 const WALNUT_D = 0x6e4826
 
-/** monitor foot, neck and bezel — the lit slab itself is a dynamic part */
+/**
+ * Monitor foot, neck and bezel — the lit slab and the light bar are dynamic parts. The top trim is
+ * 36 wide so no face of it lands on a plane of the 40-wide light bar that sits over it.
+ */
 function monitor(b: BoxSink, x: number, z: number, lit: boolean): void {
   b.box(x, 42, z, 26, 4, 14, 0x3b4550, S3)
   b.box(x, 50, z, 7, 16, 6, 0x49535e, S3)
   b.box(x, 62, z, 46, 32, 3.6, 0x2a323b)
-  b.box(x, 78.4, z, 40, 1.6, 4, 0x3b4550)
-  // a static monitor still needs a face, or it reads as a slab of bezel: a dim, sleeping screen
-  if (!lit) b.box(x, 62, z, 44, 30, 4, 0x1c2a2e)
+  b.box(x, 78.4, z, 36, 1.6, 4, 0x3b4550)
+  // A static monitor still needs a face, or it reads as a slab of bezel: a dim, sleeping screen,
+  // set in the bezel exactly like the lit one so it too shows on the hamster's side only.
+  if (!lit) b.box(x, 62, z - 0.4, 44, 30, 3.2, 0x1c2a2e)
 }
 
 export const PROPS: Record<string, PropDef> = {
