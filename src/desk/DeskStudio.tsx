@@ -30,7 +30,7 @@ import {
   type Camera,
 } from './office-camera'
 import { skyDome, swayDepthMaterial, voxMaterial, waterMaterial } from './vox/material'
-import { buildHamster, type HamsterRig } from './vox/hamster'
+import { buildHamster, EAR_TOP, type HamsterRig } from './vox/hamster'
 import { buildStudioWorld, COLS, ROWS, WATER_Y, WORLD_D, WORLD_W, type StudioWorld } from './vox/world'
 import { BOSS_DESK_W, DESK_W } from './vox/props'
 
@@ -311,8 +311,8 @@ function poseRig(st: RigState, anim: IsoAnim, seated: boolean, t: number): void 
   headG.rotation.set(0, 0, 0)
   tailG.position.set(0, tailY, -9)
   tailG.rotation.set(-0.5, 0, 0)
-  legs[0].position.set(-16, armY, 0)
-  legs[1].position.set(16, armY, 0)
+  legs[0].position.set(-17, armY, 0)
+  legs[1].position.set(17, armY, 0)
   legs[2].position.set(-6, legY, 0)
   legs[3].position.set(6, legY, 0)
   for (const l of legs) l.rotation.set(0, 0, 0)
@@ -326,7 +326,8 @@ function poseRig(st: RigState, anim: IsoAnim, seated: boolean, t: number): void 
 
   // walking is the only pose that moves the legs; every other state happens at a desk
   if (anim === 'walk') {
-    const s = Math.sin(t * 9) * 0.7
+    // shorter legs, shorter stride: at the cat's 0.7 the stubby legs read as doing the splits
+    const s = Math.sin(t * 9) * 0.5
     legs[0].rotation.x = s
     legs[1].rotation.x = -s
     legs[2].rotation.x = -s
@@ -751,8 +752,11 @@ export function DeskStudio({ session, height }: { session: SessionState | null; 
       const seated = !walker.path.length && h.state !== 'leaving'
       const anim: IsoAnim = walker.moving ? 'walk' : ['arriving', 'leaving'].includes(h.state) ? 'idle' : animFor(h.state, Date.now() - h.since)
       const pos = tileToWorld(walker.i, walker.j)
-      // sitting puts the folded legs on the chair seat, four units into the cushion
-      const groundY = H_OFFICE + (seated ? SEAT_TOP - 4 : 0)
+      // Sitting lays the folded legs (8.4 thick, pinned at rig y 4) across the chair seat and
+      // still lifts the short-legged hamster's head and arms clear of the desk top (y 40). The
+      // offset is the most the torso can rise and still stay in the cushion through the breathing
+      // bob: its underside lands at y 16.5, and ±0.8 of breath never lifts it past the seat's 18.
+      const groundY = H_OFFICE + (seated ? SEAT_TOP - 1 : 0)
       const scaleF = h.id === 'main' ? 1.1 : 1
       rs.rig.group.position.set(pos.x, groundY, pos.z)
       // face the way we are walking; standing still we face +z, across the desk and at the camera
@@ -767,7 +771,7 @@ export function DeskStudio({ session, height }: { session: SessionState | null; 
 
       // ---- DOM overlays ---------------------------------------------------------------------
       const scale = c.scale
-      const headTop = groundY + (rs.rig.headG.position.y + 26) * scaleF
+      const headTop = groundY + (rs.rig.headG.position.y + EAR_TOP + 3) * scaleF
       const deskCentre = tileToWorld(slot.i + 0.5, slot.j)
       const plateWorld = seated
         ? { x: deskCentre.x, y: H_OFFICE + 42, z: deskCentre.z + 26 }

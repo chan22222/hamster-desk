@@ -3,7 +3,7 @@ import assert from 'node:assert/strict'
 import * as THREE from 'three'
 import { H_OFFICE, OFFICE, advanceWalker, makeWalker, reconcileSeats, tileToWorld, walkTo } from '../src/desk/office-world'
 import { FEED_LINE_PX, FRAME_MAX_SCALE, FRAME_MIN_SCALE, createCamera, feedLines, focusCamera, frameCamera, frameHeadPad, groundHit, overviewCamera, worldToScreen, zoomCamera } from '../src/desk/office-camera'
-import { buildHamster } from '../src/desk/vox/hamster'
+import { HAMSTER_H, LEG_Y, buildHamster } from '../src/desk/vox/hamster'
 import { voxMaterial } from '../src/desk/vox/material'
 import { buildStudioWorld, COLS, ROWS } from '../src/desk/vox/world'
 import { modelSkin } from '../src/desk/skins'
@@ -317,15 +317,21 @@ test('every model skin builds a hamster that stands on the floor at a readable s
   const models = ['claude-fable-5-1', 'claude-opus-5', 'claude-sonnet-5', 'claude-haiku-4-5-20251001', 'claude-newmodel-7', null]
   for (const model of models) {
     const skin = modelSkin(model)
-    const rig = buildHamster({ skin, tint: tintFor(model === 'claude-fable-5-1' ? 'main' : 'Explore'), main: model === 'claude-fable-5-1' }, material)
+    const main = model === 'claude-fable-5-1'
+    const rig = buildHamster({ skin, tint: tintFor(main ? 'main' : 'Explore'), main }, material)
     const box = new THREE.Box3().setFromObject(rig.group)
     const height = box.max.y - box.min.y
     assert.ok(height > 55 && height < 80, `${model}: height ${height}`)
-    assert.ok(box.min.y >= -1, `${model}: sunk into the floor at ${box.min.y}`)
+    // the soles are the lowest thing in the rig and they rest exactly on y 0 — a hamster neither
+    // sinks into the deck nor hovers over it, whatever the skin does to the head
+    assert.ok(Math.abs(box.min.y) < 0.01, `${model}: feet at ${box.min.y}, not on the floor`)
+    assert.equal(rig.legY, LEG_Y)
     assert.equal(rig.legs.length, 4)
     const geos = rig.legs.map((l) => (l.children[0] as THREE.Mesh).geometry)
     assert.ok(geos.every((gg) => gg === geos[0]), `${model}: limbs must share one geometry`)
     if (skin.accessory !== 'none') assert.ok(rig.headG.children.length >= 2, `${model}: accessory missing`)
+    // HAMSTER_H is what the bubbles and glyphs anchor to, so it has to be the ear tips for real
+    else assert.ok(Math.abs(box.max.y - HAMSTER_H) < 0.01, `${model}: HAMSTER_H ${HAMSTER_H} but the ears top out at ${box.max.y}`)
   }
 })
 
