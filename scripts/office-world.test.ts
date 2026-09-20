@@ -2,7 +2,7 @@ import { test } from 'node:test'
 import assert from 'node:assert/strict'
 import * as THREE from 'three'
 import { H_OFFICE, OFFICE, advanceWalker, makeWalker, reconcileSeats, tileToWorld, walkTo } from '../src/desk/office-world'
-import { FEED_LINE_PX, FRAME_MAX_SCALE, FRAME_MIN_SCALE, createCamera, feedLines, focusCamera, frameCamera, frameHeadPad, groundHit, overviewCamera, worldToScreen, zoomCamera } from '../src/desk/office-camera'
+import { FEED_LINE_PX, FRAME_MAX_SCALE, FRAME_MIN_SCALE, FRAME_PAD, HEADER_PAD, autoFrameCamera, createCamera, feedLines, feedTopY, focusCamera, frameCamera, frameHeadPad, frameSubject, groundHit, feedAnchorY, overviewCamera, worldToScreen, zoomCamera } from '../src/desk/office-camera'
 import { HAMSTER_H, LEG_Y, buildHamster } from '../src/desk/vox/hamster'
 import { voxMaterial } from '../src/desk/vox/material'
 import { buildStudioWorld, COLS, ROWS } from '../src/desk/vox/world'
@@ -114,8 +114,7 @@ test('independent session maps never confuse their shared main hamster id', () =
   assert.notEqual(a.get('alice'), b.get('alice'))
 })
 
-/** DeskStudio pads each hamster by this much before framing, and the controls bar owns the bottom */
-const FRAME_PAD = 44
+/** the controls bar owns the bottom strip (FRAME_PAD is the room the framing leaves each hamster) */
 const BOTTOM_PAD = 44
 const clampScale = (v: number) => Math.max(FRAME_MIN_SCALE, Math.min(FRAME_MAX_SCALE, v))
 type Box = { minX: number; maxX: number; minZ: number; maxZ: number }
@@ -271,6 +270,54 @@ test('auto framing: a handful of colleagues is framed closer than it used to be,
   // and the point of all of it: the bubbles are actually on screen there
   assert.ok(feedLines(four.scale) >= 2, `four hamsters must carry at least two feed rows, got ${feedLines(four.scale)} at ${four.scale}`)
   assertStrip(four, bounds, w, h, 'four hamsters on the real desk')
+})
+
+/**
+ * The regression the head-based framing exists for. `frameCamera` reserves its strip from the
+ * *floor*, but the bubbles stack from the ear tips — a fixed number of world units up, which is a
+ * different number of pixels at every viewport height. At the app's default 420px desk the top of
+ * a four-row stack used to land above the canvas; here it has to clear the header at every height.
+ */
+test('auto framing: a lone hamster keeps its whole feed stack under the header at every desk height', () => {
+  const w = 1280
+  const seat = OFFICE.slots[0].seat
+  const seatW = tileToWorld(seat.i, seat.j)
+  const deskW_ = tileToWorld(seat.i, seat.j + 1)
+  const bounds = boundsOf([seatW, deskW_])
+  for (const h of [420, 520, 700]) {
+    const c = createCamera()
+    autoFrameCamera(c, bounds, w, h, FRAME_MIN_SCALE, 3.0)
+    const lines = feedLines(c.scale)
+    // measured over where the hamsters actually stand, not over the empty floor the fit pads them with
+    const top = feedAnchorY(c, frameSubject(bounds), w, h)
+    assert.ok(top !== null, `${h}px: the bubble anchors projected behind the camera`)
+    assert.ok(lines > 0, `${h}px: a lone hamster must still carry feed rows, got ${lines} at ${c.scale}`)
+    assert.ok(
+      feedTopY(top as number, lines) >= HEADER_PAD - 0.5,
+      `${h}px: ${lines} rows over an anchor at ${top} reach ${feedTopY(top as number, lines)}, above the ${HEADER_PAD}px header`,
+    )
+    // and it is still a close-up of a desk, with the hamster and its desk on screen
+    assert.ok(c.scale > 1.5, `${h}px: a lone hamster must stay a close-up, got ${c.scale}`)
+    for (const q of [seatW, deskW_]) {
+      const p = worldToScreen(c, { x: q.x, y: H_OFFICE, z: q.z }, w, h)
+      assert.equal(p.behind, false, `${h}px: the desk went behind the camera`)
+      assert.ok(p.x >= 0 && p.x <= w && p.y >= 0 && p.y <= h, `${h}px: the desk is off screen at ${p.x},${p.y}`)
+    }
+  }
+})
+
+test('auto framing: a handful of colleagues still shows two feed rows under the header', () => {
+  const w = 1280
+  const bounds = boundsOf(seatPoints([0, 1, 2, 3]))
+  for (const h of [420, 520]) {
+    const c = createCamera()
+    autoFrameCamera(c, bounds, w, h)
+    assert.ok(c.scale > 1.1, `${h}px: four hamsters should stay well inside the old 1.04, got ${c.scale}`)
+    const lines = feedLines(c.scale)
+    assert.ok(lines >= 2, `${h}px: four hamsters must carry at least two feed rows, got ${lines} at ${c.scale}`)
+    const top = feedAnchorY(c, frameSubject(bounds), w, h) as number
+    assert.ok(feedTopY(top, lines) >= HEADER_PAD - 0.5, `${h}px: the stack reaches ${feedTopY(top, lines)}, above the header`)
+  }
 })
 
 test('zoom keeps the ground point under the cursor exactly where it was', () => {

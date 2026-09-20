@@ -5,7 +5,7 @@
 //
 // No DOM here — only three's vector math — so the node test can exercise it.
 import * as THREE from 'three'
-import { H_OFFICE } from './office-world'
+import { BUBBLE_H, H_OFFICE } from './office-world'
 
 export interface Camera {
   scale: number
@@ -108,8 +108,9 @@ const clampScale = (s: number): number => Math.max(MIN_SCALE, Math.min(MAX_SCALE
 
 /**
  * Put a world point just below the middle of the screen, the way the old 2D view framed a desk.
- * `dy` is how far below centre; the automatic camera drops it further to leave room for the feed
- * of bubbles that stacks above a hamster's head. ⌂ and the follow menu keep the original offset.
+ * `dy` is how far below centre. Manual gestures (the follow menu, a double-click, the minimap) use
+ * it; the automatic framing does not — it measures where the heads actually land instead, in
+ * `autoFrameCamera`, because a fixed pixel drop is wrong at every viewport height but one.
  */
 export function focusCamera(c: Camera, world: { x: number; z: number }, w: number, h: number, scale = 2.5, dy = 10): void {
   c.scale = clampScale(scale)
@@ -156,6 +157,8 @@ export function overviewCamera(c: Camera, bounds: Bounds, w: number, h: number, 
 
 /** auto-framing never zooms in past this close-up of a desk, and never out past a full room */
 export const FRAME_MAX_SCALE = 3.4
+/** how much empty floor the automatic framing leaves around each hamster before it fits them */
+export const FRAME_PAD = 44
 /**
  * A full room (every seat and the desk in front of it, padded) fits at 0.60–0.66 in the usual
  * desk viewports; the floor is deliberately above that, so a crowded room spills a little at the
@@ -164,6 +167,12 @@ export const FRAME_MAX_SCALE = 3.4
 export const FRAME_MIN_SCALE = 0.75
 /** the strip along the bottom the controls bar sits in */
 const FRAME_BOTTOM_PAD = 44
+/**
+ * The band along the top the studio draws its header into (the live dot, the title, the status
+ * counts). A feed row that reaches into it is unreadable, so the automatic framing keeps the whole
+ * stack below it.
+ */
+export const HEADER_PAD = 56
 
 /**
  * How many rows of a hamster's chat feed are worth drawing at this zoom (0 = hide the feed).
@@ -179,7 +188,7 @@ export function feedLines(scale: number): number {
   if (scale >= 0.8) return 1
   return 0
 }
-/** rough on-screen height of one feed row plus its gap */
+/** on-screen height of a one-line feed row plus its gap */
 export const FEED_LINE_PX = 26
 
 /**
@@ -241,6 +250,111 @@ export function frameCamera(
   }
   c.scale = scale
   centerOn(c, (bounds.minX + bounds.maxX) / 2, (bounds.minZ + bounds.maxZ) / 2, w / 2, top + (h - top - FRAME_BOTTOM_PAD) / 2, w, h)
+  c.initialized = true
+}
+
+/**
+ * Slack on top of `lines * FEED_LINE_PX`. A row that wraps onto a second line is ~6px taller than
+ * the one-line row that constant describes, and a four-row stack measures 118px against the 104
+ * the constant predicts — so the framing budgets for the stack being a little taller than nominal
+ * rather than clipping its top row.
+ */
+const FEED_SLACK = 18
+
+/**
+ * Take the framing pad back off every side, never past the middle: what is left is the ground the
+ * hamsters actually stand on, which is what the head and foot measurements below have to use.
+ */
+export function frameSubject(b: Bounds, pad = FRAME_PAD): Bounds {
+  const x = Math.min(pad, (b.maxX - b.minX) / 2)
+  const z = Math.min(pad, (b.maxZ - b.minZ) / 2)
+  return { minX: b.minX + x, maxX: b.maxX - x, minZ: b.minZ + z, maxZ: b.maxZ - z }
+}
+
+const groundCorners = (b: Bounds): { x: number; z: number }[] => [
+  { x: b.minX, z: b.minZ },
+  { x: b.maxX, z: b.minZ },
+  { x: b.maxX, z: b.maxZ },
+  { x: b.minX, z: b.maxZ },
+]
+
+/** Screen y of the highest chat-bubble anchor over `bounds` — the pixel a feed stacks up from. */
+export function feedAnchorY(c: Camera, bounds: Bounds, w: number, h: number): number | null {
+  let top: number | null = null
+  for (const q of groundCorners(bounds)) {
+    const p = worldToScreen(c, { x: q.x, y: H_OFFICE + BUBBLE_H, z: q.z }, w, h)
+    if (p.behind) continue
+    if (top === null || p.y < top) top = p.y
+  }
+  return top
+}
+
+/** Screen y of the nearest edge of `bounds` on the floor — the lowest pixel of the subject. */
+function groundBottomY(c: Camera, bounds: Bounds, w: number, h: number): number | null {
+  let bottom: number | null = null
+  for (const q of groundCorners(bounds)) {
+    const p = worldToScreen(c, { x: q.x, y: H_OFFICE, z: q.z }, w, h)
+    if (p.behind) continue
+    if (bottom === null || p.y > bottom) bottom = p.y
+  }
+  return bottom
+}
+
+/** How far down the screen the top of a `lines`-row stack sits, for an anchor at `anchor`. */
+export const feedTopY = (anchor: number, lines: number): number => anchor - lines * FEED_LINE_PX - FEED_SLACK
+
+/** Slide the ground so whatever sits at the middle of the screen moves `dy` pixels down it. */
+function dropBy(c: Camera, dy: number, w: number, h: number): void {
+  panCamera(c, { x: w / 2, y: h / 2 }, { x: w / 2, y: h / 2 + dy }, w, h)
+}
+
+/**
+ * The framing both the automatic camera and ⌂ use.
+ *
+ * `frameCamera` alone only ever reasons about the floor, so the strip it reserves is measured from
+ * the ground under the hamsters — but the bubbles hang from a point `BUBBLE_H` above it, which is a
+ * different number of pixels at every zoom and every viewport height. In a 700px-tall desk that
+ * slack was generous and in the app's default 420 it was not, so the top rows of a four-row stack
+ * were drawn off the top of the canvas or under the header.
+ *
+ * So: fit as before, then project that anchor and push the view down until the stack above it
+ * clears `HEADER_PAD`. Panning can only bury the subject's feet, so if that pushes the nearest
+ * hamster off the bottom of the canvas, give a little zoom back and try again. (Off the canvas, not
+ * merely under the controls bar: that pill floats in a corner, and paying real zoom — and with it
+ * feed rows — to keep a desk out from behind it is the worse trade.) When even the floor scale
+ * cannot hold both, the head wins — a hamster with its feet cropped still says what it is doing,
+ * one with its bubbles cropped does not.
+ *
+ * Both measurements are taken on the bounds with `pad` taken back off: the caller inflates every
+ * hamster by `FRAME_PAD` so the fit leaves some floor around the room, and measuring the heads over
+ * a padded corner where nobody stands would reserve sky for a hamster that is not there.
+ */
+export function autoFrameCamera(
+  c: Camera,
+  bounds: Bounds,
+  w: number,
+  h: number,
+  minScale = FRAME_MIN_SCALE,
+  maxScale = FRAME_MAX_SCALE,
+  pad = FRAME_PAD,
+): void {
+  const subject = frameSubject(bounds, pad)
+  let cap = maxScale
+  for (let attempt = 0; attempt < 6; attempt++) {
+    frameCamera(c, bounds, w, h, minScale, cap)
+    // perspective: the ear tips move a slightly different number of pixels than the ground does,
+    // so close in on the answer rather than solving it
+    for (let k = 0; k < 4; k++) {
+      const top = feedAnchorY(c, subject, w, h)
+      if (top === null) break
+      const short = HEADER_PAD - feedTopY(top, feedLines(c.scale))
+      if (short <= 0.5) break
+      dropBy(c, short, w, h)
+    }
+    const bottom = groundBottomY(c, subject, w, h)
+    if (bottom === null || bottom <= h || c.scale <= minScale + 1e-6) break
+    cap = Math.max(minScale, c.scale * 0.94)
+  }
   c.initialized = true
 }
 

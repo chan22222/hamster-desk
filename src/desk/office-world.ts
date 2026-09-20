@@ -1,6 +1,7 @@
 // The office floor plan and who sits where. Pure data + math: no three, no DOM, so the node
 // test can drive it directly. The 3D camera lives in office-camera.ts and the voxel geometry in
 // vox/world.ts; both read the constants below.
+import { FEED_ANCHOR, HEAD_Y, MAIN_SCALE, SIT_DROP } from './vox/hamster'
 
 export interface Point { i: number; j: number }
 export interface Seat extends Point { seat: Point; chair: Point }
@@ -11,6 +12,27 @@ export const T = 64
 export const OFFICE_TILE = { i: 10, j: 8 } as const
 /** the office deck sits one step above the island */
 export const H_OFFICE = 24
+
+/** the chair's seat top (the `chair` prop's cushion), in the same units as everything else here */
+export const SEAT_TOP = 18
+/**
+ * How far the studio lifts a seated hamster off the floor. One unit shallower than the cushion's
+ * own top, which is the most the (short-legged) torso can rise and still stay in the seat through
+ * the breathing bob.
+ */
+export const SEAT_LIFT = SEAT_TOP - 1
+/** the chat feed floats this far over its anchor */
+export const FEED_RISE = 20
+/**
+ * How high above the office floor a hamster's chat bubbles hang — the point the stack grows
+ * *upward* from, and therefore the one the automatic framing has to keep clear of the header.
+ *
+ * It is written out of the rig's own numbers rather than measured off a screenshot, so reshaping
+ * the character moves the framing with it. The case that matters is the worst one: the session's
+ * main hamster (a tenth larger than a colleague), seated (the chair lifts more than the sit pose
+ * drops), which is exactly what `DeskStudio` computes for its DOM overlay.
+ */
+export const BUBBLE_H = SEAT_LIFT + (HEAD_Y - SIT_DROP + FEED_ANCHOR) * MAIN_SCALE + FEED_RISE
 
 /** office tile point → world centre. (0,0) is the middle of the office's first tile. */
 export function tileToWorld(i: number, j: number): { x: number; z: number } {

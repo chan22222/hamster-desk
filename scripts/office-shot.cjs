@@ -139,6 +139,21 @@ app.whenReady().then(async () => {
       await wait(120)
     }
     await shot('feed', 400)
+
+    // 10. the same four rows at the app's default desk height and at the tallest one it allows.
+    // The automatic framing measures where the ear tips land rather than dropping the ground by a
+    // fixed number of pixels, so the whole stack has to clear the header band in both.
+    const deskHeight = px => evaluate(`
+      const { useDesk } = await import('/store.ts');
+      useDesk.setState(s => ({ prefs: { ...s.prefs, deskH: ${px} } }));
+    `)
+    await deskHeight(420)
+    await wait(1800)
+    await shot('feed-420', 400)
+    await deskHeight(700)
+    await wait(1800)
+    await shot('feed-700', 400)
+    await deskHeight(520)
     await studio('feedLife({ act: 3000, say: 9000, warn: 12000 })')
 
 

@@ -42,8 +42,14 @@ export const TAIL_Y = 13
 export const BODY_Y = 30.5
 /** head-local y of the ear tips — the top of the silhouette */
 export const EAR_TOP = 21.25
-/** the tip of the ears, for glyphs and bubbles */
+/** the tip of the ears */
 export const HAMSTER_H = HEAD_Y + EAR_TOP
+/** head-local y the chat feed and the thought glyph hang from: just clear of the ear tips */
+export const FEED_ANCHOR = EAR_TOP + 3
+/** the sit pose drops every part of the rig by this much inside its group (DeskStudio.poseRig) */
+export const SIT_DROP = 12
+/** the session's main hamster is built a tenth larger than a colleague */
+export const MAIN_SCALE = 1.1
 
 interface Palette {
   fur: number
@@ -302,6 +308,6 @@ export function buildHamster({ skin, tint, main }: HamsterOptions, material: THR
   tailG.add(mk(geos.tail))
   group.add(tailG)
 
-  if (main) group.scale.setScalar(1.1)
+  if (main) group.scale.setScalar(MAIN_SCALE)
   return { group, bodyM, tieG, headG, tailG, legs, headY: HEAD_Y, armY: ARM_Y, legY: LEG_Y, tailY: TAIL_Y, bodyY: BODY_Y }
 }

@@ -6,7 +6,9 @@ import { modelSkin } from './skins'
 import { IconHome, IconMap, IconMinus, IconPlus, IconTarget } from '../widgets/icons'
 import {
   OFFICE,
+  FEED_RISE,
   H_OFFICE,
+  SEAT_LIFT,
   advanceWalker,
   makeWalker,
   reconcileSeats,
@@ -16,10 +18,11 @@ import {
 } from './office-world'
 import {
   applyTo,
+  autoFrameCamera,
   createCamera,
   feedLines,
   focusCamera,
-  frameCamera,
+  FRAME_PAD,
   orbitCamera,
   overviewCamera,
   panCamera,
@@ -30,7 +33,7 @@ import {
   type Camera,
 } from './office-camera'
 import { skyDome, swayDepthMaterial, voxMaterial, waterMaterial } from './vox/material'
-import { buildHamster, EAR_TOP, type HamsterRig } from './vox/hamster'
+import { buildHamster, FEED_ANCHOR, MAIN_SCALE, type HamsterRig } from './vox/hamster'
 import { buildStudioWorld, COLS, ROWS, WATER_Y, WORLD_D, WORLD_W, type StudioWorld } from './vox/world'
 import { BOSS_DESK_W, DESK_W } from './vox/props'
 
@@ -40,15 +43,11 @@ const STATE_LABEL: Record<Hamster['state'], string> = {
 }
 const GLYPH: Partial<Record<IsoAnim, string>> = { think: '···', wave: '!', sleep: 'z', phone: '♪' }
 
-/** the chair's seat top, so a sitting hamster's feet rest on it rather than in it */
-const SEAT_TOP = 18
 const FOG = 0xcfe3f2
-/** auto-framing: room around each hamster, and how fast the camera eases towards its target */
-const FRAME_PAD = 44
+/** how fast the automatic camera eases towards its target (the room it leaves is FRAME_PAD) */
 const FRAME_EASE = 6
-/** a lone seated hamster: closer than a manual focus, and pushed down to clear the feed */
+/** a lone seated hamster: closer than a manual focus (the framing pushes it down on its own) */
 const SOLO_SCALE = 3.0
-const SOLO_DY = 40
 /** a feed row fades out over its last `FEED_FADE` ms (or half its life, whichever is shorter) */
 const FEED_FADE = 600
 
@@ -761,11 +760,11 @@ export function DeskStudio({ session, height }: { session: SessionState | null; 
       const anim: IsoAnim = walker.moving ? 'walk' : ['arriving', 'leaving'].includes(h.state) ? 'idle' : animFor(h.state, Date.now() - h.since)
       const pos = tileToWorld(walker.i, walker.j)
       // Sitting lays the folded legs (8.4 thick, pinned at rig y 4) across the chair seat and
-      // still lifts the short-legged hamster's head and arms clear of the desk top (y 40). The
-      // offset is the most the torso can rise and still stay in the cushion through the breathing
-      // bob: its underside lands at y 16.5, and ±0.8 of breath never lifts it past the seat's 18.
-      const groundY = H_OFFICE + (seated ? SEAT_TOP - 1 : 0)
-      const scaleF = h.id === 'main' ? 1.1 : 1
+      // still lifts the short-legged hamster's head and arms clear of the desk top (y 40). SEAT_LIFT
+      // is the most the torso can rise and still stay in the cushion through the breathing bob: its
+      // underside lands at y 16.5, and ±0.8 of breath never takes it past the seat's own 18.
+      const groundY = H_OFFICE + (seated ? SEAT_LIFT : 0)
+      const scaleF = h.id === 'main' ? MAIN_SCALE : 1
       rs.rig.group.position.set(pos.x, groundY, pos.z)
       // face the way we are walking; standing still we face +z, across the desk and at the camera
       const next = walker.path[0]
@@ -779,7 +778,7 @@ export function DeskStudio({ session, height }: { session: SessionState | null; 
 
       // ---- DOM overlays ---------------------------------------------------------------------
       const scale = c.scale
-      const headTop = groundY + (rs.rig.headG.position.y + EAR_TOP + 3) * scaleF
+      const headTop = groundY + (rs.rig.headG.position.y + FEED_ANCHOR) * scaleF
       const deskCentre = tileToWorld(slot.i + 0.5, slot.j)
       const plateWorld = seated
         ? { x: deskCentre.x, y: H_OFFICE + 42, z: deskCentre.z + 26 }
@@ -805,7 +804,7 @@ export function DeskStudio({ session, height }: { session: SessionState | null; 
       if (feed) {
         // how many rows this zoom carries — the same answer the automatic framing reserved sky for
         const lines = feedLines(scale)
-        const p = worldToScreen(c, { x: pos.x, y: headTop + 20, z: pos.z }, W, H)
+        const p = worldToScreen(c, { x: pos.x, y: headTop + FEED_RISE, z: pos.z }, W, H)
         const show = lines > 0 && !p.behind && p.x > 70 && p.x < W - 70 && p.y > 40 && p.y < H + 70
         feed.style.opacity = show ? '1' : '0'
         // `visibility` takes the rows out of hit testing too; the container itself never gets clicks
@@ -849,7 +848,6 @@ export function DeskStudio({ session, height }: { session: SessionState | null; 
       const pts: { x: number; z: number }[] = []
       const ids: string[] = []
       let moving = false
-      let seatedOne: { i: number; j: number } | null = null
       for (const h of hams) {
         const k = world.seats.get(h.id)
         const walker = world.walkers.get(h.id)
@@ -860,26 +858,32 @@ export function DeskStudio({ session, height }: { session: SessionState | null; 
           pts.push(tileToWorld(walker.i, walker.j))
         } else {
           const seat = OFFICE.slots[k].seat
-          seatedOne = seat
           pts.push(tileToWorld(seat.i, seat.j), tileToWorld(seat.i, seat.j + 1)) // the seat and the desk in front
         }
       }
-      // recompute only when the occupancy changes or somebody is walking; otherwise keep easing
-      const sig = `${ids.sort().join(',')}${moving ? '|walk' : ''}`
+      // Recompute only when the occupancy changes, the viewport resizes or somebody is walking;
+      // otherwise keep easing towards the target we already have. The size is in the signature
+      // because the framing is measured in pixels — how much sky a feed row needs is the same 26px
+      // in a 420-tall desk as in a 700-tall one, so dragging the splitter really does change the
+      // answer. It is quantised to 8px so a drag recomputes a handful of times, not every frame.
+      const sig = `${ids.sort().join(',')}|${Math.round(W / 8)}x${Math.round(H / 8)}${moving ? '|walk' : ''}`
       if (!world.auto.target || moving || sig !== world.auto.key) {
         world.auto.key = sig
         const target: Camera = { ...c }
-        // one hamster: a close-up of its desk, sitting low enough that its feed has room above it
-        if (ids.length === 1 && !moving && seatedOne) focusCamera(target, tileToWorld(seatedOne.i, seatedOne.j), W, H, SOLO_SCALE, SOLO_DY)
-        else if (!pts.length) focusCamera(target, tileToWorld(OFFICE.slots[0].seat.i, OFFICE.slots[0].seat.j), W, H, SOLO_SCALE, SOLO_DY)
-        else {
-          const b = { minX: Infinity, maxX: -Infinity, minZ: Infinity, maxZ: -Infinity }
-          for (const p of pts) {
-            b.minX = Math.min(b.minX, p.x - FRAME_PAD); b.maxX = Math.max(b.maxX, p.x + FRAME_PAD)
-            b.minZ = Math.min(b.minZ, p.z - FRAME_PAD); b.maxZ = Math.max(b.maxZ, p.z + FRAME_PAD)
-          }
-          frameCamera(target, b, W, H)
+        // an empty office still looks at the boss's desk, so ⌂ has somewhere to go
+        if (!pts.length) {
+          const seat = OFFICE.slots[0].seat
+          pts.push(tileToWorld(seat.i, seat.j), tileToWorld(seat.i, seat.j + 1))
         }
+        const b = { minX: Infinity, maxX: -Infinity, minZ: Infinity, maxZ: -Infinity }
+        for (const p of pts) {
+          b.minX = Math.min(b.minX, p.x - FRAME_PAD); b.maxX = Math.max(b.maxX, p.x + FRAME_PAD)
+          b.minZ = Math.min(b.minZ, p.z - FRAME_PAD); b.maxZ = Math.max(b.maxZ, p.z + FRAME_PAD)
+        }
+        // one desk is the only case that would otherwise hit the 340% cap; hold it at the 300%
+        // close-up it has always had so the room around the hamster does not disappear
+        const solo = ids.length <= 1 && !moving
+        autoFrameCamera(target, b, W, H, undefined, solo ? SOLO_SCALE : undefined)
         world.auto.target = { tx: target.tx, tz: target.tz, scale: target.scale }
       }
       const goal = world.auto.target
