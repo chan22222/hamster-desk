@@ -6,11 +6,12 @@ import { TerminalPane } from './Terminal'
 import { FileLog } from './log/FileLog'
 import { Sidebar } from './sidebar/Sidebar'
 import { rememberRecent } from './sidebar/recent'
-import { UsagePill } from './widgets/Usage'
+import { UsageMeters } from './widgets/Usage'
 import { UpdatePill } from './widgets/Version'
 import { MoreMenu } from './widgets/MoreMenu'
 import { PlusMenu } from './widgets/PlusMenu'
 import { Popover } from './widgets/Popover'
+import { IconClose, IconSidebar } from './widgets/icons'
 import { startReplay } from './dev/replay-driver'
 
 const LAST_CWD = 'hd.lastCwd'
@@ -20,11 +21,11 @@ function TabClose({ busy, onClose }: { busy: boolean; onClose: () => void }) {
   if (!busy)
     return (
       <button className="tab-x" title="터미널 닫기" aria-label="터미널 닫기" onClick={onClose}>
-        ×
+        <IconClose size={12} />
       </button>
     )
   return (
-    <Popover className="tab-x" label="×" ariaLabel="터미널 닫기" title="터미널 닫기" width={224}>
+    <Popover className="tab-x" label={<IconClose size={12} />} ariaLabel="터미널 닫기" title="터미널 닫기" width={224}>
       {(close) => (
         <div className="pop-body">
           <p>이 터미널에서 Claude 가 실행 중이에요. 닫으면 하던 일이 멈춥니다.</p>
@@ -157,11 +158,12 @@ export default function App() {
     <div className="app">
       <header className="topbar">
         <button className="icon-btn" onClick={() => setPrefs({ showSidebar: !prefs.showSidebar })} title="사이드바 (Ctrl+B)" aria-label="사이드바" aria-pressed={prefs.showSidebar}>
-          ≡
+          <IconSidebar />
         </button>
         <span className="brand" title="Hamster Desk">
           🐹
         </span>
+        <span className="bar-sep" />
         <div className="tabs">
           {workspaces.map((w) => {
             const s = Object.values(sessions).find((x) => x.info.ptyId === w.ptyId && w.ptyId !== null)
@@ -196,7 +198,7 @@ export default function App() {
           })}
         </div>
         <div className="status">
-          <UsagePill />
+          <UsageMeters />
           {changed > 0 && (
             <button className={`pill ${prefs.showLog ? 'on' : ''}`} onClick={() => setPrefs({ showLog: !prefs.showLog })} title="바뀐 파일 목록 열기">
               바뀐 파일 {changed}

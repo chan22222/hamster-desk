@@ -3,6 +3,7 @@ import * as THREE from 'three'
 import { useDesk, type Hamster, type HamsterState, type SessionState } from '../store'
 import { animFor, screenColor, statusDot, tintFor, type IsoAnim } from './anim'
 import { modelSkin } from './skins'
+import { IconCheck, IconHome, IconMap, IconMinus, IconPlus, IconTarget } from '../widgets/icons'
 import {
   OFFICE,
   H_OFFICE,
@@ -892,7 +893,7 @@ export function DeskStudio({ session, height }: { session: SessionState | null; 
             {h.bubble && <div key={`${h.bubble.ts}:${h.bubble.summarized}`} className="ob-speech">{h.bubble.text}</div>}
             {h.activity && <div className={`ob-activity ${h.activity.tone === 'edit' ? 'is-edit' : ''}`}>{h.activity.text}</div>}
             {h.bubble && (
-              <button className="ob-check" aria-label="확인" title="확인" onClick={(e) => { e.stopPropagation(); if (session) dismissBubble(session.info.sessionId, h.id) }}>✓</button>
+              <button className="ob-check" aria-label="확인" title="확인" onClick={(e) => { e.stopPropagation(); if (session) dismissBubble(session.info.sessionId, h.id) }}><IconCheck size={11} /></button>
             )}
           </div>
         ))}
@@ -924,7 +925,7 @@ export function DeskStudio({ session, height }: { session: SessionState | null; 
       )}
       <div className="office-bottom" data-office-ui>
         <div className="office-follow">
-          <span className="office-follow-icon">⌖</span>
+          <span className="office-follow-icon"><IconTarget size={14} /></span>
           <select aria-label="햄스터 위치 찾기" value={list.some((h) => h.id === selected && scene.seats.has(h.id)) ? selected : ''} onChange={(e) => focus(e.target.value)}>
             <option value="" disabled>동료 위치 찾기</option>
             {list.map((h) => <option key={h.id} value={h.id} disabled={!scene.seats.has(h.id)}>{h.id === 'main' ? '메인 햄스터' : h.name} · {scene.seats.has(h.id) ? STATE_LABEL[h.state] : '빈자리 대기'}</option>)}
@@ -932,15 +933,15 @@ export function DeskStudio({ session, height }: { session: SessionState | null; 
           {overflow > 0 && <span className="office-overflow" role="status">{overflow}마리 빈자리 대기</span>}
         </div>
         <div className="office-controls">
-          <button onClick={home} title="메인 햄스터로 이동 (자동 카메라 켜기)" aria-label="메인 햄스터로 이동">⌂</button>
+          <button onClick={home} title="메인 햄스터로 이동 (자동 카메라 켜기)" aria-label="메인 햄스터로 이동"><IconHome size={14} /></button>
           <button className={autoFrame ? 'is-on' : ''} aria-pressed={autoFrame} title="있는 햄스터들만 화면에 담는 자동 카메라" onClick={() => (autoFrame ? manual() : home())}>자동</button>
           <span className="control-divider" />
-          <button onClick={() => zoomBy(0.8)} aria-label="축소">−</button>
+          <button onClick={() => zoomBy(0.8)} aria-label="축소" title="축소"><IconMinus size={14} /></button>
           <span className="office-zoom">{zoom}%</span>
-          <button onClick={() => zoomBy(1.25)} aria-label="확대">+</button>
+          <button onClick={() => zoomBy(1.25)} aria-label="확대" title="확대"><IconPlus size={14} /></button>
           <span className="control-divider" />
           <button onClick={overview}>전체 보기</button>
-          <button className={showMap ? 'is-on' : ''} aria-pressed={showMap} onClick={() => setShowMap(!showMap)}>지도</button>
+          <button className={showMap ? 'is-on' : ''} aria-pressed={showMap} onClick={() => setShowMap(!showMap)}><IconMap className="ctl-ico" size={13} />지도</button>
         </div>
       </div>
       {showMap && <div className="office-minimap" data-office-ui>

@@ -1,5 +1,6 @@
 import { useMemo, useState } from 'react'
 import type { EditEntry, SessionState } from '../store'
+import { IconClose } from '../widgets/icons'
 
 interface FileAgg {
   file: string
@@ -47,7 +48,7 @@ export function FileLog({ session, onClose }: { session: SessionState | null; on
       <span>바뀐 파일</span>
       <span className="dim">{sub}</span>
       <button className="icon-btn" onClick={onClose} title="패널 닫기" aria-label="패널 닫기">
-        ×
+        <IconClose size={14} />
       </button>
     </div>
   )

@@ -93,7 +93,7 @@ app.whenReady().then(async () => {
 
     // 8. automatic framing: ⌂ turns it on; with nine hamsters in the room it eases out until
     // every occupied desk is in view, and with only the main hamster it eases back to its desk
-    await evaluate("Array.from(document.querySelectorAll('.office-controls button')).find(b => b.textContent === '⌂').click()")
+    await evaluate("document.querySelector('.office-controls button[aria-label=\"메인 햄스터로 이동\"]').click()")
     await wait(1800)
     await shot('autoframe-8', 0)
     // four hamsters: the main plus the three agents seated nearest the boss — a tight frame

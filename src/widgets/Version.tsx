@@ -1,4 +1,5 @@
 import { useDesk } from '../store'
+import { IconDownload, IconRefresh } from './icons'
 
 function newer(a: string, b: string): boolean {
   const pa = a.split('.').map(Number)
@@ -22,6 +23,7 @@ export function UpdatePill({ onUpdate }: { onUpdate: () => void }) {
   if (!latest) return null
   return (
     <button className="pill alert" onClick={onUpdate} title={`claude update 를 새 터미널 탭에서 실행 (→ ${latest})`}>
+      <IconDownload size={14} />
       업데이트
     </button>
   )
@@ -40,6 +42,7 @@ export function VersionSection({ onUpdate }: { onUpdate: () => void }) {
       </div>
       <div className="pop-row">
         <button className="pop-ghost" onClick={recheck}>
+          <IconRefresh size={14} />
           다시 확인
         </button>
         {latest && (

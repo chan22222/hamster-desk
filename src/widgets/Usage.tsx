@@ -4,6 +4,8 @@ import { useDesk } from '../store'
 import { Popover } from './Popover'
 
 type SLState = 'installed' | 'foreign' | 'none' | 'unknown'
+/** which window a chip stands for; the popover shows them all and highlights this one */
+type Which = string
 
 function fmtReset(ms: number | null): string {
   if (!ms) return ''
@@ -24,28 +26,89 @@ function remaining(ms: number | null): string {
   return h ? `${h}시간 ${m}분` : `${m}분`
 }
 
-const tone = (pct: number): string => (pct >= 90 ? 'hot' : pct >= 70 ? 'warm' : '')
+/** three steps, and the same class goes on the percentage — colour is never the only cue */
+const step = (pct: number): string => (pct >= 90 ? 'is-hot' : pct >= 70 ? 'is-warm' : 'is-ok')
 const clamp = (w: RateWindow): number => Math.max(0, Math.min(100, w.usedPercentage))
 
-function Row({ label, w }: { label: string; w: RateWindow | null }) {
+const SEGMENTS = [0, 1, 2, 3, 4]
+
+/** Five blocks, one per 20 %. Redundant with the number next to it — that is the point. */
+function Meter({ pct }: { pct: number }) {
+  const filled = pct <= 0 ? 0 : Math.min(5, Math.ceil(pct / 20))
+  return (
+    <span className={`meter ${step(pct)}`} aria-hidden="true">
+      {SEGMENTS.map((i) => (
+        <i key={i} className={i < filled ? 'is-full' : ''} />
+      ))}
+    </span>
+  )
+}
+
+function Row({ label, w, current }: { label: string; w: RateWindow | null; current: boolean }) {
   if (!w) return null
   const pct = clamp(w)
   return (
-    <div className="u-row">
+    <div className="u-row" aria-current={current ? 'true' : undefined}>
       <span className="u-name">{label}</span>
-      <span className={`u-track ${tone(pct)}`}>
+      <span className={`u-track ${step(pct)}`}>
         <span className="u-fill" style={{ width: `${pct}%` }} />
       </span>
       <span className="u-pct">{pct.toFixed(0)}%</span>
-      <span className="u-when dim">
+      <span className="u-when">
         {fmtReset(w.resetsAt)} 초기화{w.resetsAt ? ` · ${remaining(w.resetsAt)} 남음` : ''}
       </span>
     </div>
   )
 }
 
-/** 5-hour / weekly usage from the status-line snapshots, with the one-click opt-in behind it. */
-export function UsagePill() {
+interface WindowRow {
+  key: Which
+  /** the long name, for the popover */
+  name: string
+  /** the short name, for the chip */
+  short: string
+  w: RateWindow
+}
+
+/** One gauge. Clicking it opens the same detail panel, scrolled to this window. */
+function Chip({ row, rows, extra, onUninstall }: { row: WindowRow; rows: WindowRow[]; extra: string; onUninstall: () => void }) {
+  const pct = clamp(row.w)
+  const reset = fmtReset(row.w.resetsAt)
+  const title = `${row.name} 사용량 ${pct.toFixed(0)}%${reset ? ` · ${reset} 초기화 (${remaining(row.w.resetsAt)} 남음)` : ''}`
+  const label = (
+    <>
+      <span className="um-label">{row.short}</span>
+      <Meter pct={pct} />
+      <span className={`um-pct ${step(pct)}`}>{pct.toFixed(0)}%</span>
+      {/* only when it is nearly spent is the reset time worth the width */}
+      {pct >= 90 && reset && <span className="um-reset">{reset}</span>}
+    </>
+  )
+  return (
+    <Popover className={`pill um ${extra}`} label={label} title={title} ariaLabel={title} width={252}>
+      {(close) => (
+        <div className="pop-body">
+          <div className="pop-head">사용량</div>
+          {rows.map((r) => (
+            <Row key={r.key} label={r.name} w={r.w} current={r.key === row.key} />
+          ))}
+          <button
+            className="pop-ghost"
+            onClick={() => {
+              onUninstall()
+              close()
+            }}
+          >
+            연동 해제
+          </button>
+        </div>
+      )}
+    </Popover>
+  )
+}
+
+/** 5-hour and weekly usage as two separate gauges, with the one-click opt-in behind them. */
+export function UsageMeters() {
   const usage = useDesk((s) => s.usage)
   const [sl, setSl] = useState<SLState>('unknown')
   const [busy, setBusy] = useState(false)
@@ -124,42 +187,19 @@ export function UsagePill() {
     )
   }
 
-  const fivePct = five ? clamp(five) : 0
-  const label = (
-    <>
-      {five && (
-        <span className={`u-mini ${tone(fivePct)}`}>
-          <i style={{ width: `${fivePct}%` }} />
-        </span>
-      )}
-      <span>
-        {five ? `5h ${fivePct.toFixed(0)}%` : ''}
-        {five && week ? ' · ' : ''}
-        {week ? `주 ${clamp(week).toFixed(0)}%` : ''}
-      </span>
-    </>
-  )
+  const rows: WindowRow[] = []
+  if (five) rows.push({ key: 'five', name: '5시간', short: '5h', w: five })
+  if (week) rows.push({ key: 'week', name: '주간', short: '주', w: week })
+  for (const [k, w] of others) rows.push({ key: `other:${k}`, name: k, short: k, w })
+
+  const fiveRow = rows.find((r) => r.key === 'five')
+  const weekRow = rows.find((r) => r.key === 'week')
 
   return (
-    <Popover className="pill" label={label} title="사용량 자세히 보기">
-      {(close) => (
-        <div className="pop-body">
-          <Row label="5시간" w={five} />
-          <Row label="주간" w={week} />
-          {others.map(([k, w]) => (
-            <Row key={k} label={k} w={w} />
-          ))}
-          <button
-            className="pop-ghost"
-            onClick={() => {
-              void uninstall()
-              close()
-            }}
-          >
-            연동 해제
-          </button>
-        </div>
-      )}
-    </Popover>
+    <div className="usage">
+      {fiveRow && <Chip row={fiveRow} rows={rows} extra="um-5h" onUninstall={() => void uninstall()} />}
+      {fiveRow && weekRow && <span className="bar-sep" />}
+      {weekRow && <Chip row={weekRow} rows={rows} extra="um-week" onUninstall={() => void uninstall()} />}
+    </div>
   )
 }

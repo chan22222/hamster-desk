@@ -5,13 +5,15 @@ import { WebglAddon } from '@xterm/addon-webgl'
 import '@xterm/xterm/css/xterm.css'
 import { useDesk, type Workspace } from './store'
 
+// The one dark surface in a light app: Claude Code paints this pane with its own palette, and a
+// light background would swallow every dim colour it uses.
 const THEME = {
-  background: '#0f1613',
-  foreground: '#e3e8da',
-  cursor: '#e2c890',
-  selectionBackground: '#e2c89040',
-  black: '#141e19',
-  brightBlack: '#6f7f70',
+  background: '#121814',
+  foreground: '#dfe6da',
+  cursor: '#7fd4a3',
+  selectionBackground: '#3f7a5a66',
+  black: '#12181a',
+  brightBlack: '#8b968d',
 }
 
 const CR = String.fromCharCode(13)

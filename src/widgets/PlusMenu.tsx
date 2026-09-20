@@ -1,6 +1,7 @@
 import { useEffect, useState } from 'react'
 import { middlePath, recentProjects, relTime, type RecentEntry } from '../sidebar/recent'
 import { Popover } from './Popover'
+import { IconBranch, IconFolder, IconPlus, IconSearch, IconSidebar } from './icons'
 
 function Body({ onOpen, onShowSidebar, close }: { onOpen: (dir: string) => void; onShowSidebar: () => void; close: () => void }) {
   const [rows, setRows] = useState<RecentEntry[]>([])
@@ -27,7 +28,7 @@ function Body({ onOpen, onShowSidebar, close }: { onOpen: (dir: string) => void;
             close()
           }}
         >
-          <span className="pop-item-ico">{r.claude ? '🐹' : r.git ? '⎇' : '📁'}</span>
+          <span className="pop-item-ico">{r.claude ? '🐹' : r.git ? <IconBranch className="git" size={14} /> : <IconFolder size={14} />}</span>
           <span className="pop-item-text">
             <span className="pop-item-name">{r.name}</span>
             <span className="pop-item-sub dim">{middlePath(r.path, 34)}</span>
@@ -43,7 +44,7 @@ function Body({ onOpen, onShowSidebar, close }: { onOpen: (dir: string) => void;
           close()
         }}
       >
-        <span className="pop-item-ico">🔎</span>
+        <span className="pop-item-ico"><IconSearch size={14} /></span>
         <span className="pop-item-text">폴더 찾아보기…</span>
       </button>
       <button
@@ -53,7 +54,7 @@ function Body({ onOpen, onShowSidebar, close }: { onOpen: (dir: string) => void;
           close()
         }}
       >
-        <span className="pop-item-ico">≡</span>
+        <span className="pop-item-ico"><IconSidebar size={14} /></span>
         <span className="pop-item-text">사이드바에서 고르기</span>
       </button>
     </div>
@@ -63,7 +64,7 @@ function Body({ onOpen, onShowSidebar, close }: { onOpen: (dir: string) => void;
 /** The `+` next to the tabs: open a terminal in a recent project, or go find a folder. */
 export function PlusMenu({ onOpen, onShowSidebar }: { onOpen: (dir: string) => void; onShowSidebar: () => void }) {
   return (
-    <Popover className="tab-plus" label="+" ariaLabel="새 터미널" title="새 터미널 열기" width={252}>
+    <Popover className="tab-plus" label={<IconPlus />} ariaLabel="새 터미널" title="새 터미널 열기" width={260}>
       {(close) => <Body onOpen={onOpen} onShowSidebar={onShowSidebar} close={close} />}
     </Popover>
   )

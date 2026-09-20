@@ -3,12 +3,13 @@ import { useDesk } from '../store'
 import { LANG_OPTIONS, type PrefLang } from '../i18n'
 import { bubbleAvailability, resetBubbleStats, type BubbleAvailability } from '../bubbles/summarize'
 import { Popover } from './Popover'
+import { IconCheck, IconMore } from './icons'
 import { VersionSection } from './Version'
 
 function CheckRow({ on, label, hint, disabled, onClick }: { on: boolean; label: string; hint?: string; disabled?: boolean; onClick: () => void }) {
   return (
     <button className={`pop-check ${on ? 'is-on' : ''}`} role="menuitemcheckbox" aria-checked={on} disabled={disabled} onClick={onClick}>
-      <span className="pop-tick">{on ? '✓' : ''}</span>
+      <span className="pop-tick">{on && <IconCheck size={14} />}</span>
       <span className="pop-label">{label}</span>
       {hint && <span className="dim">{hint}</span>}
     </button>
@@ -90,7 +91,7 @@ function Body({ onUpdate }: { onUpdate: () => void }) {
 /** The quiet corner of the top bar: view toggles, bubble settings and the CLI version. */
 export function MoreMenu({ onUpdate }: { onUpdate: () => void }) {
   return (
-    <Popover className="icon-btn" label="⋯" ariaLabel="설정" title="설정" width={244}>
+    <Popover className="icon-btn" label={<IconMore />} ariaLabel="설정" title="설정" width={252}>
       {() => <Body onUpdate={onUpdate} />}
     </Popover>
   )

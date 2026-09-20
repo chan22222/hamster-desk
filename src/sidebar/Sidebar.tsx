@@ -1,5 +1,6 @@
 import { useEffect, useRef, useState } from 'react'
 import { favDirs, isFav, middlePath, recentProjects, relTime, toggleFav, type RecentEntry } from './recent'
+import { IconBranch, IconChevron, IconFile, IconFolder, IconMore, IconSearch, IconStar } from '../widgets/icons'
 
 /** how many recent rows fit before the browser below them is pushed off screen */
 const RECENT_SHOWN = 12
@@ -25,14 +26,19 @@ interface Listing {
   error: string | null
 }
 
-function fileIcon(ext: string): string {
+/** All files wear the same sheet; the extension only tints it, so a folder of code reads as one. */
+function fileKind(ext: string): string {
   const e = ext.replace(/^\./, '').toLowerCase()
-  if (e === 'md' || e === 'mdx' || e === 'txt') return '🧾'
-  if (e === 'json' || e === 'yaml' || e === 'yml' || e === 'toml' || e === 'ini') return '⚙'
-  if (e === 'ts' || e === 'tsx' || e === 'js' || e === 'jsx' || e === 'mjs' || e === 'cjs') return '🟦'
-  if (e === 'py') return '🐍'
-  if (e === 'png' || e === 'jpg' || e === 'jpeg' || e === 'gif' || e === 'svg' || e === 'webp') return '🖼'
-  return '📄'
+  if (e === 'md' || e === 'mdx' || e === 'txt') return 'is-doc'
+  if (e === 'json' || e === 'yaml' || e === 'yml' || e === 'toml' || e === 'ini') return 'is-config'
+  if (['ts', 'tsx', 'js', 'jsx', 'mjs', 'cjs', 'py', 'rs', 'go'].includes(e)) return 'is-code'
+  return ''
+}
+
+/** 🐹 stays an emoji: it means "Claude Code knows this folder", which is a mark, not an icon. */
+function dirIcon(d: { git: boolean; claude: boolean }) {
+  if (d.claude) return '🐹'
+  return d.git ? <IconBranch className="git" size={14} /> : <IconFolder size={14} />
 }
 
 function crumbs(p: string): { label: string; path: string }[] {
@@ -50,7 +56,9 @@ function Section({ title, open, onToggle, children }: { title: string; open: boo
   return (
     <div className={`side-section ${open ? 'is-open' : ''}`}>
       <button className="side-title" onClick={onToggle} aria-expanded={open}>
-        <span className="side-caret">{open ? '▾' : '▸'}</span>
+        <span className="side-caret">
+          <IconChevron dir={open ? 'down' : 'right'} size={14} />
+        </span>
         {title}
       </button>
       {open && children}
@@ -140,19 +148,22 @@ export function Sidebar({ start, onOpen }: { start: string; onOpen: (dir: string
 
   return (
     <aside className="sidebar">
-      <input className="side-filter" placeholder="이름으로 거르기" value={filter} onChange={(e) => setFilter(e.target.value)} />
+      <div className="side-search">
+        <IconSearch size={14} />
+        <input className="side-filter" placeholder="프로젝트·폴더 검색" value={filter} onChange={(e) => setFilter(e.target.value)} aria-label="프로젝트·폴더 검색" />
+      </div>
 
       <div className="side-scroll">
         <Section title="최근" open={sections.recent} onToggle={() => setSections((s) => ({ ...s, recent: !s.recent }))}>
           {recentRows.length === 0 && <div className="side-empty">아직 연 프로젝트가 없어요.</div>}
           {recentShown.map((r) => (
             <div key={r.path} className="rec-row" title={`${r.path}\n클릭: 여기서 터미널 열기`} onClick={() => open(r.path)}>
-              <span className="rec-ico">{r.claude ? '🐹' : r.git ? '⎇' : '📁'}</span>
+              <span className="rec-ico">{dirIcon(r)}</span>
               <span className="rec-text">
                 <span className="rec-name">{r.name}</span>
-                <span className="rec-path dim">{middlePath(r.path)}</span>
+                <span className="rec-path">{middlePath(r.path)}</span>
               </span>
-              <span className="rec-when dim">{relTime(r.at)}</span>
+              <span className="rec-when">{relTime(r.at)}</span>
               <button
                 className={`rec-star ${r.fav ? 'is-on' : ''}`}
                 title={r.fav ? '즐겨찾기 해제' : '즐겨찾기'}
@@ -162,7 +173,7 @@ export function Sidebar({ start, onOpen }: { start: string; onOpen: (dir: string
                   star(r.path)
                 }}
               >
-                {r.fav ? '★' : '☆'}
+                <IconStar size={13} filled={r.fav} />
               </button>
             </div>
           ))}
@@ -198,14 +209,14 @@ export function Sidebar({ start, onOpen }: { start: string; onOpen: (dir: string
             <button className="side-primary" onClick={() => open(cur)} title={cur}>
               여기서 터미널 열기
             </button>
-            <button className="side-mini" onClick={() => listing?.parent && void go(listing.parent)} disabled={!listing?.parent} title="상위 폴더">
-              ↑
+            <button className="side-mini" onClick={() => listing?.parent && void go(listing.parent)} disabled={!listing?.parent} title="상위 폴더" aria-label="상위 폴더">
+              <IconChevron dir="up" size={14} />
             </button>
-            <button className={`side-mini ${isFav(cur, favs) ? 'is-on' : ''}`} onClick={() => star(cur)} title="즐겨찾기">
-              {isFav(cur, favs) ? '★' : '☆'}
+            <button className={`side-mini ${isFav(cur, favs) ? 'is-on' : ''}`} onClick={() => star(cur)} title="즐겨찾기" aria-label="즐겨찾기">
+              <IconStar size={14} filled={isFav(cur, favs)} />
             </button>
-            <button className="side-mini" onClick={() => void browse()} title="폴더 찾아보기">
-              …
+            <button className="side-mini" onClick={() => void browse()} title="폴더 찾아보기" aria-label="폴더 찾아보기">
+              <IconMore size={14} />
             </button>
           </div>
 
@@ -216,7 +227,7 @@ export function Sidebar({ start, onOpen }: { start: string; onOpen: (dir: string
 
           {dirs.map((d) => (
             <div key={d.path} className="fs-row" title={`${d.path}\n클릭: 들어가기 · 더블클릭: 터미널 열기`} onClick={() => void go(d.path)} onDoubleClick={() => open(d.path)}>
-              <span className="fs-ico">{d.claude ? '🐹' : d.git ? '⎇' : '📁'}</span>
+              <span className="fs-ico">{dirIcon(d)}</span>
               <span className="fs-name">{d.name}</span>
               <button
                 className="fs-open"
@@ -240,8 +251,10 @@ export function Sidebar({ start, onOpen }: { start: string; onOpen: (dir: string
                 setMenu({ x: e.clientX, y: e.clientY, path: f.path })
               }}
             >
-              <span className="fs-ico">{fileIcon(f.ext)}</span>
-              <span className="fs-name dim">{f.name}</span>
+              <span className={`fs-ico ${fileKind(f.ext)}`}>
+                <IconFile size={14} />
+              </span>
+              <span className="fs-name">{f.name}</span>
             </div>
           ))}
         </Section>

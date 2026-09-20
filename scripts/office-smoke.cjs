@@ -20,7 +20,8 @@ app.whenReady().then(async () => {
   const evaluate = code => win.webContents.executeJavaScript(`(async () => { ${code} })()`)
   const settle = () => evaluate('await new Promise(r => requestAnimationFrame(() => requestAnimationFrame(r)))')
   const shot = async name => fs.writeFileSync(path.resolve(`work/${name}.png`), (await win.webContents.capturePage()).toPNG())
-  const click = async text => { await evaluate(`Array.from(document.querySelectorAll('.office-controls button')).find(b => b.textContent === ${JSON.stringify(text)}).click()`); await settle() }
+  // icon-only buttons (⌂ + −) carry no text, so match the aria-label first and the label second
+  const click = async name => { await evaluate(`Array.from(document.querySelectorAll('.office-controls button')).find(b => b.getAttribute('aria-label') === ${JSON.stringify(name)} || b.textContent.trim() === ${JSON.stringify(name)}).click()`); await settle() }
   // The name plates are DOM now, so "did anybody move?" is just their box positions.
   const plates = () => evaluate("return Object.fromEntries(Array.from(document.querySelectorAll('.office-nameplate[data-id]')).filter(e => e.style.display !== 'none').map(e => { const r = e.getBoundingClientRect(); return [e.dataset.id, [Math.round(r.left), Math.round(r.top)]] }))")
   const mapPoints = () => evaluate("return document.querySelector('.office-minimap polygon').getAttribute('points')")
@@ -100,11 +101,11 @@ app.whenReady().then(async () => {
     await evaluate("const svg=document.querySelector('.office-minimap svg'),r=svg.getBoundingClientRect();svg.dispatchEvent(new MouseEvent('click',{bubbles:true,clientX:r.left+r.width*.6,clientY:r.top+r.height*.6}))")
     await settle()
     assert.notEqual(await mapPoints(), mapAfterDrag, 'map click did not navigate')
-    await click('+')
+    await click('확대')
     assert.equal(await evaluate("return document.querySelector('.office-zoom').textContent"), '313%')
     assert.notEqual(await mapPoints(), mapBefore)
     assert.equal(await evaluate("return document.querySelector('.desk-studio').classList.contains('is-dragging')"), false)
-    await click('−')
+    await click('축소')
     await evaluate(`const el=document.querySelector('.desk-studio'),r=el.getBoundingClientRect();el.dispatchEvent(new WheelEvent('wheel',{bubbles:true,cancelable:true,deltaY:-100,clientX:r.left+200,clientY:r.top+200}));`)
     await settle()
     assert.notEqual(await evaluate("return document.querySelector('.office-zoom').textContent"), '250%')
@@ -129,7 +130,7 @@ app.whenReady().then(async () => {
     await click('지도')
     await settle()
     assert.equal(await mapPoints(), cameraBeforeSwitch, 'folding lost the camera')
-    await click('⌂')
+    await click('메인 햄스터로 이동')
     await click('지도')
     await evaluate('window.testStore.setState(s=>({prefs:{...s.prefs,deskH:320}}))')
     win.setSize(800, 600)
