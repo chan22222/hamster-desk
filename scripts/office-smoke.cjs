@@ -34,26 +34,25 @@ app.whenReady().then(async () => {
     `)
     await settle()
     await shot('studio-default')
-    // The studio opens on the main hamster, which sits in the north-west corner the camera looks
-    // towards — so most desks start behind it. Frame a desk in the far row (same 250%) to get a
-    // roomful of name plates to compare positions against.
-    await evaluate(`const select=document.querySelector('.office-follow select');select.value='studio-6';select.dispatchEvent(new Event('change',{bubbles:true}));`)
+    // The studio opens on the auto-framed room. Frame the desk in the middle of the second staff
+    // row (studio-4, at 250%) to get a roomful of name plates to compare positions against.
+    await evaluate(`const select=document.querySelector('.office-follow select');select.value='studio-4';select.dispatchEvent(new Event('change',{bubbles:true}));`)
     await settle()
     // Regression: two sentences 300 ms apart must leave ONE visible bubble holding the second one.
     // The bubble element used to be re-keyed per sentence, and the replaced node's ref cleanup
     // could run after the new node registered — the fresh bubble then stayed at opacity 0 until
-    // ✓ was pressed. The camera is on studio-6 at 250%, so the bubble is allowed to show.
+    // ✓ was pressed. The camera is on studio-4 at 250%, so the bubble is allowed to show.
     assert.equal(await evaluate("return document.querySelector('.office-controls button[aria-pressed]').getAttribute('aria-pressed')"), 'false', 'locating a colleague must switch automatic framing off')
-    await evaluate("window.__studio.say('studio-6', '첫 번째 문장입니다')")
+    await evaluate("window.__studio.say('studio-4', '첫 번째 문장입니다')")
     await new Promise(r => setTimeout(r, 300))
-    await evaluate("window.__studio.say('studio-6', '두 번째 문장이 자동으로 떠야 해요')")
+    await evaluate("window.__studio.say('studio-4', '두 번째 문장이 자동으로 떠야 해요')")
     await settle()
     const bubbles = await evaluate(`
       const els = Array.from(document.querySelectorAll('.office-bubble.is-speech')).filter(e => e.title === '두 번째 문장이 자동으로 떠야 해요' || (e.querySelector('.ob-speech') || {}).textContent === '두 번째 문장이 자동으로 떠야 해요');
       const all = Array.from(document.querySelectorAll('.office-bubble.is-speech')).map(e => (e.querySelector('.ob-speech') || {}).textContent);
       return { count: els.length, all, text: els[0] ? els[0].querySelector('.ob-speech').textContent : null, opacity: els[0] ? getComputedStyle(els[0]).opacity : null };
     `)
-    assert.equal(bubbles.count, 1, `expected one bubble for studio-6, got ${JSON.stringify(bubbles)}`)
+    assert.equal(bubbles.count, 1, `expected one bubble for studio-4, got ${JSON.stringify(bubbles)}`)
     assert.ok(!bubbles.all.includes('첫 번째 문장입니다'), `the first sentence is still on screen: ${JSON.stringify(bubbles.all)}`)
     assert.equal(bubbles.text, '두 번째 문장이 자동으로 떠야 해요')
     assert.equal(bubbles.opacity, '1', `the replaced bubble stayed hidden (opacity ${bubbles.opacity})`)

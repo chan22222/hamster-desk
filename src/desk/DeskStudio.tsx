@@ -902,7 +902,7 @@ export function DeskStudio({ session, height }: { session: SessionState | null; 
           <span className="office-eyebrow"><span className="office-live-dot" /> THE HAMSTER STUDIO <span className="office-floor">01F</span></span>
           <span className="office-title" title={session?.info.cwd}>{session?.title || session?.info.name || '작은 동료들의 작업실'}</span>
         </div>
-        <div className="office-status"><span><i className="status-active" />작업 {active}</span><span><i />휴식 {list.length - active - waiting}</span>{waiting > 0 && <span className="needs-attention"><i />확인 {waiting}</span>}<span className="office-occupancy" title="사장 자리를 뺀 동료 자리">동료 {Math.min(list.filter((h) => h.id !== 'main').length, OFFICE.staff)} <small>/ {OFFICE.staff}</small></span></div>
+        <div className="office-status"><span><i className="status-active" />작업 {active}</span><span><i />휴식 {list.length - active - waiting}</span>{waiting > 0 && <span className="needs-attention"><i />확인 {waiting}</span>}<span className="office-occupancy" title="사장 자리를 뺀 동료 자리"><small>동료</small> {Math.min(list.filter((h) => h.id !== 'main').length, OFFICE.staff)} <small>/ {OFFICE.staff}</small></span></div>
       </div>
       {!session && (
         <div className="office-welcome" data-office-ui>

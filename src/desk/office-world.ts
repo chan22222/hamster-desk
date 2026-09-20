@@ -47,11 +47,16 @@ const seatAt = (i: number, j: number): Seat => ({
  */
 export const BOSS_SLOT: Seat = seatAt(9, 2)
 
+/** distance from the boss's chair to a seat — agents fill the room outwards from the boss */
+const fromBoss = (s: Seat): number => Math.hypot(s.seat.i - BOSS_SLOT.seat.i, s.seat.j - BOSS_SLOT.seat.j)
+
+// Staff seats are handed out nearest the boss first (ties: the northern one, then the western
+// one), so a handful of agents cluster around the boss's desk and the auto camera stays close.
 const slots: Seat[] = [
   BOSS_SLOT,
   ...Array.from({ length: DESK_COLS * DESK_ROWS }, (_, k) =>
     seatAt(ORIGIN.i + (k % DESK_COLS) * PITCH_I, ORIGIN.j + Math.floor(k / DESK_COLS) * PITCH_J),
-  ).sort((a, b) => a.i + a.j - b.i - b.j || a.j - b.j),
+  ).sort((a, b) => fromBoss(a) - fromBoss(b) || a.j - b.j || a.i - b.i),
 ]
 
 export const OFFICE = {

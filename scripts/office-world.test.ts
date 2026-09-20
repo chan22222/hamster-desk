@@ -57,6 +57,10 @@ test("the boss's seat is slot 0, alone along the north wall, and agents never ta
   assert.ok(staff.every((s) => s.j >= boss.j + 4), `staff desk in the boss's rows: ${JSON.stringify(staff.map((s) => s.j))}`)
   assert.ok(boss.seat.j < boss.j, 'the boss sits north of the desk, facing +z like everyone else')
   assert.ok(boss.j + 1 < OFFICE.D && boss.i + 2 <= OFFICE.W, 'the boss desk is inside the room')
+  // staff seats are handed out nearest the boss first: distance never decreases along the list
+  const dist = (s: typeof staff[number]) => Math.hypot(s.seat.i - boss.seat.i, s.seat.j - boss.seat.j)
+  for (let k = 1; k < staff.length; k++) assert.ok(dist(staff[k]) >= dist(staff[k - 1]) - 1e-9, `seat ${k} is closer to the boss than seat ${k - 1}`)
+  assert.ok(staff.slice(0, 4).every((s) => s.j === staff[0].j), 'the first four seats should be the row nearest the boss')
   const seats = new Map<string, number>()
   reconcileSeats(seats, ['a', 'b', 'c'])
   assert.ok([...seats.values()].every((k) => k >= 1), 'an agent took the boss seat while main was away')

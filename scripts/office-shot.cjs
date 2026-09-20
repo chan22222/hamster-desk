@@ -96,11 +96,17 @@ app.whenReady().then(async () => {
     await evaluate("Array.from(document.querySelectorAll('.office-controls button')).find(b => b.textContent === '⌂').click()")
     await wait(1800)
     await shot('autoframe-8', 0)
-    await evaluate(`
+    // four hamsters: the main plus the three agents seated nearest the boss — a tight frame
+    const keep = ids => evaluate(`
       const { useDesk } = await import('/store.ts');
       const st = useDesk.getState(), s = st.sessions['studio-preview'];
-      useDesk.setState({ sessions: { ...st.sessions, 'studio-preview': { ...s, hamsters: { main: s.hamsters.main }, order: ['main'] } } });
+      const ids = ${JSON.stringify(ids)};
+      useDesk.setState({ sessions: { ...st.sessions, 'studio-preview': { ...s, hamsters: Object.fromEntries(ids.map(id => [id, s.hamsters[id]])), order: ids } } });
     `)
+    await keep(['main', 'studio-0', 'studio-1', 'studio-2'])
+    await wait(1800)
+    await shot('autoframe-4', 0)
+    await keep(['main'])
     await wait(1800)
     await shot('autoframe-1', 0)
 
