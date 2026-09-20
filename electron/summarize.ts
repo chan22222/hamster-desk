@@ -1,7 +1,9 @@
 import { execFile } from 'node:child_process'
+import { mkdirSync, readFileSync, renameSync, writeFileSync } from 'node:fs'
 import { homedir } from 'node:os'
+import { dirname, join } from 'node:path'
 import { claudeInvocation, cleanEnv, findClaude } from './env'
-import type { BubbleRequest, BubbleResult, BubbleState } from '../shared/events'
+import type { BubbleRequest, BubbleResult, BubbleState, BubbleStats } from '../shared/events'
 
 /**
  * Speech-bubble summaries through the user's own Claude subscription — no API key, no SDK.
@@ -42,6 +44,57 @@ const AVAIL_TTL = 60_000
 const FAIL_LIMIT = 3
 const DISABLE_MS = 5 * 60_000
 const NO_CLAUDE = 'claude 명령을 찾을 수 없어요'
+const STATS_PATH = join(homedir(), '.hamster-desk', 'bubble-stats.json')
+
+// ---- usage counter: what the bubbles have actually cost (measured: ~550 in / ~30 out / $0.0007 a call)
+
+function emptyStats(): BubbleStats {
+  return { calls: 0, inputTokens: 0, outputTokens: 0, costUSD: 0, since: Date.now() }
+}
+
+const num = (v: unknown): number => (typeof v === 'number' && Number.isFinite(v) && v >= 0 ? v : 0)
+
+function loadStats(path: string): BubbleStats {
+  try {
+    const j = JSON.parse(readFileSync(path, 'utf8')) as Record<string, unknown>
+    return {
+      calls: num(j.calls),
+      inputTokens: num(j.inputTokens),
+      outputTokens: num(j.outputTokens),
+      costUSD: num(j.costUSD),
+      since: num(j.since) || Date.now(),
+    }
+  } catch {
+    return emptyStats() // missing or corrupt: start from zero rather than lose the summarizer
+  }
+}
+
+function saveStats(path: string, stats: BubbleStats): void {
+  try {
+    mkdirSync(dirname(path), { recursive: true })
+    const tmp = `${path}.tmp`
+    writeFileSync(tmp, JSON.stringify(stats), 'utf8')
+    renameSync(tmp, path) // atomic: a half-written file would read back as corrupt
+  } catch {
+    /* the counter is a nicety; never fail a summary over it */
+  }
+}
+
+/** Token/cost numbers the CLI reports for one call. */
+export interface BubbleUsage {
+  inputTokens: number
+  outputTokens: number
+  costUSD: number
+}
+
+function readUsage(o: Record<string, unknown>): BubbleUsage {
+  const u = (o.usage ?? {}) as Record<string, unknown>
+  return {
+    inputTokens: num(u.input_tokens) + num(u.cache_creation_input_tokens) + num(u.cache_read_input_tokens),
+    outputTokens: num(u.output_tokens),
+    costUSD: num(o.total_cost_usd),
+  }
+}
 
 export function buildSystemPrompt(lang: string, maxChars: number): string {
   return SYSTEM.split('{lang}').join(lang).split('{maxChars}').join(String(maxChars))
@@ -91,6 +144,8 @@ export interface BubbleOptions {
   concurrency?: number
   timeoutMs?: number
   exec?: BubbleExec
+  /** where the usage counter is kept; tests point this at a temp file */
+  statsPath?: string
 }
 
 interface Job {
@@ -153,6 +208,8 @@ export class BubbleSummarizer {
   private readonly cache = new Map<string, string>()
   private readonly queue: Job[] = []
   private readonly running = new Set<AbortController>()
+  private readonly statsPath: string
+  private stats: BubbleStats
   private avail: { at: number; ok: boolean } | null = null
   private fails = 0
   private disabledUntil: number | null = null
@@ -163,6 +220,8 @@ export class BubbleSummarizer {
     this.timeoutMs = Math.max(1000, opts?.timeoutMs ?? 20_000)
     this.exec = opts?.exec ?? runClaude
     this.injected = opts?.exec != null
+    this.statsPath = opts?.statsPath ?? STATS_PATH
+    this.stats = loadStats(this.statsPath)
   }
 
   state(): BubbleState {
@@ -171,7 +230,14 @@ export class BubbleSummarizer {
       this.disabledUntil = null
       this.fails = 0
     }
-    return { available: ok, reason: ok ? null : NO_CLAUDE, disabledUntil: this.disabledUntil }
+    return { available: ok, reason: ok ? null : NO_CLAUDE, disabledUntil: this.disabledUntil, stats: { ...this.stats } }
+  }
+
+  /** Zero the usage counter (the ⋯ menu's 초기화 button). */
+  reset(): BubbleState {
+    this.stats = emptyStats()
+    saveStats(this.statsPath, this.stats)
+    return this.state()
   }
 
   summarize(req: BubbleRequest): Promise<BubbleResult> {
@@ -214,6 +280,18 @@ export class BubbleSummarizer {
     this.running.clear()
   }
 
+  /** Only calls that really reached Haiku land here — cache hits, superseded and failures do not. */
+  private count(usage: BubbleUsage): void {
+    this.stats = {
+      calls: this.stats.calls + 1,
+      inputTokens: this.stats.inputTokens + usage.inputTokens,
+      outputTokens: this.stats.outputTokens + usage.outputTokens,
+      costUSD: this.stats.costUSD + usage.costUSD,
+      since: this.stats.since,
+    }
+    saveStats(this.statsPath, this.stats)
+  }
+
   private available(): boolean {
     if (this.injected) return true
     const now = Date.now()
@@ -239,7 +317,8 @@ export class BubbleSummarizer {
     }, this.timeoutMs)
     try {
       const stdout = await this.exec(buildSystemPrompt(req.lang, req.maxChars), buildUserPrompt(req.kind, req.text), ctrl.signal)
-      const text = parseResult(stdout, req.maxChars)
+      const { text, usage } = parseResult(stdout, req.maxChars)
+      this.count(usage)
       this.cache.set(job.cacheKey, text)
       while (this.cache.size > CACHE_MAX) this.cache.delete(this.cache.keys().next().value as string)
       this.fails = 0
@@ -259,17 +338,17 @@ export class BubbleSummarizer {
   }
 }
 
-function parseResult(stdout: string, maxChars: number): string {
+function parseResult(stdout: string, maxChars: number): { text: string; usage: BubbleUsage } {
   let j: unknown
   try {
     j = JSON.parse(stdout)
   } catch {
     throw new Error('bad-json')
   }
-  const o = (j ?? {}) as { result?: unknown; is_error?: unknown }
+  const o = (j ?? {}) as Record<string, unknown>
   if (o.is_error === true) throw new Error(typeof o.result === 'string' ? o.result.slice(0, 200) : 'cli-error')
   if (typeof o.result !== 'string') throw new Error('bad-result')
   const text = cleanBubble(o.result, maxChars)
   if (!text) throw new Error('empty')
-  return text
+  return { text, usage: readUsage(o) }
 }

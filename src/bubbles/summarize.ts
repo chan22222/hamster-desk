@@ -2,12 +2,17 @@
 // (which runs the summarizer) may hand back a 40-character version that fits the bubble.
 // Nothing here blocks the UI: a failure simply leaves the raw text in place.
 import { langName } from '../i18n'
+import type { BubbleStats } from '@shared/events'
 
 export interface BubbleAvailability {
   available: boolean
   reason: string | null
   disabledUntil: number | null
+  /** what the summaries have cost so far (main keeps the running total on disk) */
+  stats: BubbleStats
 }
+
+const NO_STATS: BubbleStats = { calls: 0, inputTokens: 0, outputTokens: 0, costUSD: 0, since: 0 }
 
 export interface SummaryRequest {
   /** one lane per hamster: `${sessionId}:${hid}` */
@@ -22,7 +27,7 @@ export interface SummaryRequest {
 
 const DEBOUNCE_MS = 600
 const STATE_TTL_MS = 30_000
-const NO_BRIDGE: BubbleAvailability = { available: false, reason: '데스크톱 앱에서만 쓸 수 있어요.', disabledUntil: null }
+const NO_BRIDGE: BubbleAvailability = { available: false, reason: '데스크톱 앱에서만 쓸 수 있어요.', disabledUntil: null, stats: NO_STATS }
 
 let cached: { state: BubbleAvailability; at: number } | null = null
 let inflight: Promise<BubbleAvailability> | null = null
@@ -40,7 +45,7 @@ export async function bubbleAvailability(force = false): Promise<BubbleAvailabil
     inflight = api
       .state()
       .then((state) => state)
-      .catch((err: unknown) => ({ available: false, reason: String(err), disabledUntil: null }))
+      .catch((err: unknown) => ({ available: false, reason: String(err), disabledUntil: null, stats: NO_STATS }))
       .then((state) => {
         cached = { state, at: Date.now() }
         inflight = null
@@ -48,6 +53,15 @@ export async function bubbleAvailability(force = false): Promise<BubbleAvailabil
       })
   }
   return inflight
+}
+
+/** Zero the usage counter and refresh the cached state, so the menu redraws with 0. */
+export async function resetBubbleStats(): Promise<BubbleAvailability> {
+  const api = window.desk?.bubble
+  if (!api) return NO_BRIDGE
+  const state = await api.resetStats()
+  cached = { state, at: Date.now() }
+  return state
 }
 
 function usable(s: BubbleAvailability): boolean {

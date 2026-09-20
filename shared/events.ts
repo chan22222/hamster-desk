@@ -176,9 +176,21 @@ export interface BubbleResult {
   error: string | null
 }
 
+/** What the bubble summaries have cost so far. Only calls that actually reached Haiku are counted. */
+export interface BubbleStats {
+  calls: number
+  /** input + cache creation + cache read */
+  inputTokens: number
+  outputTokens: number
+  costUSD: number
+  /** unix ms the counter started (or was last reset) */
+  since: number
+}
+
 export interface BubbleState {
   available: boolean
   reason: string | null
   /** unix ms until which the summarizer stays off after repeated failures */
   disabledUntil: number | null
+  stats: BubbleStats
 }

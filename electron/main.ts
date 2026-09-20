@@ -374,6 +374,7 @@ function summarizer(): BubbleSummarizer {
 
 ipcMain.handle('bubble:summarize', (_e, req: BubbleRequest) => summarizer().summarize(req))
 ipcMain.handle('bubble:state', () => summarizer().state())
+ipcMain.handle('bubble:resetStats', () => summarizer().reset())
 
 ipcMain.handle('dialog:pickFolder', async (_e, defaultPath?: string) => {
   if (!win) return null

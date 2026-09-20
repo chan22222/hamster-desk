@@ -47,6 +47,7 @@ export interface DeskBridge {
   bubble: {
     summarize(req: BubbleRequest): Promise<BubbleResult>
     state(): Promise<BubbleState>
+    resetStats(): Promise<BubbleState>
   }
   clipboard: {
     readText(): Promise<string>
@@ -109,6 +110,7 @@ const bridge: DeskBridge = {
   bubble: {
     summarize: (req) => ipcRenderer.invoke('bubble:summarize', req),
     state: () => ipcRenderer.invoke('bubble:state'),
+    resetStats: () => ipcRenderer.invoke('bubble:resetStats'),
   },
   clipboard: {
     readText: () => ipcRenderer.invoke('clipboard:readText'),

@@ -379,6 +379,15 @@ export function DeskStudio({ session, height }: { session: SessionState | null; 
   const [dragging, setDragging] = useState(false)
   const [noGl, setNoGl] = useState(false)
   const dismissBubble = useDesk((s) => s.dismissBubble)
+  // The welcome card can start claude for the user, but only in a terminal this window owns:
+  // an external session's tab has no pty of ours to type into.
+  const activeTab = useDesk((s) => s.activeTab)
+  const workspaces = useDesk((s) => s.workspaces)
+  const welcomePty = workspaces.find((w) => `ws:${w.id}` === activeTab)?.ptyId ?? null
+  const runInShell = (cmd: string): void => {
+    if (welcomePty === null) return
+    window.desk?.pty.input(welcomePty, `${cmd}`)
+  }
   const size = useRef({ w: 800, h: height })
   const sessionRef = useRef(session)
   sessionRef.current = session
@@ -763,7 +772,24 @@ export function DeskStudio({ session, height }: { session: SessionState | null; 
         </div>
         <div className="office-status"><span><i className="status-active" />작업 {active}</span><span><i />휴식 {list.length - active - waiting}</span>{waiting > 0 && <span className="needs-attention"><i />확인 {waiting}</span>}<span className="office-occupancy">{Math.min(list.length, OFFICE.slots.length)} <small>/ {OFFICE.slots.length}</small></span></div>
       </div>
-      {!session && <div className="office-welcome" data-office-ui><span>자리는 준비되어 있어요</span><p>터미널에서 <code>claude</code>를 실행하면<br />햄스터 동료가 출근합니다.</p></div>}
+      {!session && (
+        <div className="office-welcome" data-office-ui>
+          <span>자리는 준비되어 있어요</span>
+          <p>
+            터미널에서 <code>claude</code>를 실행하거나<br />아래 버튼을 누르세요.
+          </p>
+          {welcomePty !== null && (
+            <div className="office-welcome-actions">
+              <button className="owa-run" onClick={() => runInShell('claude')} title="이 터미널에서 claude 시작">
+                claude 실행
+              </button>
+              <button onClick={() => runInShell('claude --continue')} title="이 폴더의 마지막 대화를 이어서 시작">
+                이어서 실행 <code>--continue</code>
+              </button>
+            </div>
+          )}
+        </div>
+      )}
       <div className="office-bottom" data-office-ui>
         <div className="office-follow">
           <span className="office-follow-icon">⌖</span>
