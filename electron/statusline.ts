@@ -15,7 +15,8 @@ import { claudeDir } from './watcher/paths'
  * which the app watches. The script runs asynchronously next to the CLI and never blocks the model.
  */
 
-export const HAMSTER_HOME = join(homedir(), '.hamster-desk')
+// HAMSTER_HOME can be pointed at a temp folder so tests never touch the user's real profile.
+export const HAMSTER_HOME = process.env.HAMSTER_HOME || join(homedir(), '.hamster-desk')
 export const STATUS_DIR = join(HAMSTER_HOME, 'status')
 export const SCRIPT_PATH = join(HAMSTER_HOME, 'statusline.cjs')
 const MARK = 'hamster-desk statusline'

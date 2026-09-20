@@ -74,7 +74,12 @@ npx electron .          # 또는 npm run dev (HMR)
 
 **협업 모드 (상단 `협업 모드 ON/OFF`)**
 - 추론 강도는 사용자가 정한 대로 두고, 역할만 나눈다. **설계 담당** = 지금 쓰는 모델·effort 그대로인 메인 세션(예: Fable 5.1). 사용자와 대화하고 조사·설계·검토·보고를 맡되 `Edit/Write/MultiEdit/NotebookEdit` 가 금지돼 코드를 직접 못 고친다. **구현 담당** = `hd-implementer` 서브에이전트, `model: opus`(별칭이라 항상 최신 Opus), `effort` 는 선택한 값(xhigh / max; ultracode 를 고르면 max + 독립 작업 병렬 처리 지시). 코드 변경은 전부 여기로 위임된다.
-- 구현: Claude Code 의 사용자 에이전트 정의 두 개(`~/.claude/agents/hd-architect.md`, `hd-implementer.md`)와 `settings.json` 의 `agent: "hd-architect"`(메인 세션을 이 에이전트로 실행). 끄면 항목을 되돌리고 파일을 지운다(기존에 다른 agent 설정이 있었으면 복원). 새로 시작하는 `claude` 세션부터 적용되며, 배너에 `@hd-architect` 가 붙는다.
+- 구현: Claude Code 의 사용자 에이전트 정의 두 개(`~/.claude/agents/hd-architect.md`, `hd-implementer.md`) + **이 앱이 여는 터미널에만** 적용되는 `claude` 셸 래퍼(`electron/shell-wrapper.ts`). 배너에 `@hd-architect` 가 붙는다.
+- **적용 범위는 기본이 "이 앱의 터미널만"이다.** 예전에는 `~/.claude/settings.json` 의 `agent` 키를 썼는데, 그건 전역이라 앱 밖에서 띄운 `claude` 까지 전부 hd-architect 로 떴다. 지금은 앱이 셸을 띄울 때 `claude` 함수를 정의해 두고, 그 함수가 **호출될 때마다** `~/.hamster-desk/harness.json` 을 읽어 `on && scope !== 'global'` 이면 `--agent hd-architect` 를 앞에 붙인다. 그래서 앱에서 켜고 끄면 **다음 `claude` 실행부터 바로** 반영되고(터미널 재시작 불필요), 다른 터미널의 claude 는 영향을 받지 않는다.
+  - 주입하지 않는 경우: 하위 명령(`claude update`, `mcp`, `doctor`, `plugin`, `auth`, `config`, `agents`, `install`, `setup-token`, `attach`, `logs`, `stop`, `rm`, `migrate-installer`), 사용자가 이미 `--agent` 를 준 경우, `-p`/`--print`(말풍선 요약기의 호출이 여기 해당). 설정 파일이 없거나 깨졌으면 그대로 실행한다.
+  - 지원 셸: **pwsh.exe / powershell.exe**(함수를 `-NoExit -EncodedCommand` 로 인라인 전달 — 스크립트 파일이 없어 실행 정책을 타지 않고, 프로필도 평소대로 로드된다)와 **bash**(`--rcfile ~/.hamster-desk/shell/claude-wrapper.bash`, 안에서 `~/.bashrc` 를 먼저 읽는다). zsh·fish·cmd 는 래퍼 없이 그냥 뜨고, 그 터미널에서는 협업 모드가 주입되지 않는다.
+  - 팝오버의 `모든 claude 세션` 을 고르면 예전 방식(`settings.json` 의 `agent`)으로 돌아간다. 끄거나 `이 앱의 터미널만` 으로 되돌리면 그 키를 지운다(기존에 다른 agent 설정이 있었으면 복원).
+  - **마이그레이션**: 예전 버전으로 `settings.agent = hd-architect` 가 남아 있던 사용자는 앱을 처음 켤 때 자동으로 `scope: 'app'` 으로 옮겨지고 전역 키가 제거된다(`agent` 외의 설정은 건드리지 않는다).
 - 검증(2026-09-19): "README 끝에 한 줄 추가" 요청에 설계 담당은 읽기만 하고 `Agent(subagent_type: hd-implementer)` 로 명세를 넘겼고, 구현 담당은 `claude-opus-5` 로 실행돼 파일을 고치고 sha256 검증까지 보고했다.
 - 주의: 메인 세션이 에이전트로 돌면 Claude Code 기본 시스템 프롬프트가 에이전트 프롬프트로 **대체**된다. 그래서 설계 담당 프롬프트에 답변 언어·간결성·도구 사용·확인이 필요한 행동 등 기본 규칙을 함께 넣어 두었다(`electron/harness.ts`). `/effort` 로 바꾼 값은 Claude Code 가 그 모델의 기본값(`modelSettings`)에도 저장한다.
 
@@ -86,6 +91,7 @@ npx electron .          # 또는 npm run dev (HMR)
 npm run watch:cli                  # Electron 없이 감시기만: 모든 이벤트를 콘솔에 출력
 npm run replay -- <session.jsonl>  # 지난 세션 → src/dev/replay.json (브라우저 미리보기용)
 npm run typecheck
+npm run smoke:harness            # 협업 모드 상태 모델 + 셸 래퍼(가짜 claude 로 실제 pwsh 실행)
 ```
 
 스모크 테스트(창을 보지 않고 스크린샷만). `HAMSTER_TYPE` 은 첫 셸에 자동 입력할 텍스트(`\r` = Enter, `|` 로 단계 구분, 단계 간격 `HAMSTER_TYPE_DELAY` ms), `HAMSTER_CWD` 는 셸 시작 폴더. 긴 문장은 Claude 입력창이 붙여넣기로 보므로 Enter(`
@@ -111,7 +117,8 @@ electron/summarize.ts   말풍선 요약: headless `claude -p --model haiku` 의
 electron/watcher/       sessions(세션 파일·pty 소유 판별) · project(프로젝트 폴더 재귀 감시) · tail(증분 읽기) · parse(JSONL → 이벤트)
 electron/statusline.ts  상태줄 스크립트 설치/해제, 스냅샷 감시
 electron/version.ts     claude --version / npm 최신 비교
-electron/harness.ts     협업 모드: 에이전트 파일 생성/삭제 + settings.agent
+electron/harness.ts     협업 모드: 에이전트 파일 생성/삭제 + 범위(app/global) 상태·마이그레이션
+electron/shell-wrapper.ts 앱이 띄운 pwsh/bash 에 심는 `claude` 래퍼(--agent 주입 규칙) — 순수 문자열, 셸 없이 테스트 가능
 shared/events.ts        이벤트 타입
 src/store.ts            zustand: 세션·햄스터 상태기계(말풍선 = 한 말 + 하는 일)·작업 공간(터미널 탭)·사용량·버전·설정
 src/App.tsx             상단 바·패널 배치 · src/widgets/ Popover(공용)·사용량·협업·버전·⋯ 메뉴·+ 메뉴

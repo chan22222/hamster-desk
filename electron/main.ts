@@ -6,7 +6,7 @@ import type { BubbleRequest, DeskEvent, FileEntry, RecentProject, StatusSnapshot
 import { spawnPty, PromptDetector, type PtyHandle } from './pty'
 import { StatusWatcher, installStatusLine, uninstallStatusLine, statusLineState } from './statusline'
 import { checkVersion } from './version'
-import { harnessState, enableHarness, disableHarness, readHarnessConfig, type HarnessConfig } from './harness'
+import { harnessState, enableHarness, disableHarness, migrateHarness, readHarnessConfig, saveHarnessConfig, type HarnessConfig } from './harness'
 import { BubbleSummarizer } from './summarize'
 import { claudeDir } from './watcher/paths'
 
@@ -194,16 +194,12 @@ ipcMain.handle('version:check', async (_e, force?: boolean) => {
 })
 
 ipcMain.handle('harness:state', () => harnessState())
-ipcMain.handle('harness:enable', (_e, c: HarnessConfig) => enableHarness({ implEffort: c?.implEffort ?? readHarnessConfig().implEffort }))
-ipcMain.handle('harness:disable', () => disableHarness())
-ipcMain.handle('harness:saveConfig', async (_e, c: HarnessConfig) => {
-  const { writeFileSync, mkdirSync } = await import('node:fs')
-  const { join } = await import('node:path')
-  const { HAMSTER_HOME } = await import('./statusline')
-  mkdirSync(HAMSTER_HOME, { recursive: true })
-  writeFileSync(join(HAMSTER_HOME, 'harness.json'), JSON.stringify(c, null, 2), 'utf8')
-  return harnessState()
+ipcMain.handle('harness:enable', (_e, c: Partial<HarnessConfig>) => {
+  const cur = readHarnessConfig()
+  return enableHarness({ ...cur, implEffort: c?.implEffort ?? cur.implEffort, scope: c?.scope ?? cur.scope })
 })
+ipcMain.handle('harness:disable', () => disableHarness())
+ipcMain.handle('harness:saveConfig', (_e, c: Partial<HarnessConfig>) => saveHarnessConfig(c ?? {}))
 
 // ---- IPC: folder browser
 
@@ -478,6 +474,8 @@ if (gotLock) {
   })
 
   app.whenReady().then(() => {
+    // first run after the update: hand back the global settings.json `agent` key (see harness.ts)
+    if (migrateHarness()) console.log('[harness] moved collaboration mode to this app only')
     createWindow()
     startWatchers()
     scheduleCapture()

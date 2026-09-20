@@ -14,6 +14,7 @@
     "typecheck": "tsc --noEmit -p tsconfig.json",
     "test:office": "tsx --test scripts/office-world.test.ts",
     "smoke:bubble": "tsx scripts/bubble-smoke.ts",
+    "smoke:harness": "tsx scripts/harness-smoke.ts",
     "preview:studio": "vite --config scripts/vite.studio.mjs",
     "test:office:ui": "electron scripts/office-smoke.cjs",
     "shot:studio": "electron scripts/office-shot.cjs",

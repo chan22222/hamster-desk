@@ -78,6 +78,9 @@ button:focus-visible, select:focus-visible, input:focus-visible { outline: 2px s
 .pop-head { font-size: 11px; color: var(--text-3); letter-spacing: 0.04em; }
 .pop-note { margin: 0; font-size: 11px; color: var(--text-3); line-height: 1.6; }
 .pop-sep { height: 1px; background: var(--line); margin: 2px -8px; }
+.pop-scope { display: flex; flex-direction: column; gap: 5px; }
+.pop-scope label { display: flex; align-items: center; gap: 6px; font-size: 11px; color: var(--text-2); cursor: pointer; }
+.pop-scope input { accent-color: var(--green); width: 12px; height: 12px; margin: 0; flex: none; }
 .pop-usage { display: flex; align-items: flex-start; gap: 6px; font-size: 11px; line-height: 1.55; color: var(--text-3); }
 .pop-usage > span { flex: 1; min-width: 0; }
 .pop-usage button { flex: none; padding: 2px 6px; border-radius: var(--radius); border: 1px solid var(--line-strong); color: var(--text-3); font-size: 10px; }

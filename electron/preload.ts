@@ -2,8 +2,12 @@ import { contextBridge, ipcRenderer } from 'electron'
 import type { BubbleRequest, BubbleResult, BubbleState, DeskEvent, DirEntry, FileEntry, PtyInfo, RecentProject, SessionInfo, VersionInfo } from '../shared/events'
 
 export type ImplEffort = 'xhigh' | 'max' | 'ultracode'
+/** 'app' = only terminals this app opens (shell wrapper); 'global' = settings.json, every session. */
+export type HarnessScope = 'app' | 'global'
 export interface HarnessConfig {
   implEffort: ImplEffort
+  scope: HarnessScope
+  on: boolean
 }
 export interface HarnessState {
   on: boolean
@@ -38,9 +42,9 @@ export interface DeskBridge {
   version: { check(force?: boolean): Promise<VersionInfo> }
   harness: {
     state(): Promise<HarnessState>
-    enable(c: HarnessConfig): Promise<HarnessState>
+    enable(c: Partial<HarnessConfig>): Promise<HarnessState>
     disable(): Promise<HarnessState>
-    saveConfig(c: HarnessConfig): Promise<HarnessState>
+    saveConfig(c: Partial<HarnessConfig>): Promise<HarnessState>
   }
   dialog: { pickFolder(defaultPath?: string): Promise<string | null> }
   /** short speech-bubble lines summarized by a headless `claude -p --model haiku` (electron/summarize.ts) */

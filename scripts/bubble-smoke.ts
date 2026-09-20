@@ -204,8 +204,10 @@ async function realCall(): Promise<void> {
   console.log(`  bubble: ${r.text ?? `(null) error=${r.error}`}`)
   console.log(`  took:   ${ms} ms`)
   check(r.error === null && !!r.text, 'real call produced a bubble', r)
-  const after = sessionFiles()
-  check(after.length === before.length, 'no new ~/.claude/sessions/*.json', { before: before.length, after: after.length })
+  // Only *new* files matter: unrelated claude sessions elsewhere may end (and clean up) meanwhile,
+  // so comparing counts would flake.
+  const appeared = sessionFiles().filter((f) => !before.includes(f))
+  check(appeared.length === 0, 'no new ~/.claude/sessions/*.json', appeared)
   const stats = s.state().stats
   console.log(`  usage:  ${stats.inputTokens} in / ${stats.outputTokens} out / $${stats.costUSD.toFixed(4)}`)
   check(stats.calls === 1 && stats.inputTokens > 0, 'the real call was counted', stats)

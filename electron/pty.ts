@@ -1,8 +1,11 @@
 import * as pty from 'node-pty'
 import { execFileSync } from 'node:child_process'
-import { existsSync } from 'node:fs'
+import { existsSync, mkdirSync, writeFileSync } from 'node:fs'
 import { homedir } from 'node:os'
+import { basename, join } from 'node:path'
 import { cleanEnv, findOnPath } from './env'
+import { bashWrapperScript, encodeForPowerShell, psWrapperScript } from './shell-wrapper'
+import { HAMSTER_HOME } from './statusline'
 import type { PtyInfo } from '../shared/events'
 
 // cleanEnv/findOnPath live in ./env so modules that must not load node-pty (the bubble summarizer,
@@ -24,6 +27,32 @@ export function defaultShell(): string {
 
 let nextId = 1
 
+export const HARNESS_FILE = join(HAMSTER_HOME, 'harness.json')
+const BASH_RC = join(HAMSTER_HOME, 'shell', 'claude-wrapper.bash')
+
+/**
+ * Arguments that make the shell define our `claude` wrapper (see electron/shell-wrapper.ts).
+ * PowerShell gets the function inline via -EncodedCommand (no script file, no execution policy) and
+ * -NoExit to stay interactive; bash gets an rc file that sources ~/.bashrc first. Any other shell
+ * (zsh, fish, cmd) is started unchanged — collaboration mode then simply does not inject.
+ */
+export function shellArgs(shell: string): string[] {
+  const name = basename(shell).toLowerCase()
+  if (name === 'pwsh.exe' || name === 'powershell.exe' || name === 'pwsh' || name === 'powershell') {
+    return ['-NoExit', '-EncodedCommand', encodeForPowerShell(psWrapperScript())]
+  }
+  if (name === 'bash' || name === 'bash.exe') {
+    try {
+      mkdirSync(join(HAMSTER_HOME, 'shell'), { recursive: true })
+      writeFileSync(BASH_RC, bashWrapperScript(), 'utf8')
+      return ['--rcfile', BASH_RC]
+    } catch {
+      return [] // could not write the rc file: plain shell, no injection
+    }
+  }
+  return []
+}
+
 /**
  * Spawns the user's shell under a pseudo terminal (ConPTY on Windows). The user runs `claude` in it
  * exactly as they would in Windows Terminal; nothing sits between the CLI and the API.
@@ -40,8 +69,10 @@ export function spawnPty(
   env.TERM = 'xterm-256color'
   env.COLORTERM = 'truecolor'
   env.HAMSTER_DESK = '1'
+  // the wrapper re-reads this file on every `claude`, so the collaboration switch applies at once
+  env.HAMSTER_HARNESS_FILE = HARNESS_FILE
   const dir = cwd && existsSync(cwd) ? cwd : homedir()
-  const proc = pty.spawn(shell, [], {
+  const proc = pty.spawn(shell, shellArgs(shell), {
     name: 'xterm-256color',
     cols: Math.max(2, cols),
     rows: Math.max(1, rows),
