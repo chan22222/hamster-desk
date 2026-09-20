@@ -127,7 +127,7 @@ export interface PtyInfo {
 }
 
 
-// ---- folder browser / recent projects (electron/main.ts fs:* and projects:recent)
+// ---- folder browser (electron/main.ts fs:*)
 
 export interface DirEntry {
   name: string
@@ -144,16 +144,6 @@ export interface FileEntry {
   mtime: number
   /** lowercase extension without the dot ('' when none) */
   ext: string
-}
-
-/** Derived from ~/.claude/history.jsonl — only `project` and `timestamp`; prompt text never leaves main. */
-export interface RecentProject {
-  path: string
-  lastActiveAt: number
-  prompts: number
-  git: boolean
-  claude: boolean
-  exists: boolean
 }
 
 // ---- speech bubble summaries (electron/summarize.ts)
@@ -194,3 +184,8 @@ export interface BubbleState {
   disabledUntil: number | null
   stats: BubbleStats
 }
+
+// ---- UI settings persisted outside the Electron profile (electron/ui-store.ts, ~/.hamster-desk/ui.json)
+
+/** Whatever the renderer wants remembered (language, open panels, …); shallow-merged, JSON only. */
+export type UiState = Record<string, unknown>

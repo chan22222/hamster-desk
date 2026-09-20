@@ -2,9 +2,10 @@ import { app, BrowserWindow, clipboard, dialog, ipcMain, shell } from 'electron'
 import { readFileSync } from 'node:fs'
 import { join } from 'node:path'
 import { DeskWatcher } from './watcher'
-import type { BubbleRequest, DeskEvent, FileEntry, RecentProject, StatusSnapshot } from '../shared/events'
+import type { BubbleRequest, DeskEvent, FileEntry, StatusSnapshot, UiState } from '../shared/events'
 import { spawnPty, PromptDetector, type PtyHandle } from './pty'
 import { StatusWatcher, installStatusLine, uninstallStatusLine, statusLineState } from './statusline'
+import { flushUi, loadUi, saveUi, uiPath } from './ui-store'
 import { checkVersion } from './version'
 import { BubbleSummarizer } from './summarize'
 import { cleanupLegacyHarness } from './legacy'
@@ -261,6 +262,22 @@ ipcMain.handle('fs:list', async (_e, p: string) => {
   }
 })
 
+/** Which of these folders are still there — the recent list greys out the ones that are gone. */
+ipcMain.handle('fs:exists', async (_e, paths: unknown) => {
+  const { existsSync } = await import('node:fs')
+  const out: Record<string, boolean> = {}
+  if (!Array.isArray(paths)) return out
+  for (const p of paths.slice(0, 200)) {
+    if (typeof p !== 'string' || !p) continue
+    try {
+      out[p] = existsSync(p)
+    } catch {
+      out[p] = false
+    }
+  }
+  return out
+})
+
 ipcMain.handle('fs:openPath', (_e, p: string) => shell.openPath(String(p || '')))
 ipcMain.on('fs:showInFolder', (_e, p: string) => shell.showItemInFolder(String(p || '')))
 
@@ -273,79 +290,6 @@ ipcMain.handle('fs:drives', async () => {
     if (existsSync(d)) out.push(d)
   }
   return out
-})
-
-// ---- IPC: recent projects
-//
-// Claude Code appends one line per prompt to ~/.claude/history.jsonl:
-//   { display, pastedContents, timestamp, project, sessionId }
-// The file grows to several MB, so only the last 2 MB are read (the tail is the recent part) and
-// only `project` + `timestamp` are kept. `display`/`pastedContents` are the user's own prompt text
-// and never leave the main process.
-
-const HISTORY_TAIL = 2 * 1024 * 1024
-let recentCache: { mtime: number; size: number; list: RecentProject[] } | null = null
-
-async function readRecentProjects(): Promise<RecentProject[]> {
-  const { promises: fsp, existsSync } = await import('node:fs')
-  const { join } = await import('node:path')
-  const file = join(claudeDir(), 'history.jsonl')
-  let fh: Awaited<ReturnType<typeof fsp.open>> | null = null
-  let text = ''
-  let mtime = 0
-  let size = 0
-  try {
-    fh = await fsp.open(file, 'r')
-    const st = await fh.stat()
-    mtime = st.mtimeMs
-    size = st.size
-    if (recentCache && recentCache.mtime === mtime && recentCache.size === size) return recentCache.list
-    const len = Math.min(size, HISTORY_TAIL)
-    const buf = Buffer.alloc(len)
-    await fh.read(buf, 0, len, size - len)
-    text = buf.toString('utf8')
-  } catch {
-    return []
-  } finally {
-    await fh?.close().catch(() => {})
-  }
-
-  const agg = new Map<string, { path: string; lastActiveAt: number; prompts: number }>()
-  for (const line of text.split('\n')) {
-    if (!line.trim()) continue
-    let rec: { project?: unknown; timestamp?: unknown }
-    try {
-      rec = JSON.parse(line) as { project?: unknown; timestamp?: unknown } // the first line is usually cut in half
-    } catch {
-      continue
-    }
-    if (typeof rec.project !== 'string' || !rec.project) continue
-    const ts = typeof rec.timestamp === 'number' && Number.isFinite(rec.timestamp) ? rec.timestamp : 0
-    const key = rec.project.toLowerCase()
-    const cur = agg.get(key)
-    if (cur) {
-      cur.prompts++
-      if (ts > cur.lastActiveAt) cur.lastActiveAt = ts
-    } else {
-      agg.set(key, { path: rec.project, lastActiveAt: ts, prompts: 1 })
-    }
-  }
-
-  const list = [...agg.values()]
-    .sort((a, b) => b.lastActiveAt - a.lastActiveAt)
-    .map((p) => ({
-      ...p,
-      exists: existsSync(p.path),
-      git: existsSync(join(p.path, '.git')),
-      claude: existsSync(join(p.path, 'CLAUDE.md')) || existsSync(join(p.path, '.claude')),
-    }))
-  recentCache = { mtime, size, list }
-  return list
-}
-
-ipcMain.handle('projects:recent', async (_e, limit?: number) => {
-  const n = Number.isFinite(limit) ? Math.max(1, Math.min(200, Number(limit))) : 30
-  return (await readRecentProjects()).slice(0, n)
 })
 
 // ---- IPC: clipboard (the preload runs sandboxed and cannot reach the clipboard itself)
@@ -363,6 +307,11 @@ function summarizer(): BubbleSummarizer {
 ipcMain.handle('bubble:summarize', (_e, req: BubbleRequest) => summarizer().summarize(req))
 ipcMain.handle('bubble:state', () => summarizer().state())
 ipcMain.handle('bubble:resetStats', () => summarizer().reset())
+
+// ---- IPC: UI settings (~/.hamster-desk/ui.json — outside the per-run-mode Electron profile)
+
+ipcMain.handle('ui:load', () => loadUi())
+ipcMain.handle('ui:save', (_e, patch: UiState) => saveUi(patch))
 
 ipcMain.handle('dialog:pickFolder', async (_e, defaultPath?: string) => {
   if (!win) return null
@@ -403,6 +352,7 @@ ipcMain.handle('app:info', () => {
     home: app.getPath('home'),
     debugPrefs,
     claudeLanguage: claudeLanguage(),
+    uiPath: uiPath(),
   }
 })
 
@@ -443,6 +393,7 @@ let shuttingDown = false
 function shutdown(): void {
   if (shuttingDown) return
   shuttingDown = true
+  flushUi() // a setting changed in the last 300 ms is still only in memory
   for (const p of ptys.values()) p.kill()
   ptys.clear()
   watcher?.stop()

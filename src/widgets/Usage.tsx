@@ -26,6 +26,17 @@ function remaining(ms: number | null): string {
   return h ? `${h}시간 ${m}분` : `${m}분`
 }
 
+/** The chip version: one unit past a day, two below it — it has to fit next to the percentage. */
+function countdown(ms: number | null): string {
+  if (!ms) return ''
+  const diff = ms - Date.now()
+  if (diff <= 0) return '곧'
+  const h = Math.floor(diff / 3600000)
+  if (h >= 24) return `${Math.floor(h / 24)}일`
+  const m = Math.floor((diff % 3600000) / 60000)
+  return h ? `${h}시간 ${m}분` : `${m}분`
+}
+
 /** three steps, and the same class goes on the percentage — colour is never the only cue */
 const step = (pct: number): string => (pct >= 90 ? 'is-hot' : pct >= 70 ? 'is-warm' : 'is-ok')
 const clamp = (w: RateWindow): number => Math.max(0, Math.min(100, w.usedPercentage))
@@ -80,8 +91,9 @@ function Chip({ row, rows, extra, onUninstall }: { row: WindowRow; rows: WindowR
       <span className="um-label">{row.short}</span>
       <Meter pct={pct} />
       <span className={`um-pct ${step(pct)}`}>{pct.toFixed(0)}%</span>
-      {/* only when it is nearly spent is the reset time worth the width */}
-      {pct >= 90 && reset && <span className="um-reset">{reset}</span>}
+      {/* "얼마나 썼나" 만큼이나 "언제 다시 차나" 가 궁금한 숫자라, 남은 시간은 늘 붙어 있다.
+          초기화 *시각* 은 title 과 팝오버에 있다. 좁은 창에서는 이 조각이 가장 먼저 접힌다. */}
+      {row.w.resetsAt && <span className="um-reset">· {countdown(row.w.resetsAt)}</span>}
     </>
   )
   return (

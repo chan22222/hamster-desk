@@ -2,7 +2,7 @@ import { test } from 'node:test'
 import assert from 'node:assert/strict'
 import * as THREE from 'three'
 import { H_OFFICE, OFFICE, advanceWalker, makeWalker, reconcileSeats, tileToWorld, walkTo } from '../src/desk/office-world'
-import { FRAME_MAX_SCALE, FRAME_MIN_SCALE, createCamera, focusCamera, frameCamera, groundHit, overviewCamera, worldToScreen, zoomCamera } from '../src/desk/office-camera'
+import { FEED_LINE_PX, FRAME_MAX_SCALE, FRAME_MIN_SCALE, createCamera, feedLines, focusCamera, frameCamera, frameHeadPad, groundHit, overviewCamera, worldToScreen, zoomCamera } from '../src/desk/office-camera'
 import { buildHamster } from '../src/desk/vox/hamster'
 import { voxMaterial } from '../src/desk/vox/material'
 import { buildStudioWorld, COLS, ROWS } from '../src/desk/vox/world'
@@ -114,29 +114,94 @@ test('independent session maps never confuse their shared main hamster id', () =
   assert.notEqual(a.get('alice'), b.get('alice'))
 })
 
-test('auto framing: one hamster gets the full 250% desk view, a full room stays in frame or at the floor scale', () => {
-  const pad = 80
-  const boundsOf = (pts: { x: number; z: number }[]) => ({
-    minX: Math.min(...pts.map((p) => p.x)) - pad, maxX: Math.max(...pts.map((p) => p.x)) + pad,
-    minZ: Math.min(...pts.map((p) => p.z)) - pad, maxZ: Math.max(...pts.map((p) => p.z)) + pad,
+/** DeskStudio pads each hamster by this much before framing, and the controls bar owns the bottom */
+const FRAME_PAD = 44
+const BOTTOM_PAD = 44
+const clampScale = (v: number) => Math.max(FRAME_MIN_SCALE, Math.min(FRAME_MAX_SCALE, v))
+type Box = { minX: number; maxX: number; minZ: number; maxZ: number }
+const boundsOf = (pts: { x: number; z: number }[]): Box => ({
+  minX: Math.min(...pts.map((p) => p.x)) - FRAME_PAD, maxX: Math.max(...pts.map((p) => p.x)) + FRAME_PAD,
+  minZ: Math.min(...pts.map((p) => p.z)) - FRAME_PAD, maxZ: Math.max(...pts.map((p) => p.z)) + FRAME_PAD,
+})
+const seatPoints = (slots: readonly number[]) =>
+  slots.flatMap((k) => {
+    const s = OFFICE.slots[k].seat
+    return [tileToWorld(s.i, s.j), tileToWorld(s.i, s.j + 1)]
   })
+const cornersOf = (b: Box) => [[b.minX, b.minZ], [b.maxX, b.minZ], [b.maxX, b.maxZ], [b.minX, b.maxZ]] as const
+/** the zoom the first pass settles on: the bounds fitted into the whole frame, no strip reserved */
+const firstPass = (b: Box, w: number, h: number): number => {
+  const probe = createCamera()
+  overviewCamera(probe, b, w, h, 0, BOTTOM_PAD)
+  return clampScale(probe.scale)
+}
+/**
+ * How much sky the framing actually left, read back off the result. `frameCamera` centres the
+ * bounds in the band below the strip, so the centre lands at `(top + h - BOTTOM_PAD) / 2` — which
+ * inverts exactly. Measuring it this way means the test never has to trust the implementation.
+ */
+const reservedPixels = (c: ReturnType<typeof createCamera>, b: Box, w: number, h: number): number => {
+  const p = worldToScreen(c, { x: (b.minX + b.maxX) / 2, y: H_OFFICE, z: (b.minZ + b.maxZ) / 2 }, w, h)
+  return 2 * p.y - h + BOTTOM_PAD
+}
+
+/**
+ * The contract between the two halves of the feature: the sky a framing reserves is exactly the
+ * sky the rows it draws will use — and when it reserves none, it is because it kept the closer
+ * first pass rather than because it forgot.
+ */
+const assertStrip = (c: ReturnType<typeof createCamera>, b: Box, w: number, h: number, label: string): void => {
+  const reserved = reservedPixels(c, b, w, h)
+  const s0 = firstPass(b, w, h)
+  if (reserved > 1) {
+    assert.ok(feedLines(c.scale) > 0, `${label}: reserved ${reserved}px of sky for a feed that is never drawn`)
+    assert.ok(
+      Math.abs(reserved - frameHeadPad(h, feedLines(s0))) < 2,
+      `${label}: a ${reserved}px strip for the ${feedLines(s0)} rows the first pass promised (${frameHeadPad(h, feedLines(s0))}px)`,
+    )
+  } else {
+    assert.ok(Math.abs(c.scale - s0) < 1e-9, `${label}: no strip reserved, so the framing must keep the first pass (${c.scale} vs ${s0})`)
+  }
+}
+
+test('auto framing: one hamster gets the close-up desk view, a full room stays in frame or at the floor scale, and the feed gets its strip of sky', () => {
+  assert.equal(FRAME_MAX_SCALE, 3.4)
+  assert.equal(FRAME_MIN_SCALE, 0.75)
+  assert.equal(FEED_LINE_PX, 26)
   for (const [w, h] of [[900, 420], [1280, 700], [420, 220]]) {
-    // one hamster at the boss's desk: never closer than the manual focus, centred on it
+    // one hamster at the boss's desk: never closer than the close-up cap, centred below the strip
     const one = createCamera()
     const seat = tileToWorld(OFFICE.slots[0].seat.i, OFFICE.slots[0].seat.j)
-    frameCamera(one, boundsOf([seat, { x: seat.x, z: seat.z + 64 }]), w, h)
-    // (a 420x220 viewport is too small even for one desk at 250%, so only the real sizes must clamp)
+    const oneBounds = boundsOf([seat, { x: seat.x, z: seat.z + 64 }])
+    const oneS0 = firstPass(oneBounds, w, h)
+    frameCamera(one, oneBounds, w, h)
+    // a close-up carries the whole stack, so this is the widest strip the framing ever reserves
+    assert.equal(feedLines(oneS0), 4, `one hamster should carry four feed rows, got ${feedLines(oneS0)} at ${oneS0}`)
+    const pad = frameHeadPad(h, 4)
+    if (h >= 700) assert.equal(pad, 4 * FEED_LINE_PX + 10, 'a tall viewport fits the full four-row strip')
+    // (a 420x220 viewport cannot hold even one desk at 340%, so only the real sizes must clamp)
     if (h >= 400) assert.equal(one.scale, FRAME_MAX_SCALE, `one hamster should sit at the max scale, got ${one.scale}`)
-    else assert.ok(one.scale > 2 && one.scale <= FRAME_MAX_SCALE, `one hamster in a tiny viewport: ${one.scale}`)
-    assert.equal(FRAME_MAX_SCALE, 2.5)
-    const p = worldToScreen(one, { x: seat.x, y: H_OFFICE, z: seat.z + 32 }, w, h)
-    assert.ok(Math.abs(p.x - w / 2) < w * 0.03 && Math.abs(p.y - (h / 2 + 10)) < h * 0.03, `off centre: ${p.x},${p.y}`)
+    else assert.ok(one.scale > FRAME_MIN_SCALE && one.scale <= FRAME_MAX_SCALE, `one hamster in a tiny viewport: ${one.scale}`)
+    const midY = pad + (h - pad - BOTTOM_PAD) / 2
+    const centre = { x: (oneBounds.minX + oneBounds.maxX) / 2, y: H_OFFICE, z: (oneBounds.minZ + oneBounds.maxZ) / 2 }
+    const p = worldToScreen(one, centre, w, h)
+    assert.ok(Math.abs(p.x - w / 2) < w * 0.03 && Math.abs(p.y - midY) < h * 0.03, `off centre: ${p.x},${p.y} (wanted ${w / 2},${midY})`)
+    // the strip is what pushes the subject down; in a viewport so short that it ends up smaller
+    // than the controls bar at the bottom, the centre is simply the centre
+    if (pad > BOTTOM_PAD) assert.ok(p.y > h / 2, `the framed subject must sit below the middle of the screen, got ${p.y} of ${h}`)
+    else assert.ok(p.y >= h / 2 - 6, `even without a usable strip the subject must stay centred, got ${p.y} of ${h}`)
     assert.equal(one.initialized, true)
+    // nothing of the subject reaches into the strip: that is where the bubbles stack
+    for (const [x, z] of cornersOf(oneBounds)) {
+      const sp = worldToScreen(one, { x, y: H_OFFICE, z }, w, h)
+      assert.ok(sp.behind || sp.y >= pad, `a corner projected ${sp.y}px down, inside the ${pad}px strip`)
+    }
 
     // every seat taken: either every point is on screen, or the camera stopped at the floor scale
     const all = createCamera()
-    const pts = OFFICE.slots.flatMap((s) => [tileToWorld(s.seat.i, s.seat.j), tileToWorld(s.seat.i, s.seat.j + 1)])
-    frameCamera(all, boundsOf(pts), w, h)
+    const pts = seatPoints(OFFICE.slots.map((_, k) => k))
+    const allBounds = boundsOf(pts)
+    frameCamera(all, allBounds, w, h)
     assert.ok(all.scale >= FRAME_MIN_SCALE && all.scale <= FRAME_MAX_SCALE, `scale out of range: ${all.scale}`)
     assert.ok(all.scale < one.scale, 'a full room must zoom out from the single-hamster view')
     const inside = pts.every((q) => {
@@ -144,8 +209,68 @@ test('auto framing: one hamster gets the full 250% desk view, a full room stays 
       return !sp.behind && sp.x >= 0 && sp.x <= w && sp.y >= 0 && sp.y <= h
     })
     assert.ok(inside || all.scale === FRAME_MIN_SCALE, `hamsters cut off at scale ${all.scale} in ${w}x${h}`)
-    if (w === 1280) assert.ok(inside, 'the wide viewport must hold the whole room')
+    // and it reserves exactly as much sky as the rows it will actually draw, no more
+    assertStrip(all, allBounds, w, h, `full room in ${w}x${h}`)
   }
+})
+
+test('auto framing: every zoom bucket reserves exactly its own rows worth of sky', () => {
+  const seat = tileToWorld(OFFICE.slots[0].seat.i, OFFICE.slots[0].seat.j)
+  const square = (r: number): Box => ({ minX: seat.x - r, maxX: seat.x + r, minZ: seat.z - r, maxZ: seat.z + r })
+  assert.deepEqual([3.4, 2.2, 1.9, 1.5, 1.4, 1.1, 0.9, 0.8, 0.79, 0.2].map(feedLines), [4, 4, 3, 3, 2, 2, 1, 1, 0, 0])
+  for (const [w, h] of [[900, 420], [1280, 700]]) {
+    // the subject only ever gets bigger, so the first-pass zoom only ever falls: bisect for the
+    // size that lands each bucket, then check what the framing actually left clear
+    const radiusFor = (target: number): number => {
+      let lo = 1, hi = 8000
+      for (let k = 0; k < 50; k++) {
+        const mid = (lo + hi) / 2
+        if (firstPass(square(mid), w, h) >= target) lo = mid
+        else hi = mid
+      }
+      return lo
+    }
+    for (const [target, expected] of [[2.6, 4], [1.8, 3], [1.3, 2], [0.9, 1]] as const) {
+      const bounds = square(radiusFor(target))
+      const s0 = firstPass(bounds, w, h)
+      assert.equal(feedLines(s0), expected, `${target} should be a ${expected}-row bucket, got ${feedLines(s0)} at ${s0}`)
+      const c = createCamera()
+      frameCamera(c, bounds, w, h)
+      assertStrip(c, bounds, w, h, `the ${expected}-row bucket in ${w}x${h}`)
+      // a bucket with room to spare keeps its strip outright
+      if (expected >= 2) {
+        const want = frameHeadPad(h, expected)
+        const got = reservedPixels(c, bounds, w, h)
+        assert.ok(Math.abs(got - want) < 2, `${expected} rows should reserve ${want}px, got ${got}`)
+      }
+      for (const [x, z] of cornersOf(bounds)) {
+        const sp = worldToScreen(c, { x, y: H_OFFICE, z }, w, h)
+        assert.equal(sp.behind, false, `corner behind the camera in the ${expected}-row bucket`)
+        assert.ok(sp.x >= 0 && sp.x <= w && sp.y >= 0 && sp.y <= h, `corner off screen in the ${expected}-row bucket: ${sp.x},${sp.y}`)
+      }
+    }
+    // far enough out that no bubble is drawn: no strip at all, and no zoom paid for one
+    const wide = square(8000)
+    const zero = createCamera()
+    frameCamera(zero, wide, w, h)
+    assert.equal(feedLines(firstPass(wide, w, h)), 0)
+    assert.equal(frameHeadPad(h, 0), 0)
+    assert.ok(Math.abs(reservedPixels(zero, wide, w, h)) < 2, 'a framing with no feed must reserve nothing')
+    assert.equal(zero.scale, firstPass(wide, w, h), 'a framing with no feed must keep the first pass')
+  }
+})
+
+test('auto framing: a handful of colleagues is framed closer than it used to be, and still shows two feed rows', () => {
+  // the real desk: the boss plus the three seats nearest to it — the `shot-autoframe-4` scene
+  const w = 1280, h = 520
+  const bounds = boundsOf(seatPoints([0, 1, 2, 3]))
+  const four = createCamera()
+  frameCamera(four, bounds, w, h)
+  // it used to sit at 1.04 (pad 80 around each hamster, a flat 56px top pad, cap 2.5)
+  assert.ok(four.scale > 1.1, `four hamsters should be framed well inside the old 1.04, got ${four.scale}`)
+  // and the point of all of it: the bubbles are actually on screen there
+  assert.ok(feedLines(four.scale) >= 2, `four hamsters must carry at least two feed rows, got ${feedLines(four.scale)} at ${four.scale}`)
+  assertStrip(four, bounds, w, h, 'four hamsters on the real desk')
 })
 
 test('zoom keeps the ground point under the cursor exactly where it was', () => {

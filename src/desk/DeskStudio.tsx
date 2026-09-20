@@ -1,9 +1,9 @@
 import { useEffect, useRef, useState } from 'react'
 import * as THREE from 'three'
-import { useDesk, type Hamster, type HamsterState, type SessionState } from '../store'
+import { feedLife, setFeedLife, useDesk, type Hamster, type HamsterState, type SessionState } from '../store'
 import { animFor, screenColor, statusDot, tintFor, type IsoAnim } from './anim'
 import { modelSkin } from './skins'
-import { IconCheck, IconHome, IconMap, IconMinus, IconPlus, IconTarget } from '../widgets/icons'
+import { IconHome, IconMap, IconMinus, IconPlus, IconTarget } from '../widgets/icons'
 import {
   OFFICE,
   H_OFFICE,
@@ -17,11 +17,13 @@ import {
 import {
   applyTo,
   createCamera,
+  feedLines,
   focusCamera,
   frameCamera,
   orbitCamera,
   overviewCamera,
   panCamera,
+  PLATE_MIN_SCALE,
   viewportGroundPolygon,
   worldToScreen,
   zoomCamera,
@@ -42,8 +44,13 @@ const GLYPH: Partial<Record<IsoAnim, string>> = { think: '···', wave: '!', sl
 const SEAT_TOP = 18
 const FOG = 0xcfe3f2
 /** auto-framing: room around each hamster, and how fast the camera eases towards its target */
-const FRAME_PAD = 80
+const FRAME_PAD = 44
 const FRAME_EASE = 6
+/** a lone seated hamster: closer than a manual focus, and pushed down to clear the feed */
+const SOLO_SCALE = 3.0
+const SOLO_DY = 40
+/** a feed row fades out over its last `FEED_FADE` ms (or half its life, whichever is shorter) */
+const FEED_FADE = 600
 
 /** Camera scripting for the capture script, only wired up in the `?studio-demo` preview. */
 export interface StudioDebug {
@@ -54,6 +61,10 @@ export interface StudioDebug {
   addArriving(id: string, model: string, agentType: string): void
   /** the hamster says a sentence, exactly as a `text` transcript event would make it */
   say(id: string, text: string): void
+  /** the hamster does something, exactly as a `tool` transcript event would make it */
+  act(id: string, label: string): void
+  /** shorten the feed's life spans so a capture does not have to wait nine seconds */
+  feedLife(p: { act?: number; say?: number; warn?: number }): void
   /** turn the automatic framing on or off (the `자동` button) */
   autoFrame(on: boolean): void
 }
@@ -87,7 +98,16 @@ interface Scene {
   width: number
   height: number
 }
-const makeScene = (): Scene => ({ seats: new Map(), walkers: new Map(), camera: createCamera(), rigs: new Map(), auto: { on: true, key: '', target: null }, width: 0, height: 0 })
+const makeScene = (): Scene => ({
+  seats: new Map(),
+  walkers: new Map(),
+  camera: createCamera(),
+  rigs: new Map(),
+  // a scene that has never been opened starts with whatever the saved preference says
+  auto: { on: useDesk.getState().prefs.autoCam, key: '', target: null },
+  width: 0,
+  height: 0,
+})
 // Folding the desk unmounts this component. Keep each session's world across that toggle too.
 const scenes = new Map<string, Scene>()
 
@@ -391,7 +411,7 @@ function poseRig(st: RigState, anim: IsoAnim, seated: boolean, t: number): void 
 export function DeskStudio({ session, height }: { session: SessionState | null; height: number }) {
   const wrapRef = useRef<HTMLDivElement>(null)
   const canvasHost = useRef<HTMLDivElement>(null)
-  const tags = useRef(new Map<string, HTMLDivElement>())
+  const feeds = useRef(new Map<string, HTMLDivElement>())
   const plates = useRef(new Map<string, HTMLDivElement>())
   const glyphs = useRef(new Map<string, HTMLDivElement>())
   const viewportPolygon = useRef<SVGPolygonElement>(null)
@@ -402,16 +422,17 @@ export function DeskStudio({ session, height }: { session: SessionState | null; 
   const [noGl, setNoGl] = useState(false)
   // Automatic framing keeps every present hamster in view. Any manual gesture switches it off;
   // ⌂ switches it back on. The scene holds the truth (the render loop reads it); this state only
-  // draws the button.
-  const [autoFrame, setAutoFrameState] = useState(true)
+  // draws the button, and the preference remembers the answer across restarts.
+  const [autoFrame, setAutoFrameState] = useState(useDesk.getState().prefs.autoCam)
   const setAuto = (on: boolean): void => {
     sceneFor().auto.on = on
     setAutoFrameState(on)
+    if (useDesk.getState().prefs.autoCam !== on) useDesk.getState().setPrefs({ autoCam: on })
   }
   const manual = (): void => { if (sceneFor().auto.on) setAuto(false) }
   /** DOM nodes the render loop has already hidden once, so a re-render does not blank them again */
   const primed = useRef(new WeakSet<HTMLElement>())
-  const dismissBubble = useDesk((s) => s.dismissBubble)
+  const dismissFeedItem = useDesk((s) => s.dismissFeedItem)
   // The welcome card can start claude for the user, but only in a terminal this window owns:
   // an external session's tab has no pty of ours to type into.
   const activeTab = useDesk((s) => s.activeTab)
@@ -518,6 +539,19 @@ export function DeskStudio({ session, height }: { session: SessionState | null; 
         const sid = sessionId()
         if (!sid) return
         useDesk.getState().apply({ kind: 'text', sessionId: sid, agentId: id === 'main' ? null : id, text, ts: Date.now() })
+      },
+      act(id, label) {
+        const sid = sessionId()
+        if (!sid) return
+        const ts = Date.now()
+        const agentId = id === 'main' ? null : id
+        const toolUseId = `dbg-${ts}-${Math.random().toString(36).slice(2, 7)}`
+        const apply = useDesk.getState().apply
+        apply({ kind: 'tool', sessionId: sid, agentId, toolUseId, name: 'Bash', action: 'run', label, file: null, ts })
+        apply({ kind: 'tool_done', sessionId: sid, agentId, toolUseId, ok: true, ts })
+      },
+      feedLife(p) {
+        setFeedLife(p)
       },
       autoFrame(on) {
         if (on) home()
@@ -679,15 +713,15 @@ export function DeskStudio({ session, height }: { session: SessionState | null; 
       seen.add(h.id)
       const index = world.seats.get(h.id)
       const plate = plates.current.get(h.id)
-      const bubble = tags.current.get(h.id)
+      const feed = feeds.current.get(h.id)
       const glyph = glyphs.current.get(h.id)
       if (index === undefined) {
         const idle = world.rigs.get(h.id)
         if (idle) idle.rig.group.visible = false
         if (plate) plate.style.display = 'none'
-        if (bubble) {
-          bubble.style.opacity = '0'
-          bubble.style.pointerEvents = 'none'
+        if (feed) {
+          feed.style.opacity = '0'
+          feed.style.visibility = 'hidden'
         }
         if (glyph) glyph.style.display = 'none'
         return
@@ -740,7 +774,7 @@ export function DeskStudio({ session, height }: { session: SessionState | null; 
         : { x: pos.x, y: groundY + 4, z: pos.z }
       if (plate) {
         const p = worldToScreen(c, plateWorld, W, H)
-        const show = scale >= 1.25 && !p.behind && p.x > -60 && p.x < W + 60 && p.y > -20 && p.y < H + 20
+        const show = scale >= PLATE_MIN_SCALE && !p.behind && p.x > -60 && p.x < W + 60 && p.y > -20 && p.y < H + 20
         plate.style.display = show ? '' : 'none'
         if (show) plate.style.transform = `translate(${Math.round(p.x)}px, ${Math.round(p.y)}px) translate(-50%, 0)`
       }
@@ -756,14 +790,38 @@ export function DeskStudio({ session, height }: { session: SessionState | null; 
           glyph.style.transform = `translate(${Math.round(p.x)}px, ${Math.round(p.y - (Math.floor(t / 600) % 2) * 3)}px) translate(-50%, -100%)`
         }
       }
-      if (bubble) {
-        // A bubble stays until it is ticked off or replaced, so there is no fade on a timer here.
+      if (feed) {
+        // how many rows this zoom carries — the same answer the automatic framing reserved sky for
+        const lines = feedLines(scale)
         const p = worldToScreen(c, { x: pos.x, y: headTop + 20, z: pos.z }, W, H)
-        const show = scale >= 1.5 && !p.behind && p.x > 70 && p.x < W - 70 && p.y > 40 && p.y < H + 70
-        bubble.style.opacity = show ? '1' : '0'
-        // only a speech bubble is clickable; a bare activity chip stays out of the way
-        bubble.style.pointerEvents = show && bubble.classList.contains('is-speech') ? 'auto' : 'none'
-        if (show) bubble.style.transform = `translate(${Math.round(p.x)}px, ${Math.round(p.y)}px) translate(-50%, -100%)`
+        const show = lines > 0 && !p.behind && p.x > 70 && p.x < W - 70 && p.y > 40 && p.y < H + 70
+        feed.style.opacity = show ? '1' : '0'
+        // `visibility` takes the rows out of hit testing too; the container itself never gets clicks
+        feed.style.visibility = show ? '' : 'hidden'
+        if (show) {
+          feed.style.transform = `translate(${Math.round(p.x)}px, ${Math.round(p.y)}px) translate(-50%, -100%)`
+          // Each row ages out on its own, and zooming out drops the oldest ones. React must not
+          // re-render for either, so which rows are shown, the fade, and the step-back of the rows
+          // that got pushed up are all written straight onto the elements here.
+          const rows = feed.children
+          const now = Date.now()
+          const first = Math.max(0, rows.length - lines) // only the newest `lines` rows are drawn
+          for (let k = 0; k < rows.length; k++) {
+            const row = rows[k] as HTMLElement
+            if (k < first) {
+              row.style.display = 'none'
+              continue
+            }
+            row.style.display = ''
+            const life = Number(row.dataset.life) || 3000
+            const age = now - (Number(row.dataset.ts) || now)
+            const fade = Math.min(FEED_FADE, life * 0.5)
+            const dying = Math.max(0, Math.min(1, (age - (life - fade)) / fade))
+            const back = k < rows.length - 1 // anything but the newest row has been pushed up
+            row.style.opacity = String((back ? 0.8 : 1) * (1 - dying))
+            row.style.transform = back ? 'scale(0.96)' : ''
+          }
+        }
       }
     })
     for (const [id, rs] of world.rigs) {
@@ -799,8 +857,9 @@ export function DeskStudio({ session, height }: { session: SessionState | null; 
       if (!world.auto.target || moving || sig !== world.auto.key) {
         world.auto.key = sig
         const target: Camera = { ...c }
-        if (ids.length === 1 && !moving && seatedOne) focusCamera(target, tileToWorld(seatedOne.i, seatedOne.j), W, H)
-        else if (!pts.length) focusCamera(target, tileToWorld(OFFICE.slots[0].seat.i, OFFICE.slots[0].seat.j), W, H)
+        // one hamster: a close-up of its desk, sitting low enough that its feed has room above it
+        if (ids.length === 1 && !moving && seatedOne) focusCamera(target, tileToWorld(seatedOne.i, seatedOne.j), W, H, SOLO_SCALE, SOLO_DY)
+        else if (!pts.length) focusCamera(target, tileToWorld(OFFICE.slots[0].seat.i, OFFICE.slots[0].seat.j), W, H, SOLO_SCALE, SOLO_DY)
         else {
           const b = { minX: Infinity, maxX: -Infinity, minZ: Infinity, maxZ: -Infinity }
           for (const p of pts) {
@@ -871,30 +930,39 @@ export function DeskStudio({ session, height }: { session: SessionState | null; 
             return () => { if (glyphs.current.get(h.id) === el) glyphs.current.delete(h.id) }
           }} />
         ))}
-        {/* One bubble element per hamster, keyed by the hamster alone. A new sentence must not
-            replace the element: the render loop finds it through `tags`, and swapping DOM nodes
-            under that map is how a fresh bubble used to get stuck at the mount-time opacity 0.
-            The pop-in comes from the inner speech element, which is re-keyed per sentence. */}
-        {list.map((h) => (h.bubble || h.activity) && (
+        {/* One feed container per hamster, keyed by the hamster alone. A new row must not replace
+            the container: the render loop finds it through `feeds`, and swapping DOM nodes under
+            that map is how a fresh bubble used to get stuck at the mount-time opacity 0. Rows are
+            keyed by their feed id, so a merged row keeps its element (and its place) while a new
+            one mounts at the bottom and plays the pop-in. The container grows upwards, so the
+            newest line is nearest the head and older ones are pushed away, like a chat log. */}
+        {list.map((h) => h.feed.length > 0 && (
           <div
-            key={`bubble:${session?.info.sessionId}:${h.id}`}
-            className={`office-bubble ${h.bubble ? `tone-${h.bubble.tone} is-speech` : 'is-activity-only'}`}
+            key={`feed:${session?.info.sessionId}:${h.id}`}
+            className="office-feed"
             data-office-ui
-            title={h.bubble?.raw ?? h.activity?.text}
+            data-hid={h.id}
             ref={(el) => {
               if (!el) return
               if (!primed.current.has(el)) { el.style.opacity = '0'; primed.current.add(el) }
-              tags.current.set(h.id, el)
+              feeds.current.set(h.id, el)
               // only forget the element we registered: a stale cleanup must never drop a newer node
-              return () => { if (tags.current.get(h.id) === el) tags.current.delete(h.id) }
+              return () => { if (feeds.current.get(h.id) === el) feeds.current.delete(h.id) }
             }}
-            onClick={() => { if (h.bubble && session) dismissBubble(session.info.sessionId, h.id) }}
           >
-            {h.bubble && <div key={`${h.bubble.ts}:${h.bubble.summarized}`} className="ob-speech">{h.bubble.text}</div>}
-            {h.activity && <div className={`ob-activity ${h.activity.tone === 'edit' ? 'is-edit' : ''}`}>{h.activity.text}</div>}
-            {h.bubble && (
-              <button className="ob-check" aria-label="확인" title="확인" onClick={(e) => { e.stopPropagation(); if (session) dismissBubble(session.info.sessionId, h.id) }}><IconCheck size={11} /></button>
-            )}
+            {h.feed.map((f) => (
+              <div
+                key={f.id}
+                className={`ob-item kind-${f.kind} tone-${f.tone}`}
+                data-ts={f.ts}
+                data-life={feedLife(f)}
+                title={f.raw}
+                onClick={() => { if (session) dismissFeedItem(session.info.sessionId, h.id, f.id) }}
+              >
+                <span className="ob-text">{f.text}</span>
+                {f.count > 1 && <span className="ob-count">×{f.count}</span>}
+              </div>
+            ))}
           </div>
         ))}
       </div>

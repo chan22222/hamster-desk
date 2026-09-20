@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react'
-import { useDesk } from '../store'
+import { useDesk, type DeskSide, type ThemeMode } from '../store'
 import { LANG_OPTIONS, type PrefLang } from '../i18n'
 import { bubbleAvailability, resetBubbleStats, type BubbleAvailability } from '../bubbles/summarize'
 import { Popover } from './Popover'
@@ -15,6 +15,32 @@ function CheckRow({ on, label, hint, disabled, onClick }: { on: boolean; label: 
     </button>
   )
 }
+
+/** A short list of exclusive choices, side by side — a stack of radio rows would double the menu. */
+function Segmented<T extends string>({ label, value, options, onChange }: { label: string; value: T; options: { value: T; label: string }[]; onChange: (v: T) => void }) {
+  return (
+    <div className="pop-field">
+      <span>{label}</span>
+      <span className="seg" role="radiogroup" aria-label={label}>
+        {options.map((o) => (
+          <button key={o.value} className={`seg-btn ${value === o.value ? 'is-on' : ''}`} role="radio" aria-checked={value === o.value} onClick={() => onChange(o.value)}>
+            {o.label}
+          </button>
+        ))}
+      </span>
+    </div>
+  )
+}
+
+const THEMES: { value: ThemeMode; label: string }[] = [
+  { value: 'light', label: '라이트' },
+  { value: 'dark', label: '다크' },
+  { value: 'system', label: '시스템' },
+]
+const SIDES: { value: DeskSide; label: string }[] = [
+  { value: 'top', label: '위' },
+  { value: 'right', label: '오른쪽' },
+]
 
 /** 1234 → '1.2k'; small numbers stay exact so a first summary reads as '550', not '0.6k'. */
 function compact(n: number): string {
@@ -44,6 +70,26 @@ function UsageRow({ stats, onReset }: { stats: BubbleAvailability['stats']; onRe
   )
 }
 
+/** `C:\Users\me\.hamster-desk\ui.json` → `~\.hamster-desk\ui.json` */
+function tilde(path: string, home: string): string {
+  if (!home || !path.toLowerCase().startsWith(home.toLowerCase())) return path
+  return `~${path.slice(home.length)}`
+}
+
+/** Where the settings actually live — one file, shared by every way of running the app. */
+function SettingsFile() {
+  const [where, setWhere] = useState<{ uiPath: string; home: string } | null>(null)
+  useEffect(() => {
+    void window.desk?.info().then((i) => setWhere({ uiPath: i.uiPath, home: i.home }))
+  }, [])
+  if (!where?.uiPath) return null
+  return (
+    <button className="pop-path" title={`${where.uiPath}\n클릭: 탐색기에서 보기`} onClick={() => window.desk?.fs.showInFolder(where.uiPath)}>
+      설정 파일: {tilde(where.uiPath, where.home)}
+    </button>
+  )
+}
+
 function Body({ onUpdate }: { onUpdate: () => void }) {
   const prefs = useDesk((s) => s.prefs)
   const setPrefs = useDesk((s) => s.setPrefs)
@@ -57,8 +103,15 @@ function Body({ onUpdate }: { onUpdate: () => void }) {
     <div className="pop-body">
       <CheckRow on={prefs.showSidebar} label="사이드바" hint="Ctrl+B" onClick={() => setPrefs({ showSidebar: !prefs.showSidebar })} />
       <CheckRow on={!prefs.folded} label="책상 펼치기" onClick={() => setPrefs({ folded: !prefs.folded })} />
-      <CheckRow on={prefs.showLog} label="바뀐 파일 패널" onClick={() => setPrefs({ showLog: !prefs.showLog })} />
+      <CheckRow
+        on={prefs.showSidebar && prefs.showLog}
+        label="바뀐 파일"
+        hint="사이드바"
+        onClick={() => (prefs.showSidebar && prefs.showLog ? setPrefs({ showLog: false }) : setPrefs({ showSidebar: true, showLog: true }))}
+      />
       <CheckRow on={prefs.onTop} label="항상 위" onClick={() => setPrefs({ onTop: !prefs.onTop })} />
+      <Segmented label="책상 위치" value={prefs.deskSide} options={SIDES} onChange={(v) => setPrefs({ deskSide: v })} />
+      <Segmented label="테마" value={prefs.theme} options={THEMES} onChange={(v) => setPrefs({ theme: v })} />
 
       <div className="pop-sep" />
       <div className="pop-head">말풍선</div>
@@ -84,14 +137,17 @@ function Body({ onUpdate }: { onUpdate: () => void }) {
       <div className="pop-sep" />
       <div className="pop-head">Claude Code</div>
       <VersionSection onUpdate={onUpdate} />
+
+      <div className="pop-sep" />
+      <SettingsFile />
     </div>
   )
 }
 
-/** The quiet corner of the top bar: view toggles, bubble settings and the CLI version. */
+/** The quiet corner of the top bar: view toggles, theme, bubble settings and the CLI version. */
 export function MoreMenu({ onUpdate }: { onUpdate: () => void }) {
   return (
-    <Popover className="icon-btn" label={<IconMore />} ariaLabel="설정" title="설정" width={252}>
+    <Popover className="icon-btn" label={<IconMore />} ariaLabel="설정" title="설정" width={268}>
       {() => <Body onUpdate={onUpdate} />}
     </Popover>
   )

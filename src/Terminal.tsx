@@ -4,16 +4,28 @@ import { FitAddon } from '@xterm/addon-fit'
 import { WebglAddon } from '@xterm/addon-webgl'
 import '@xterm/xterm/css/xterm.css'
 import { useDesk, type Workspace } from './store'
+import { usePainted, type Painted } from './widgets/theme'
 
-// The one dark surface in a light app: Claude Code paints this pane with its own palette, and a
-// light background would swallow every dim colour it uses.
-const THEME = {
-  background: '#121814',
-  foreground: '#dfe6da',
-  cursor: '#7fd4a3',
-  selectionBackground: '#3f7a5a66',
-  black: '#12181a',
-  brightBlack: '#8b968d',
+// The terminal is dark in *both* themes: Claude Code paints this pane with its own palette, and a
+// light background would swallow every dim colour it uses. Dark mode only deepens the background,
+// so the pane stops being the one dark rectangle and simply matches the app around it (--term-bg).
+const THEME: Record<Painted, Record<string, string>> = {
+  light: {
+    background: '#121814',
+    foreground: '#dfe6da',
+    cursor: '#7fd4a3',
+    selectionBackground: '#3f7a5a66',
+    black: '#12181a',
+    brightBlack: '#8b968d',
+  },
+  dark: {
+    background: '#0e1310',
+    foreground: '#e3eade',
+    cursor: '#8fdcb0',
+    selectionBackground: '#4a8a6866',
+    black: '#0d120f',
+    brightBlack: '#8f9a91',
+  },
 }
 
 const CR = String.fromCharCode(13)
@@ -37,13 +49,18 @@ export function TerminalPane({ ws, visible }: { ws: Workspace; visible: boolean 
   const hostRef = useRef<HTMLDivElement>(null)
   const bind = useDesk((s) => s.bindWorkspacePty)
   const fitRef = useRef<{ fit: () => void; focus: () => void } | null>(null)
+  const termRef = useRef<XTerm | null>(null)
+  const painted = usePainted()
+  // the pane is built once per workspace, so the theme it started with is read from a ref
+  const paintedRef = useRef(painted)
+  paintedRef.current = painted
 
   useEffect(() => {
     const host = hostRef.current
     const bridge = window.desk
     if (!host) return
     const term = new XTerm({
-      theme: THEME,
+      theme: THEME[paintedRef.current],
       fontFamily: '"Cascadia Mono", "D2Coding", "JetBrains Mono", Consolas, "Malgun Gothic", monospace',
       fontSize: 14,
       lineHeight: 1.15,
@@ -55,6 +72,7 @@ export function TerminalPane({ ws, visible }: { ws: Workspace; visible: boolean 
     const fit = new FitAddon()
     term.loadAddon(fit)
     term.open(host)
+    termRef.current = term
     try {
       term.loadAddon(new WebglAddon())
     } catch {
@@ -180,6 +198,13 @@ export function TerminalPane({ ws, visible }: { ws: Workspace; visible: boolean 
     }, 30)
     return () => clearTimeout(t)
   }, [visible])
+
+  // follow the app's theme: only the background really moves, but it has to match --term-bg or the
+  // pane draws a seam against the surface behind it
+  useEffect(() => {
+    const term = termRef.current
+    if (term) term.options.theme = THEME[painted]
+  }, [painted])
 
   return <div ref={hostRef} className="term-host" style={{ display: visible ? 'block' : 'none' }} />
 }

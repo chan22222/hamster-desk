@@ -1,20 +1,22 @@
-import { useEffect, useMemo, useRef } from 'react'
-import { externalSessions, sessionForTab, useDesk } from './store'
+import { useEffect, useMemo, useRef, useState } from 'react'
+import { externalSessions, freezePrefs, hydrateUi, sessionForTab, useDesk } from './store'
 import { setLang } from './i18n'
 import { DeskStudio } from './desk/DeskStudio'
 import { TerminalPane } from './Terminal'
-import { FileLog } from './log/FileLog'
 import { Sidebar } from './sidebar/Sidebar'
-import { rememberRecent } from './sidebar/recent'
+import { lastCwd, rememberRecent, setLastCwd } from './sidebar/recent'
 import { UsageMeters } from './widgets/Usage'
 import { UpdatePill } from './widgets/Version'
 import { MoreMenu } from './widgets/MoreMenu'
-import { PlusMenu } from './widgets/PlusMenu'
+import { PlusMenu, StartCard } from './widgets/PlusMenu'
 import { Popover } from './widgets/Popover'
+import { usePainted } from './widgets/theme'
 import { IconClose, IconSidebar } from './widgets/icons'
 import { startReplay } from './dev/replay-driver'
 
-const LAST_CWD = 'hd.lastCwd'
+/** studio size limits, shared by the splitters and their double-click reset */
+const DESK_H = { min: 220, max: 700, def: 420 }
+const DESK_W = { min: 320, max: 900, def: 520 }
 
 /** The × on a tab. A terminal with a live claude session asks first, in a popover. */
 function TabClose({ busy, onClose }: { busy: boolean; onClose: () => void }) {
@@ -55,7 +57,12 @@ export default function App() {
   const ptyWaiting = useDesk((s) => s.ptyWaiting)
   const prefs = useDesk((s) => s.prefs)
   const setPrefs = useDesk((s) => s.setPrefs)
+  const painted = usePainted()
   const booted = useRef(false)
+  // the settings file is read over IPC, so the first frame would be the defaults; hide it instead
+  const [booting, setBooting] = useState(() => !!window.desk)
+  const colRef = useRef<HTMLDivElement>(null)
+  const [colH, setColH] = useState(0)
 
   // event stream (with backlog replay) or browser-only replay
   useEffect(() => {
@@ -79,33 +86,48 @@ export default function App() {
     return off
   }, [apply])
 
-  // first terminal
+  // settings, then the first terminal — in that order, so it opens in the folder we left off in
   useEffect(() => {
     if (booted.current || !window.desk) return
     booted.current = true
-    void window.desk.info().then((info) => {
-      setLang(useDesk.getState().prefs.lang, info.claudeLanguage)
-      if (info.debugPrefs) {
-        // in-memory only: smoke tests must not overwrite the user's saved preferences
-        const { demoAgents, ...rest } = info.debugPrefs as { demoAgents?: number } & Partial<typeof prefs>
-        useDesk.setState((s) => ({ prefs: { ...s.prefs, ...rest } }))
-        const n = Number(demoAgents ?? 0)
-        if (n > 0) void import('./dev/demo').then((m) => m.startDemo(apply, n))
-      }
-      let cwd = info.home
-      try {
-        cwd = localStorage.getItem(LAST_CWD) || cwd
-      } catch {
-        /* ignore */
-      }
-      if (useDesk.getState().workspaces.length === 0) addWorkspace(cwd)
-    })
+    void hydrateUi()
+      .then(() => window.desk?.info())
+      .then((info) => {
+        if (!info) return
+        setLang(useDesk.getState().prefs.lang, info.claudeLanguage)
+        if (info.debugPrefs) {
+          // forced prefs are for this run only: freeze the store so nothing reaches ~/.hamster-desk/ui.json
+          const { demoAgents, ...rest } = info.debugPrefs as { demoAgents?: number } & Partial<typeof prefs>
+          freezePrefs()
+          useDesk.setState((s) => ({ prefs: { ...s.prefs, ...rest } }))
+          const n = Number(demoAgents ?? 0)
+          if (n > 0) void import('./dev/demo').then((m) => m.startDemo(apply, n))
+        }
+        if (useDesk.getState().workspaces.length === 0) addWorkspace(lastCwd() || info.home)
+      })
+      .finally(() => setBooting(false))
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [addWorkspace])
+
+  // the one place the palette is chosen; styles.css keys the dark token set off this attribute
+  useEffect(() => {
+    document.documentElement.dataset.theme = painted
+  }, [painted])
 
   useEffect(() => {
     window.desk?.win.alwaysOnTop(prefs.onTop)
   }, [prefs.onTop])
+
+  // the studio beside the terminal fills the column, which only the DOM knows the height of
+  useEffect(() => {
+    const el = colRef.current
+    if (!el) return
+    const read = (): void => setColH((h) => (h === el.clientHeight ? h : el.clientHeight))
+    read()
+    const ro = new ResizeObserver(read)
+    ro.observe(el)
+    return () => ro.disconnect()
+  }, [])
 
   // Ctrl+B: the sidebar, wherever the focus is (the terminal lets this one through)
   useEffect(() => {
@@ -127,11 +149,7 @@ export default function App() {
   const changed = useMemo(() => new Set((active?.edits ?? []).map((e) => e.file)).size, [active?.edits])
 
   const openTerminal = (dir: string): void => {
-    try {
-      localStorage.setItem(LAST_CWD, dir)
-    } catch {
-      /* ignore */
-    }
+    setLastCwd(dir)
     rememberRecent(dir)
     addWorkspace(dir)
   }
@@ -141,21 +159,50 @@ export default function App() {
     useDesk.getState().addWorkspace(cwd, '업데이트', 'claude update')
   }
 
+  /**
+   * Both splitters. Dragging writes straight to the store and saves once on release, so a drag is
+   * one settings write rather than sixty.
+   */
   const onDrag = (e: React.MouseEvent): void => {
     e.preventDefault()
-    const startY = e.clientY
-    const startH = prefs.deskH
-    const move = (ev: MouseEvent): void => setPrefs({ deskH: Math.max(220, Math.min(700, startH + ev.clientY - startY)) })
+    const side = prefs.deskSide
+    const start = side === 'right' ? e.clientX : e.clientY
+    const from = side === 'right' ? prefs.deskW : prefs.deskH
+    const { min, max } = side === 'right' ? DESK_W : DESK_H
+    let v = from
+    const move = (ev: MouseEvent): void => {
+      // the studio sits to the *right* of the terminal, so dragging left widens it
+      const delta = side === 'right' ? start - ev.clientX : ev.clientY - start
+      v = Math.max(min, Math.min(max, from + delta))
+      useDesk.setState((s) => ({ prefs: { ...s.prefs, ...(side === 'right' ? { deskW: v } : { deskH: v }) } }))
+    }
     const up = (): void => {
       window.removeEventListener('mousemove', move)
       window.removeEventListener('mouseup', up)
+      setPrefs(side === 'right' ? { deskW: v } : { deskH: v })
     }
     window.addEventListener('mousemove', move)
     window.addEventListener('mouseup', up)
   }
 
+  const resetSplit = (): void => setPrefs(prefs.deskSide === 'right' ? { deskW: DESK_W.def } : { deskH: DESK_H.def })
+
+  const beside = prefs.deskSide === 'right'
+  const splitter = (
+    <div
+      className={`splitter ${beside ? 'is-v' : ''}`}
+      role="separator"
+      aria-orientation={beside ? 'vertical' : 'horizontal'}
+      aria-label="책상 크기"
+      title="끌어서 크기 조절 · 더블클릭: 기본값"
+      onMouseDown={onDrag}
+      onDoubleClick={resetSplit}
+    />
+  )
+  const studio = <DeskStudio session={active} height={beside ? Math.max(1, colH) : prefs.deskH} />
+
   return (
-    <div className="app">
+    <div className="app" data-booting={booting ? '' : undefined}>
       <header className="topbar">
         <button className="icon-btn" onClick={() => setPrefs({ showSidebar: !prefs.showSidebar })} title="사이드바 (Ctrl+B)" aria-label="사이드바" aria-pressed={prefs.showSidebar}>
           <IconSidebar />
@@ -178,7 +225,7 @@ export default function App() {
                   <span className="tab-label">{s?.title || w.title}</span>
                   {n > 1 && <span className="count">🐹×{n}</span>}
                 </button>
-                {workspaces.length > 1 && <TabClose busy={!!s} onClose={() => removeWorkspace(w.id)} />}
+                <TabClose busy={!!s} onClose={() => removeWorkspace(w.id)} />
               </div>
             )
           })}
@@ -200,7 +247,11 @@ export default function App() {
         <div className="status">
           <UsageMeters />
           {changed > 0 && (
-            <button className={`pill ${prefs.showLog ? 'on' : ''}`} onClick={() => setPrefs({ showLog: !prefs.showLog })} title="바뀐 파일 목록 열기">
+            <button
+              className={`pill ${prefs.showSidebar && prefs.showLog ? 'on' : ''}`}
+              onClick={() => (prefs.showSidebar && prefs.showLog ? setPrefs({ showLog: false }) : setPrefs({ showSidebar: true, showLog: true }))}
+              title="사이드바의 '바뀐 파일' 열기"
+            >
               바뀐 파일 {changed}
             </button>
           )}
@@ -209,12 +260,12 @@ export default function App() {
         </div>
       </header>
       <div className="body">
-        {prefs.showSidebar && <Sidebar start={activeWs?.cwd ?? workspaces[0]?.cwd ?? ''} onOpen={openTerminal} />}
-        <div className="column">
-          {!prefs.folded && (
+        {prefs.showSidebar && <Sidebar start={activeWs?.cwd ?? workspaces[0]?.cwd ?? ''} session={active} onOpen={openTerminal} />}
+        <div ref={colRef} className={`column ${beside ? 'is-beside' : ''}`} style={{ ['--desk-w' as string]: `${prefs.deskW}px` }}>
+          {!prefs.folded && !beside && (
             <>
-              <DeskStudio session={active} height={prefs.deskH} />
-              <div className="splitter" onMouseDown={onDrag} />
+              {studio}
+              {splitter}
             </>
           )}
           <div className="panes">
@@ -224,10 +275,20 @@ export default function App() {
             {activeTab?.startsWith('session:') && (
               <div className="ext-pane">이 세션은 다른 터미널에서 실행 중입니다. 위 책상에서 지켜볼 수만 있고, 입력은 그 터미널에서 하세요.</div>
             )}
-            {!activeTab && <div className="ext-pane">{window.desk ? '터미널을 여는 중…' : '스튜디오 미리보기 · 터미널은 데스크톱 앱에서 사용할 수 있어요.'}</div>}
+            {!activeTab &&
+              (window.desk ? (
+                <StartCard onOpen={openTerminal} onShowSidebar={() => setPrefs({ showSidebar: true })} />
+              ) : (
+                <div className="ext-pane">스튜디오 미리보기 · 터미널은 데스크톱 앱에서 사용할 수 있어요.</div>
+              ))}
           </div>
+          {!prefs.folded && beside && (
+            <>
+              {splitter}
+              {studio}
+            </>
+          )}
         </div>
-        {prefs.showLog && <FileLog session={active} onClose={() => setPrefs({ showLog: false })} />}
       </div>
     </div>
   )

@@ -17,23 +17,44 @@ export type HamsterState =
   | 'arriving'
   | 'leaving'
 
-/** What a hamster is *saying*: stays up until it is dismissed or the next sentence arrives. */
-export interface Bubble {
-  /** what the bubble shows: the summary once it arrives, the trimmed raw text until then */
+export type FeedKind = 'say' | 'act'
+
+/**
+ * One line of a hamster's chat feed. Rows stack above its head — oldest first, newest at the
+ * bottom — and expire on their own; nothing has to be ticked off. Pushing a line that is already
+ * in the feed does not add a second row: it bumps `count`, refreshes `ts` and moves the row to the
+ * end, so a tool that keeps firing reads as `실행 중 ×3` instead of three identical bubbles.
+ */
+export interface FeedItem {
+  /** `${hid}:${n}` — stable across merges, which is what a late summary matches on */
+  id: string
+  kind: FeedKind
+  tone: 'talk' | 'warn' | 'name' | 'info' | 'edit'
+  /** what the row shows: the summary once it arrives, the trimmed raw text until then */
   text: string
   /** the full sentence (tooltip, and the text sent to the summarizer) */
   raw: string
+  /** when the row first appeared; never changes, so a merge keeps its place in the stack */
+  born: number
+  /** last time it was pushed — the life span below is counted from here */
   ts: number
-  tone: 'talk' | 'warn' | 'name'
+  count: number
   summarized: boolean
 }
 
-/** What a hamster is *doing* right now: one dim line under the speech, replaced by the next tool. */
-export interface Activity {
-  text: string
-  ts: number
-  tone: 'info' | 'edit'
+/** How long a row stays up, measured from its `ts`. The studio smoke test shortens these. */
+export const FEED_LIFE = { act: 3000, say: 9000, warn: 12000 }
+export function setFeedLife(p: Partial<typeof FEED_LIFE>): void {
+  Object.assign(FEED_LIFE, p)
 }
+export function feedLife(f: Pick<FeedItem, 'kind' | 'tone'>): number {
+  return f.tone === 'warn' ? FEED_LIFE.warn : f.kind === 'act' ? FEED_LIFE.act : FEED_LIFE.say
+}
+/** at most this many rows are on screen; the oldest fall off the top */
+export const FEED_MAX = 4
+
+/** a row before the store gives it an id and its timestamps */
+type NewItem = Pick<FeedItem, 'kind' | 'tone' | 'text' | 'raw' | 'summarized'>
 
 export interface Hamster {
   id: string // 'main' or agentId
@@ -45,8 +66,8 @@ export interface Hamster {
   state: HamsterState
   since: number
   inFlight: string[]
-  bubble: Bubble | null
-  activity: Activity | null
+  /** the chat feed above this hamster's head, oldest first, at most FEED_MAX rows */
+  feed: FeedItem[]
   toolCount: number
   editCount: number
   /** model id last seen on this hamster's assistant messages */
@@ -96,25 +117,47 @@ export interface Workspace {
   initialCommand?: string
 }
 
+/** `system` keeps following the OS for as long as it is picked. */
+export type ThemeMode = 'light' | 'dark' | 'system'
+/** where the studio sits relative to the terminal */
+export type DeskSide = 'top' | 'right'
+
 export interface Prefs {
+  /** studio height when it sits above the terminal */
   deskH: number
-  showLog: boolean
+  /** studio width when it sits beside the terminal */
+  deskW: number
+  deskSide: DeskSide
+  sidebarW: number
   showSidebar: boolean
+  /** the sidebar's "changed files" section is expanded */
+  showLog: boolean
+  /** the sidebar's file browser section is expanded */
+  showExplorer: boolean
   onTop: boolean
   folded: boolean
   /** ask the summarizer to shorten what a hamster says */
   bubbleSummary: boolean
   lang: PrefLang
+  theme: ThemeMode
+  /** the studio's automatic camera (the `자동` button) */
+  autoCam: boolean
 }
 
 export const DEFAULT_PREFS: Prefs = {
   deskH: 420,
-  showLog: false,
+  deskW: 520,
+  deskSide: 'top',
+  sidebarW: 248,
   showSidebar: false,
+  showLog: true,
+  showExplorer: true,
   onTop: false,
   folded: false,
   bubbleSummary: true,
   lang: 'auto',
+  theme: 'light',
+  autoCam: true,
 }
 
 interface DeskStore {
@@ -135,15 +178,14 @@ interface DeskStore {
   bindWorkspacePty(id: number, ptyId: number, cwd: string): void
   removeWorkspace(id: number): void
   setPrefs(p: Partial<Prefs>): void
-  /** the user ticked a speech bubble off (or clicked it) */
-  dismissBubble(sessionId: string, hid: string): void
+  /** the user clicked one row of a hamster's feed: drop just that row */
+  dismissFeedItem(sessionId: string, hid: string, id: string): void
   /** optimistic: the app just sent `/effort <level>` to this session */
   setSessionEffort(sessionId: string, level: EffortLevel): void
 }
 
 const ARRIVE_MS = 900
 const LEAVE_MS = 2600 // long enough to walk back to the door in the 3D view
-const PREFS_KEY = 'hd.prefs'
 
 const actionState: Record<ToolAction, HamsterState> = {
   read: 'reading',
@@ -155,39 +197,180 @@ const actionState: Record<ToolAction, HamsterState> = {
   other: 'thinking',
 }
 
-function loadPrefs(): Prefs {
-  let prefs = DEFAULT_PREFS
+// ---- where the UI settings live ----------------------------------------------------------
+// ~/.hamster-desk/ui.json, through the main process (electron/ui-store.ts). localStorage used to
+// hold them, but it belongs to the Electron *profile* and this app gives each run mode its own
+// (packaged / -dev / -smoke), so a language picked in the portable exe was invisible to `npm run
+// dev`. The file is read once at boot (`hydrateUi`) and mirrored here, so every reader stays
+// synchronous. Keys: `prefs`, `recents`, `favs`, `lastCwd`.
+
+/** the whole bag, for the browser preview that has no main process to keep the file */
+const UI_KEY = 'hd.ui'
+/** the localStorage keys ui.json replaced; read once, then deleted */
+const LEGACY_KEYS = ['hd.prefs', 'hd.recentDirs', 'hd.recentMeta', 'hd.favDirs', 'hd.lastCwd']
+
+type UiBag = Record<string, unknown>
+let uiBag: UiBag = {}
+/** smoke runs force prefs through HAMSTER_PREFS; those must never reach the user's file */
+let prefsReadOnly = false
+
+function readLocal<T>(key: string, fallback: T): T {
   try {
-    const raw = localStorage.getItem(PREFS_KEY)
-    if (raw) {
-      // `showFolders` was this pref's name before the sidebar replaced the folder panel
-      const { showFolders, ...rest } = JSON.parse(raw) as Partial<Prefs> & { showFolders?: boolean }
-      prefs = { ...DEFAULT_PREFS, ...rest }
-      if (rest.showSidebar === undefined && typeof showFolders === 'boolean') prefs.showSidebar = showFolders
-    }
+    const raw = localStorage.getItem(key)
+    const v: unknown = raw ? JSON.parse(raw) : null
+    return v === null || v === undefined ? fallback : (v as T)
   } catch {
-    /* defaults */
+    return fallback
   }
+}
+
+/** What was stored under `key`, or `fallback` when nothing was. */
+export function uiGet<T>(key: string, fallback: T): T {
+  const v = uiBag[key]
+  return v === undefined || v === null ? fallback : (v as T)
+}
+
+/** Remember `value` under `key`; the main process debounces and writes it atomically. */
+export function uiSet(key: string, value: unknown): void {
+  uiBag = { ...uiBag, [key]: value }
+  if (window.desk) {
+    void window.desk.ui.save({ [key]: value })
+    return
+  }
+  try {
+    localStorage.setItem(UI_KEY, JSON.stringify(uiBag))
+  } catch {
+    /* a preference we cannot store is not worth an exception */
+  }
+}
+
+/** Stop persisting preferences: this renderer is running with forced (debug) ones. */
+export function freezePrefs(): void {
+  prefsReadOnly = true
+}
+
+/**
+ * The version stamp stored prefs carry, so a key whose *meaning* changed can be thrown away rather
+ * than read as the old thing. A rename is cheap to handle by name (`showFolders` → `showSidebar`,
+ * below); a key that kept its name and changed meaning is not, because the old value is a perfectly
+ * valid new value. Bump this and add a `stored < n` rule in `adoptPrefs` next time one does.
+ *
+ * 2 — `showLog` used to mean "show the right-hand file panel" (default off) and now means "the
+ *     sidebar's 바뀐 파일 section is expanded" (default on), so a stored `false` would greet a
+ *     user of the new layout with that section already folded.
+ */
+const PREFS_VERSION = 2
+
+/** which version wrote this bag; anything without a stamp predates the field */
+const prefsVersionOf = (raw: unknown): number => {
+  const v = raw && typeof raw === 'object' ? (raw as { v?: unknown }).v : undefined
+  return typeof v === 'number' ? v : 1
+}
+
+/** what goes in the file: the prefs plus the stamp the migrations above key off */
+const storedPrefs = (p: Prefs): UiBag => ({ ...p, v: PREFS_VERSION })
+
+/** `showFolders` was this pref's name before the sidebar replaced the folder panel. */
+function adoptPrefs(raw: unknown): Prefs {
+  const { showFolders, v: _v, ...rest } = (raw && typeof raw === 'object' ? raw : {}) as Partial<Prefs> & { showFolders?: boolean; v?: number }
+  if (prefsVersionOf(raw) < 2) delete rest.showLog // meaning changed: take the new default instead
+  const prefs: Prefs = { ...DEFAULT_PREFS, ...rest }
+  if (rest.showSidebar === undefined && typeof showFolders === 'boolean') prefs.showSidebar = showFolders
   setLang(prefs.lang)
   return prefs
+}
+
+/**
+ * One-time move of the keys this app kept in localStorage before ui.json existed. Per *key*, not
+ * per file: an early ui.json may hold only `prefs`, and the recent folders would then be stranded
+ * in a profile nobody reads any more.
+ */
+function migrateFromLocalStorage(have: UiBag): UiBag | null {
+  const bag: UiBag = {}
+  if (have.prefs === undefined) {
+    const prefs = readLocal<UiBag>('hd.prefs', {})
+    if (prefs && typeof prefs === 'object' && Object.keys(prefs).length) bag.prefs = prefs
+  }
+  if (have.recents === undefined) {
+    const dirs = readLocal<string[]>('hd.recentDirs', [])
+    const meta = readLocal<Record<string, number>>('hd.recentMeta', {})
+    if (Array.isArray(dirs) && dirs.length) bag.recents = dirs.map((p) => ({ path: p, at: meta?.[p.toLowerCase()] ?? 0, count: 1 }))
+  }
+  if (have.favs === undefined) {
+    const favs = readLocal<string[]>('hd.favDirs', [])
+    if (Array.isArray(favs) && favs.length) bag.favs = favs
+  }
+  if (have.lastCwd === undefined) {
+    try {
+      const lastCwd = localStorage.getItem('hd.lastCwd') // this one was never JSON
+      if (lastCwd) bag.lastCwd = lastCwd
+    } catch {
+      /* ignore */
+    }
+  }
+  if (Object.keys(bag).length === 0) return null
+  for (const k of LEGACY_KEYS) {
+    try {
+      localStorage.removeItem(k)
+    } catch {
+      /* ignore */
+    }
+  }
+  return bag
+}
+
+/** The first paint: defaults, plus whatever the browser preview kept for itself. */
+function loadPrefs(): Prefs {
+  if (!window.desk) uiBag = readLocal<UiBag>(UI_KEY, {})
+  return adoptPrefs(uiBag.prefs)
+}
+
+/**
+ * Read ~/.hamster-desk/ui.json and adopt it. It is async, so the app wears `data-booting` until
+ * this resolves and the first frame is not painted with the defaults.
+ */
+export async function hydrateUi(): Promise<void> {
+  const bridge = window.desk
+  if (!bridge) return
+  let bag: UiBag = {}
+  try {
+    bag = (await bridge.ui.load()) ?? {}
+  } catch {
+    bag = {}
+  }
+  const moved = migrateFromLocalStorage(bag)
+  if (moved) {
+    bag = { ...bag, ...moved }
+    try {
+      await bridge.ui.save(moved)
+    } catch {
+      /* best effort: the settings still work for this run */
+    }
+  }
+  uiBag = bag
+  const prefs = adoptPrefs(uiBag.prefs)
+  useDesk.setState({ prefs })
+  // write the migrated set back once, stamped, so the next boot has nothing left to fix up
+  if (prefsVersionOf(uiBag.prefs) < PREFS_VERSION) uiSet('prefs', storedPrefs(prefs))
 }
 
 const RAW_MAX = 400
 const SPEECH_MAX = 120
 
 /** A sentence a hamster says. `text` shows immediately; a summary may replace it later. */
-function speech(raw: string, tone: Bubble['tone']): Bubble {
+function speech(raw: string, tone: 'talk' | 'warn' | 'name'): NewItem {
   const full = raw.trim().slice(0, RAW_MAX)
-  return { text: shortName(full, SPEECH_MAX), raw: full, ts: Date.now(), tone, summarized: false }
+  return { kind: 'say', tone, text: shortName(full, SPEECH_MAX), raw: full, summarized: false }
 }
 
 /** A fixed phrase: already short, never summarized. */
-function fixed(text: string, tone: Bubble['tone']): Bubble {
-  return { text, raw: text, ts: Date.now(), tone, summarized: true }
+function fixed(text: string, tone: 'talk' | 'warn' | 'name'): NewItem {
+  return { kind: 'say', tone, text, raw: text, summarized: true }
 }
 
-function activityOf(text: string, tone: Activity['tone']): Activity {
-  return { text: shortName(text, 60), ts: Date.now(), tone }
+/** What the hamster is doing right now — the dim rows, and the ones that merge into `×N`. */
+function doing(text: string, tone: 'info' | 'edit'): NewItem {
+  return { kind: 'act', tone, text: shortName(text, 60), raw: text, summarized: true }
 }
 
 function mainHamster(sessionId: string): Hamster {
@@ -201,8 +384,7 @@ function mainHamster(sessionId: string): Hamster {
     state: 'idle',
     since: Date.now(),
     inFlight: [],
-    bubble: null,
-    activity: null,
+    feed: [],
     toolCount: 0,
     editCount: 0,
     model: null,
@@ -241,6 +423,8 @@ export function shortName(text: string, max = 22): string {
 }
 
 let nextWorkspaceId = 1
+/** feed row ids only have to be unique per hamster; one running counter is plenty */
+let feedSeq = 0
 
 export const useDesk = create<DeskStore>((set, get) => {
   const timers = new Map<string, ReturnType<typeof setTimeout>>()
@@ -276,17 +460,87 @@ export const useDesk = create<DeskStore>((set, get) => {
 
   const laneOf = (sessionId: string, hid: string): string => `${sessionId}:${hid}`
 
-  /** Ask the summarizer to shorten a sentence; a late answer is dropped if the bubble moved on. */
-  const askSummary = (sessionId: string, hid: string, b: Bubble, kind: 'said' | 'assigned'): void => {
-    requestSummary({ lane: laneOf(sessionId, hid), kind, raw: b.raw, ts: b.ts, enabled: get().prefs.bubbleSummary }, (ts, text) =>
-      updHamster(sessionId, hid, (h) => (h.bubble && h.bubble.ts === ts ? { ...h, bubble: { ...h.bubble, text, summarized: true } } : h)),
+  /**
+   * Drop every expired row. Only runs while something is still on screen: the last sweep that
+   * empties every feed does not book another one, so an idle app has no timer at all.
+   */
+  const sweepFeeds = (): void => {
+    const now = Date.now()
+    const sessions = get().sessions
+    let changed = false
+    let soonest = Infinity
+    const next: Record<string, SessionState> = {}
+    for (const [sid, s] of Object.entries(sessions)) {
+      let touched = false
+      const hamsters: Record<string, Hamster> = {}
+      for (const [hid, h] of Object.entries(s.hamsters)) {
+        const alive = h.feed.filter((f) => now - f.ts < feedLife(f))
+        for (const f of alive) soonest = Math.min(soonest, f.ts + feedLife(f))
+        if (alive.length === h.feed.length) hamsters[hid] = h
+        else {
+          hamsters[hid] = { ...h, feed: alive }
+          touched = true
+        }
+      }
+      next[sid] = touched ? { ...s, hamsters } : s
+      if (touched) changed = true
+    }
+    if (changed) set({ sessions: next })
+    if (soonest !== Infinity) scheduleSweep(soonest - now)
+  }
+  /** Book the next sweep: at the first expiry, and never more than three seconds away. */
+  const scheduleSweep = (inMs = 0): void => {
+    later('feed:sweep', Math.max(200, Math.min(3000, inMs)), sweepFeeds)
+  }
+
+  /**
+   * Add a row to a hamster's feed, merging it into an identical row that is already there.
+   * Returns the id the row ended up with, which is what a late summary is matched against.
+   */
+  const push = (sessionId: string, hid: string, item: NewItem, patch: Partial<Hamster> = {}): string | null => {
+    const h = get().sessions[sessionId]?.hamsters[hid]
+    if (!h) return null
+    const now = Date.now()
+    const alive = h.feed.filter((f) => now - f.ts < feedLife(f))
+    const at = alive.findIndex((f) => f.kind === item.kind && f.text === item.text)
+    let id: string
+    let feed: FeedItem[]
+    if (at >= 0) {
+      // same line again: keep its id and `born`, count it, and move it back to the bottom
+      const cur = alive[at]
+      id = cur.id
+      feed = [...alive.slice(0, at), ...alive.slice(at + 1), { ...cur, ...item, ts: now, count: cur.count + 1 }]
+    } else {
+      id = `${hid}:${++feedSeq}`
+      feed = [...alive, { ...item, id, born: now, ts: now, count: 1 }]
+    }
+    updHamster(sessionId, hid, (cur) => ({ ...cur, ...patch, feed: feed.slice(-FEED_MAX) }))
+    scheduleSweep(feedLife(item))
+    return id
+  }
+
+  /** Drop rows of one kind (a new turn clears what the hamster *was doing*, not what it said). */
+  const clearFeed = (sessionId: string, hid: string, keep: (f: FeedItem) => boolean, patch: Partial<Hamster> = {}): void => {
+    updHamster(sessionId, hid, (h) => ({ ...h, ...patch, feed: h.feed.filter(keep) }))
+  }
+
+  /** Ask the summarizer to shorten a sentence; a late answer is dropped if that row is gone. */
+  const askSummary = (sessionId: string, hid: string, id: string, raw: string, kind: 'said' | 'assigned'): void => {
+    requestSummary({ lane: laneOf(sessionId, hid), kind, raw, ts: Date.now(), enabled: get().prefs.bubbleSummary }, (_ts, text) =>
+      updHamster(sessionId, hid, (h) => {
+        const at = h.feed.findIndex((f) => f.id === id)
+        if (at < 0) return h
+        const feed = [...h.feed]
+        feed[at] = { ...feed[at], text, summarized: true }
+        return { ...h, feed }
+      }),
     )
   }
 
-  /** A fixed phrase replaces whatever was waiting to be summarized. */
-  const say = (sessionId: string, hid: string, b: Bubble, patch: Partial<Hamster> = {}): void => {
+  /** A fixed phrase drops whatever was waiting to be summarized for this hamster. */
+  const say = (sessionId: string, hid: string, item: NewItem, patch: Partial<Hamster> = {}): void => {
     cancelSummary(laneOf(sessionId, hid))
-    updHamster(sessionId, hid, (h) => ({ ...h, ...patch, bubble: b }))
+    push(sessionId, hid, item, patch)
   }
 
   const ensureAgent = (sessionId: string, agentId: string, ts: number): void => {
@@ -306,8 +560,7 @@ export const useDesk = create<DeskStore>((set, get) => {
           state: 'arriving',
           since: ts,
           inFlight: [],
-          bubble: null,
-          activity: null,
+          feed: [],
           toolCount: 0,
           editCount: 0,
           model: null,
@@ -358,19 +611,14 @@ export const useDesk = create<DeskStore>((set, get) => {
         hamsters: s.hamsters.main ? { ...s.hamsters, main: { ...s.hamsters.main, effort: level } } : s.hamsters,
       }))
     },
-    dismissBubble(sessionId, hid) {
-      cancelSummary(laneOf(sessionId, hid))
-      updHamster(sessionId, hid, (h) => (h.bubble ? { ...h, bubble: null } : h))
+    dismissFeedItem(sessionId, hid, id) {
+      updHamster(sessionId, hid, (h) => (h.feed.some((f) => f.id === id) ? { ...h, feed: h.feed.filter((f) => f.id !== id) } : h))
     },
     setPrefs(p) {
       const prefs = { ...get().prefs, ...p }
       set({ prefs })
       if (p.lang !== undefined) setLang(prefs.lang)
-      try {
-        localStorage.setItem(PREFS_KEY, JSON.stringify(prefs))
-      } catch {
-        /* ignore */
-      }
+      if (!prefsReadOnly) uiSet('prefs', storedPrefs(prefs))
     },
 
     apply(e) {
@@ -402,7 +650,8 @@ export const useDesk = create<DeskStore>((set, get) => {
               let hamsters = s.hamsters
               if (main) {
                 if (info.status === 'idle' && main.state !== 'idle' && main.state !== 'waiting') {
-                  hamsters = { ...hamsters, main: { ...main, state: 'idle', since: Date.now(), inFlight: [], activity: null } }
+                  // going idle stops *doing* things; what it said stays until it times out
+                  hamsters = { ...hamsters, main: { ...main, state: 'idle', since: Date.now(), inFlight: [], feed: main.feed.filter((f) => f.kind !== 'act') } }
                 } else if (info.status === 'busy' && !wasBusy && main.state === 'idle') {
                   hamsters = { ...hamsters, main: { ...main, state: 'thinking', since: Date.now() } }
                 }
@@ -428,7 +677,8 @@ export const useDesk = create<DeskStore>((set, get) => {
           cancelSummary(laneOf(e.sessionId, 'main'))
           updSession(e.sessionId, (s) => {
             const main = s.hamsters.main
-            const hamsters = main ? { ...s.hamsters, main: { ...main, state: 'thinking' as HamsterState, since: e.ts, bubble: null, activity: null } } : s.hamsters
+            // a new prompt starts a fresh conversation on screen too: the feed is wiped
+            const hamsters = main ? { ...s.hamsters, main: { ...main, state: 'thinking' as HamsterState, since: e.ts, feed: [] } } : s.hamsters
             return { ...s, lastPrompt: e.text, hamsters, waiting: false, lastActivity: Date.now() }
           })
           return
@@ -443,13 +693,17 @@ export const useDesk = create<DeskStore>((set, get) => {
             depth: e.depth,
             background: e.background,
             state: h.state === 'leaving' ? 'thinking' : h.state,
-            bubble: assignment ?? h.bubble,
           }))
-          if (assignment) askSummary(e.sessionId, e.agentId, assignment, 'assigned')
+          if (assignment) {
+            const id = push(e.sessionId, e.agentId, assignment)
+            if (id) askSummary(e.sessionId, e.agentId, id, assignment.raw, 'assigned')
+          }
           return
         }
         case 'agent_stop': {
-          say(e.sessionId, e.agentId, fixed(t().reportDone, 'talk'), { state: 'leaving', since: Date.now(), inFlight: [], activity: null })
+          // it is on its way out: what it was doing goes, the sign-off stays
+          clearFeed(e.sessionId, e.agentId, (f) => f.kind !== 'act')
+          say(e.sessionId, e.agentId, fixed(t().reportDone, 'talk'), { state: 'leaving', since: Date.now(), inFlight: [] })
           later(`leave:${e.sessionId}:${e.agentId}`, LEAVE_MS, () =>
             updSession(e.sessionId, (s) => {
               const h = s.hamsters[e.agentId]
@@ -486,20 +740,20 @@ export const useDesk = create<DeskStore>((set, get) => {
             since: e.ts,
             inFlight: [...h.inFlight, e.toolUseId],
             toolCount: h.toolCount + 1,
-            activity: label ? activityOf(label, 'info') : h.activity,
           }))
+          // the repeated ones are why the feed merges: `실행 중 ×3` rather than three rows
+          if (label) push(e.sessionId, hid, doing(label, 'info'))
           return
         }
         case 'tool_done': {
           const hid = hidOf(e.agentId)
-          if (!e.ok) cancelSummary(laneOf(e.sessionId, hid))
-          const failed = e.ok ? null : fixed(t().failed, 'warn')
           updHamster(e.sessionId, hid, (h) => {
             const inFlight = h.inFlight.filter((x) => x !== e.toolUseId)
             const busyStates: HamsterState[] = ['reading', 'searching', 'writing', 'running', 'hiring', 'browsing']
             const state = inFlight.length === 0 && busyStates.includes(h.state) ? 'thinking' : h.state
-            return { ...h, inFlight, state, since: state !== h.state ? Date.now() : h.since, bubble: failed ?? h.bubble }
+            return { ...h, inFlight, state, since: state !== h.state ? Date.now() : h.since }
           })
+          if (!e.ok) say(e.sessionId, hid, fixed(t().failed, 'warn'))
           return
         }
         case 'edit': {
@@ -513,21 +767,17 @@ export const useDesk = create<DeskStore>((set, get) => {
               { id: e.toolUseId, ts: e.ts, who: hid, whoName: who?.name ?? hid, file: e.file, op: e.op, added: e.added, removed: e.removed, preview: e.preview },
             ],
           }))
-          updHamster(e.sessionId, hid, (h) => ({
-            ...h,
-            editCount: h.editCount + 1,
-            activity: activityOf(`${baseName(e.file)}  ${sign}`, 'edit'),
-          }))
+          updHamster(e.sessionId, hid, (h) => ({ ...h, editCount: h.editCount + 1 }))
+          push(e.sessionId, hid, doing(`${baseName(e.file)}  ${sign}`, 'edit'))
           return
         }
         case 'text': {
           const hid = hidOf(e.agentId)
           const said = speech(e.text, 'talk')
           if (!said.text) return
-          updHamster(e.sessionId, hid, (h) =>
-            h.state === 'arriving' || h.state === 'leaving' ? { ...h, bubble: said } : { ...h, state: 'talking', since: e.ts, bubble: said },
-          )
-          askSummary(e.sessionId, hid, said, 'said')
+          const walking = ['arriving', 'leaving'].includes(get().sessions[e.sessionId]?.hamsters[hid]?.state ?? '')
+          const id = push(e.sessionId, hid, said, walking ? {} : { state: 'talking', since: e.ts })
+          if (id) askSummary(e.sessionId, hid, id, said.raw, 'said')
           return
         }
         case 'thinking': {
@@ -548,7 +798,8 @@ export const useDesk = create<DeskStore>((set, get) => {
         case 'turn_end':
           updSession(e.sessionId, (s) => {
             const main = s.hamsters.main
-            const hamsters = main ? { ...s.hamsters, main: { ...main, state: 'idle' as HamsterState, since: Date.now(), inFlight: [], activity: null } } : s.hamsters
+            // the turn is over: drop what it was doing, keep what it said
+            const hamsters = main ? { ...s.hamsters, main: { ...main, state: 'idle' as HamsterState, since: Date.now(), inFlight: [], feed: main.feed.filter((f) => f.kind !== 'act') } } : s.hamsters
             return { ...s, hamsters, turns: s.turns + 1 }
           })
           return
@@ -556,7 +807,7 @@ export const useDesk = create<DeskStore>((set, get) => {
           updSession(e.sessionId, (s) => ({ ...s, linesAdded: e.linesAdded, linesRemoved: e.linesRemoved, costUSD: e.costUSD }))
           return
         case 'compact':
-          updHamster(e.sessionId, 'main', (h) => ({ ...h, activity: activityOf(t().compacting, 'info') }))
+          say(e.sessionId, 'main', fixed(t().compacting, 'talk'))
           return
         case 'status': {
           const { kind: _k, ...snap } = e
@@ -588,12 +839,10 @@ export const useDesk = create<DeskStore>((set, get) => {
           set({ ptyWaiting: { ...st.ptyWaiting, [e.ptyId]: e.reason } })
           const s = sessionOfPty(e.ptyId)
           if (!s) return
-          cancelSummary(laneOf(s.info.sessionId, 'main'))
-          const ask = fixed(e.reason === 'permission' ? t().needPermission : t().haveQuestion, 'warn')
-          updSession(s.info.sessionId, (ss) => {
-            const main = ss.hamsters.main
-            const hamsters = main ? { ...ss.hamsters, main: { ...main, state: 'waiting' as HamsterState, since: Date.now(), bubble: ask } } : ss.hamsters
-            return { ...ss, waiting: true, hamsters }
+          updSession(s.info.sessionId, (ss) => ({ ...ss, waiting: true }))
+          say(s.info.sessionId, 'main', fixed(e.reason === 'permission' ? t().needPermission : t().haveQuestion, 'warn'), {
+            state: 'waiting',
+            since: Date.now(),
           })
           return
         }
@@ -606,9 +855,10 @@ export const useDesk = create<DeskStore>((set, get) => {
           updSession(s.info.sessionId, (ss) => {
             if (!ss.waiting) return ss
             const main = ss.hamsters.main
+            // the prompt is answered: the warning it was showing goes with it
             const hamsters =
               main && main.state === 'waiting'
-                ? { ...ss.hamsters, main: { ...main, state: 'thinking' as HamsterState, since: Date.now(), bubble: main.bubble?.tone === 'warn' ? null : main.bubble } }
+                ? { ...ss.hamsters, main: { ...main, state: 'thinking' as HamsterState, since: Date.now(), feed: main.feed.filter((f) => f.tone !== 'warn') } }
                 : ss.hamsters
             return { ...ss, waiting: false, hamsters }
           })

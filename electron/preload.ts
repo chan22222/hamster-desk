@@ -1,5 +1,5 @@
 import { contextBridge, ipcRenderer } from 'electron'
-import type { BubbleRequest, BubbleResult, BubbleState, DeskEvent, DirEntry, FileEntry, PtyInfo, RecentProject, SessionInfo, VersionInfo } from '../shared/events'
+import type { BubbleRequest, BubbleResult, BubbleState, DeskEvent, DirEntry, FileEntry, PtyInfo, SessionInfo, UiState, VersionInfo } from '../shared/events'
 
 export interface SeqEvent {
   seq: number
@@ -41,15 +41,25 @@ export interface DeskBridge {
     listDirs(path: string): Promise<{ path: string; parent: string | null; dirs: DirEntry[]; error: string | null }>
     list(path: string): Promise<{ path: string; parent: string | null; dirs: DirEntry[]; files: FileEntry[]; error: string | null }>
     drives(): Promise<string[]>
+    /** `{ [path]: still there? }` — one call for a whole list of folders */
+    exists(paths: string[]): Promise<Record<string, boolean>>
     openPath(path: string): Promise<string>
     showInFolder(path: string): void
   }
-  projects: { recent(limit?: number): Promise<RecentProject[]> }
+  /**
+   * UI settings kept in ~/.hamster-desk/ui.json — not localStorage, which lives in the Electron
+   * profile and therefore differs between the portable exe, `npm run dev` and the smoke runs.
+   * `save` shallow-merges the patch (a `null` value deletes the key) and resolves to the merged state.
+   */
+  ui: {
+    load(): Promise<UiState>
+    save(patch: UiState): Promise<UiState>
+  }
   win: {
     alwaysOnTop(on: boolean): void
     opacity(v: number): void
   }
-  info(): Promise<{ version: string; platform: string; home: string; debugPrefs: Record<string, unknown> | null; claudeLanguage: string | null }>
+  info(): Promise<{ version: string; platform: string; home: string; debugPrefs: Record<string, unknown> | null; claudeLanguage: string | null; uiPath: string }>
   /** smoke tests only: text to feed through xterm as if typed */
   onDebugType(cb: (ptyId: number, text: string) => void): () => void
 }
@@ -98,10 +108,14 @@ const bridge: DeskBridge = {
     listDirs: (p) => ipcRenderer.invoke('fs:listDirs', p),
     list: (p) => ipcRenderer.invoke('fs:list', p),
     drives: () => ipcRenderer.invoke('fs:drives'),
+    exists: (paths) => ipcRenderer.invoke('fs:exists', paths),
     openPath: (p) => ipcRenderer.invoke('fs:openPath', p),
     showInFolder: (p) => ipcRenderer.send('fs:showInFolder', p),
   },
-  projects: { recent: (limit) => ipcRenderer.invoke('projects:recent', limit) },
+  ui: {
+    load: () => ipcRenderer.invoke('ui:load'),
+    save: (patch) => ipcRenderer.invoke('ui:save', patch),
+  },
   win: {
     alwaysOnTop: (on) => ipcRenderer.send('win:alwaysOnTop', on),
     opacity: (v) => ipcRenderer.send('win:opacity', v),

@@ -103,12 +103,44 @@ app.whenReady().then(async () => {
       const ids = ${JSON.stringify(ids)};
       useDesk.setState({ sessions: { ...st.sessions, 'studio-preview': { ...s, hamsters: Object.fromEntries(ids.map(id => [id, s.hamsters[id]])), order: ids } } });
     `)
+    const clearFeeds = () => evaluate(`
+      const { useDesk } = await import('/store.ts');
+      const st = useDesk.getState(), s = st.sessions['studio-preview'];
+      useDesk.setState({ sessions: { ...st.sessions, 'studio-preview': { ...s, hamsters: Object.fromEntries(Object.entries(s.hamsters).map(([id, h]) => [id, { ...h, feed: [] }])) } } });
+    `)
     await keep(['main', 'studio-0', 'studio-1', 'studio-2'])
+    // the row budget in action: at this framing `feedLines` allows two rows per hamster, and the
+    // camera reserved exactly two rows' worth of sky for them
+    await studio('feedLife({ act: 60000, say: 60000, warn: 60000 })')
+    await studio("say('main', '\uc774 \ubd80\ubd84\uc740 \uc6cc\ucee4 \ucabd\uc5d0\uc11c \ucc98\ub9ac\ud560\uac8c\uc694')")
+    await studio("act('main', 'src/store.ts')")
+    await studio("say('studio-1', '\uc88c\uc11d \ubc30\uc815\ubd80\ud130 \ubcfc\uac8c\uc694')")
+    await studio("act('studio-2', 'npm run build')")
     await wait(1800)
     await shot('autoframe-4', 0)
+    await clearFeeds()
     await keep(['main'])
     await wait(1800)
     await shot('autoframe-1', 0)
+
+    // 9. the chat feed, in the framing it actually gets: the lone main hamster at the automatic
+    // close-up, which leaves the top of the frame clear for the stack. Rows come in at the bottom,
+    // nearest the head, and push the older ones up; the repeated activity merges into one `×3`.
+    // Lives are still stretched, so nothing ages out between the pushes and the capture.
+    await studio('feedLife({ act: 60000, say: 60000, warn: 60000 })')
+    await studio("say('main', '이 부분은 워커 쪽에서 처리하는 게 맞겠어요')")
+    await wait(200)
+    await studio("act('main', 'src/store.ts')")
+    await wait(150)
+    await studio("say('main', '테스트부터 돌려볼게요')")
+    await wait(150)
+    for (let i = 0; i < 3; i++) {
+      await studio("act('main', 'npm run test:office')")
+      await wait(120)
+    }
+    await shot('feed', 400)
+    await studio('feedLife({ act: 3000, say: 9000, warn: 12000 })')
+
 
     if (errors.length) {
       console.error('renderer errors:')

@@ -16,15 +16,80 @@
   --warn: #8a5a08;  --warn-soft: #fbf0da;
   --danger: #a33a25; --danger-soft: #fae7e2;
   --info: #2c5f7a;
+  --on-accent: #ffffff;  /* text that sits *on* --accent */
+  --accent-hover: #27593f;
   --term-bg: #121814;    /* the terminal panel */
+  --diff-old-bg: #fae7e2; --diff-old-text: #6d2417;
+  --diff-new-bg: #e3f1e7; --diff-new-text: #1c4a31;
   --radius: 6px; --radius-lg: 10px;
   --shadow-1: 0 1px 2px #17201a0f;
   --shadow-pop: 0 10px 28px #17201a1f, 0 2px 6px #17201a14;
+
+  /* The studio contract: DOM chrome that floats over the 3D canvas uses these, never the surface
+     tokens above. The scene stays bright in both themes, so the dark set is a dark *translucent*
+     panel rather than an inverted one — light text on a light beach would be unreadable. */
+  --overlay-bg: #ffffffd9;
+  --overlay-bg-strong: #ffffffe8;
+  --overlay-line: #17201a1f;
+  --overlay-shadow: #17201a24;   /* a colour, not a shadow: the studio writes `0 2px 10px var(…)` */
+  --overlay-text: #17201a;
+  --overlay-text-2: #55605a;
+  --bubble-bg: #f4f0df;        /* the scene's own voice: cream, not app chrome */
+  --bubble-text: #2f3c32;
+  --bubble-dim: #5c6a56;
+  --bubble-warn-bg: #f5e2cf;
+  --bubble-name-bg: #e9e6f3;
+  --plate-bg: #ffffffef;
+  --plate-line: #17201a1f;
   font-family: 'Pretendard', 'Pretendard Variable', system-ui, -apple-system, 'Malgun Gothic', sans-serif;
   font-size: 13px;
   font-feature-settings: 'tnum' 1;  /* fixed-width digits, so a counting percentage never jitters */
   color: var(--text);
 }
+
+/* The dark set: the same roles under the same names, so every rule below keeps working — only the
+   values flip. `<html data-theme>` is written by src/widgets/theme.ts, which is also what makes
+   `system` follow the OS. The terminal only *deepens* (it is Claude Code's own canvas either way),
+   and the overlay tokens stay a dark translucent panel because the 3D scene is bright in both. */
+:root[data-theme='dark'] {
+  color-scheme: dark;
+  --bg: #0f1311;
+  --surface: #161b18;
+  --surface-2: #1d2420;
+  --surface-3: #27302b;
+  --line: #2b342e;
+  --line-strong: #3d4a42;
+  --text: #eef1ec;
+  --text-2: #b6c0b8;
+  --text-3: #8c968e;     /* 4.9:1 on --surface — never go fainter than this */
+  --accent: #79c79a;
+  --accent-soft: #1e3329;
+  --warn: #e3b168;  --warn-soft: #342a1a;
+  --danger: #f0a08c; --danger-soft: #3a241e;
+  --info: #93c6df;
+  --on-accent: #10241a;  /* white on this accent would be 1.9:1 */
+  --accent-hover: #93d6ac;
+  --term-bg: #0e1310;
+  --diff-old-bg: #3a201a; --diff-old-text: #f5c6b8;
+  --diff-new-bg: #16331f; --diff-new-text: #a8dcbb;
+  --shadow-1: 0 1px 2px #00000066;
+  --shadow-pop: 0 12px 30px #00000088, 0 2px 8px #00000066;
+
+  --overlay-bg: #16201bdb;
+  --overlay-bg-strong: #121a16f0;
+  --overlay-line: #ffffff26;
+  --overlay-shadow: #00000059;
+  --overlay-text: #f2f5f0;
+  --overlay-text-2: #c5cec6;
+  --bubble-bg: #1f2b24f2;
+  --bubble-text: #e9f0e6;
+  --bubble-dim: #adbaad;
+  --bubble-warn-bg: #3a2b1cf2;
+  --bubble-name-bg: #282b3df2;
+  --plate-bg: #18211ceb;
+  --plate-line: #ffffff2e;
+}
+
 * { box-sizing: border-box; }
 html, body, #root { height: 100%; margin: 0; background: var(--bg); overflow: hidden; }
 button { font: inherit; color: inherit; background: none; border: 0; cursor: pointer; }
@@ -41,6 +106,9 @@ button:focus-visible, select:focus-visible, input:focus-visible { outline: 2px s
 ::-webkit-scrollbar-corner { background: transparent; }
 
 .app { display: flex; flex-direction: column; height: 100%; }
+/* The settings file is read over IPC, so the first frame would be the defaults — a light flash for
+   a dark-theme user, a shifted layout for everyone. It is one IPC round trip, not a transition. */
+.app[data-booting] { visibility: hidden; }
 
 /* ---- top bar ------------------------------------------------------------------------- */
 .topbar { display: flex; align-items: center; gap: 8px; height: 44px; padding: 0 10px; background: var(--surface); border-bottom: 1px solid var(--line); -webkit-app-region: drag; }
@@ -75,8 +143,8 @@ button:focus-visible, select:focus-visible, input:focus-visible { outline: 2px s
 .pill { display: flex; align-items: center; gap: 6px; height: 28px; padding: 0 9px; border-radius: var(--radius); border: 1px solid var(--line); background: var(--surface); color: var(--text-2); font-size: 12px; white-space: nowrap; }
 .pill:hover { background: var(--surface-2); color: var(--text); }
 .pill.on, .pill.is-open { background: var(--surface-3); border-color: var(--line-strong); color: var(--text); }
-.pill.alert { background: var(--accent); border-color: transparent; color: #fff; }
-.pill.alert:hover { background: #27593f; color: #fff; }
+.pill.alert { background: var(--accent); border-color: transparent; color: var(--on-accent); }
+.pill.alert:hover { background: var(--accent-hover); color: var(--on-accent); }
 
 /* ---- usage: two independent gauges, each with its own popover ------------------------- */
 .usage { display: flex; align-items: center; gap: 6px; flex: none; }
@@ -111,13 +179,21 @@ button:focus-visible, select:focus-visible, input:focus-visible { outline: 2px s
 .pop-line { font-size: 13px; color: var(--text); }
 .pop-row { display: flex; gap: 6px; }
 .pop-row > * { flex: 1; }
-.pop-primary { display: inline-flex; align-items: center; justify-content: center; gap: 6px; height: 32px; padding: 0 12px; border-radius: var(--radius); background: var(--accent); color: #fff; font-size: 13px; font-weight: 500; }
-.pop-primary:hover:not(:disabled) { background: #27593f; }
+.pop-primary { display: inline-flex; align-items: center; justify-content: center; gap: 6px; height: 32px; padding: 0 12px; border-radius: var(--radius); background: var(--accent); color: var(--on-accent); font-size: 13px; font-weight: 500; }
+.pop-primary:hover:not(:disabled) { background: var(--accent-hover); }
 .pop-primary:disabled { opacity: 0.5; cursor: default; }
 .pop-ghost { display: inline-flex; align-items: center; justify-content: center; gap: 6px; height: 32px; padding: 0 12px; border-radius: var(--radius); border: 1px solid var(--line-strong); background: var(--surface); color: var(--text-2); font-size: 13px; }
 .pop-ghost:hover { color: var(--text); background: var(--surface-2); }
 .pop-field { display: flex; align-items: center; justify-content: space-between; gap: 8px; height: 32px; font-size: 13px; color: var(--text-2); }
 .pop-field select, .side-crumbs select { background: var(--surface-2); color: var(--text); border: 1px solid var(--line); border-radius: var(--radius); padding: 4px 6px; font: inherit; font-size: 12px; }
+/* two or three exclusive choices, side by side — a stack of radio rows would double the menu */
+.seg { display: inline-flex; flex: none; padding: 2px; gap: 2px; border: 1px solid var(--line); border-radius: var(--radius); background: var(--surface-2); }
+.seg-btn { padding: 3px 8px; border-radius: 4px; font-size: 12px; color: var(--text-2); white-space: nowrap; }
+.seg-btn:hover { color: var(--text); }
+.seg-btn.is-on { background: var(--surface); color: var(--text); font-weight: 500; box-shadow: var(--shadow-1); }
+/* where the settings actually live: quiet, but the one line that answers "where did it save?" */
+.pop-path { display: block; width: 100%; padding: 2px 6px 0; text-align: left; font-size: 11px; color: var(--text-3); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.pop-path:hover { color: var(--text-2); text-decoration: underline; }
 .pop-check { display: flex; align-items: center; gap: 8px; width: 100%; height: 32px; padding: 0 6px; border-radius: var(--radius); font-size: 13px; text-align: left; color: var(--text-2); }
 .pop-check:hover:not(:disabled) { background: var(--surface-2); color: var(--text); }
 .pop-check:disabled { opacity: 0.45; cursor: default; }
@@ -148,29 +224,44 @@ button:focus-visible, select:focus-visible, input:focus-visible { outline: 2px s
 /* ---- layout --------------------------------------------------------------------------- */
 .body { display: flex; flex: 1; min-height: 0; }
 .column { display: flex; flex-direction: column; flex: 1; min-width: 0; position: relative; }
-.splitter { position: relative; height: 8px; cursor: row-resize; background: var(--bg); border-top: 1px solid var(--line); border-bottom: 1px solid var(--line); }
+/* `책상 위치: 오른쪽` — the same three children, laid out across instead of down */
+.column.is-beside { flex-direction: row; }
+.column.is-beside > .desk-wrap { width: var(--desk-w); flex: none; }
+.splitter { position: relative; flex: none; height: 8px; cursor: row-resize; background: var(--bg); border-top: 1px solid var(--line); border-bottom: 1px solid var(--line); }
 .splitter::after { content: ''; position: absolute; width: 32px; height: 3px; left: calc(50% - 16px); top: 2px; border-radius: 2px; background: var(--line-strong); }
 .splitter:hover { background: var(--accent-soft); }
-.panes { flex: 1; min-height: 0; display: flex; flex-direction: column; position: relative; }
+.splitter.is-v { height: auto; width: 8px; cursor: col-resize; border: 0; border-left: 1px solid var(--line); border-right: 1px solid var(--line); }
+.splitter.is-v::after { width: 3px; height: 32px; left: 2px; top: calc(50% - 16px); }
+.panes { flex: 1; min-height: 0; min-width: 0; display: flex; flex-direction: column; position: relative; }
 /* the one dark panel: Claude Code paints this with its own theme, and a light background would
    swallow every dim colour it uses */
 .term-host { flex: 1; min-height: 0; padding: 6px 0 0 10px; background: var(--term-bg); border-top: 1px solid var(--line); }
 .term-host .xterm { height: 100%; }
 .ext-pane { flex: 1; display: flex; align-items: center; justify-content: center; background: var(--bg); color: var(--text-2); font-size: 13px; line-height: 1.7; padding: 24px; text-align: center; }
+/* no terminal at all: the `+` menu's list again, in the middle of the window */
+.start-pane { flex: 1; min-height: 0; display: flex; align-items: center; justify-content: center; background: var(--bg); padding: 24px; overflow: auto; }
+.start-card { width: 340px; max-width: 100%; padding: 12px; border: 1px solid var(--line); border-radius: var(--radius-lg); background: var(--surface); box-shadow: var(--shadow-pop); }
 .desk-wrap { position: relative; overflow: hidden; background: var(--bg); flex: none; }
 .desk-canvas { display: block; }
 
 /* ---- sidebar -------------------------------------------------------------------------- */
-.sidebar { width: 248px; flex: none; display: flex; flex-direction: column; min-height: 0; background: var(--surface); border-right: 1px solid var(--line); }
+/* the width itself is an inline style, because it is a preference the user drags (prefs.sidebarW) */
+.sidebar { position: relative; flex: none; display: flex; flex-direction: column; min-height: 0; background: var(--surface); border-right: 1px solid var(--line); }
+.side-resize { position: absolute; top: 0; right: -2px; width: 4px; height: 100%; z-index: 5; cursor: col-resize; }
+.side-resize:hover, .side-resize:active { background: var(--accent-soft); }
 .side-search { display: flex; align-items: center; gap: 6px; height: 30px; margin: 8px; padding: 0 8px; background: var(--surface-2); border: 1px solid var(--line); border-radius: var(--radius); color: var(--text-3); }
 .side-search:focus-within { border-color: var(--accent); box-shadow: 0 0 0 3px var(--accent-soft); }
 .side-search svg { flex: none; }
 .side-filter { flex: 1; min-width: 0; background: none; border: 0; color: var(--text); font: inherit; font-size: 12px; outline: none; }
 .side-filter::placeholder { color: var(--text-2); }
-.side-scroll { flex: 1; overflow-y: auto; padding-bottom: 8px; }
-.side-section + .side-section { margin-top: 8px; padding-top: 8px; border-top: 1px solid var(--line); }
-.side-title { display: flex; align-items: center; gap: 4px; width: 100%; padding: 8px; color: var(--text-2); font-size: 12px; font-weight: 600; }
+.side-section { display: flex; flex-direction: column; min-height: 0; }
+/* what changed must never push the browser off screen: 45% of the sidebar, then it scrolls itself */
+.side-changed { flex: none; max-height: 45%; border-bottom: 1px solid var(--line); }
+.side-browse { flex: 1 1 auto; }
+.side-rows { flex: 1; min-height: 0; overflow-y: auto; padding-bottom: 8px; }
+.side-title { display: flex; align-items: center; gap: 4px; flex: none; width: 100%; padding: 8px; color: var(--text-2); font-size: 12px; font-weight: 600; }
 .side-title:hover { color: var(--text); }
+.side-count { padding: 0 6px; border-radius: 999px; background: var(--surface-2); color: var(--text-2); font-size: 11px; line-height: 16px; font-variant-numeric: tabular-nums; }
 .side-caret { display: inline-flex; align-items: center; justify-content: center; width: 14px; color: var(--text-3); }
 .side-empty { margin: 4px 6px; padding: 10px 12px; border-radius: var(--radius); background: var(--bg); color: var(--text-2); font-size: 13px; line-height: 1.6; }
 .rec-row { display: flex; align-items: center; gap: 8px; height: 34px; margin: 0 6px; padding: 0 8px; border-radius: var(--radius); cursor: pointer; user-select: none; }
@@ -186,14 +277,21 @@ button:focus-visible, select:focus-visible, input:focus-visible { outline: 2px s
 .rec-row:hover .rec-star, .rec-star.is-on { opacity: 1; }
 .rec-star:hover { background: var(--surface-3); color: var(--text); }
 .rec-star.is-on { color: var(--warn); }
-.side-more { width: 100%; padding: 6px 8px 6px 32px; text-align: left; color: var(--text-2); font-size: 12px; }
-.side-more:hover { color: var(--text); background: var(--surface-2); }
+.rec-x { display: inline-flex; align-items: center; justify-content: center; width: 18px; height: 18px; border-radius: 4px; flex: none; color: var(--text-3); opacity: 0; }
+.rec-row:hover .rec-x { opacity: 1; }
+.rec-x:hover { background: var(--surface-3); color: var(--danger); }
+/* a folder that has since been deleted or renamed: still listed, but plainly not openable */
+.rec-row.is-gone .rec-name, .rec-row.is-gone .rec-ico { color: var(--text-3); text-decoration: line-through; }
+.rec-row.is-gone .rec-when { color: var(--danger); }
+/* the recent list as it appears in the `+` menu and the start card */
+.rl-search { margin: 0 0 2px; }
+.rl-list { overflow-y: auto; margin: 0 -6px; }
 .side-crumbs { display: flex; flex-wrap: wrap; align-items: center; gap: 2px; padding: 4px 12px; font-size: 11px; color: var(--text-3); }
 .crumb { padding: 2px 4px; border-radius: 4px; color: var(--text-2); font-size: 11px; }
 .crumb:hover { background: var(--surface-2); color: var(--text); }
 .side-actions { display: flex; gap: 4px; padding: 6px 8px 10px; }
-.side-primary { flex: 1; min-width: 0; height: 30px; padding: 0 9px; border-radius: var(--radius); background: var(--accent); color: #fff; font-size: 12px; font-weight: 500; text-align: left; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.side-primary:hover { background: #27593f; }
+.side-primary { flex: 1; min-width: 0; height: 30px; padding: 0 9px; border-radius: var(--radius); background: var(--accent); color: var(--on-accent); font-size: 12px; font-weight: 500; text-align: left; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.side-primary:hover { background: var(--accent-hover); }
 .side-mini { display: inline-flex; align-items: center; justify-content: center; width: 28px; height: 30px; flex: none; border-radius: var(--radius); border: 1px solid var(--line); background: var(--surface); color: var(--text-2); }
 .side-mini:hover:not(:disabled) { background: var(--surface-2); border-color: var(--line-strong); color: var(--text); }
 .side-mini:disabled { opacity: 0.4; cursor: default; }
@@ -214,26 +312,23 @@ button:focus-visible, select:focus-visible, input:focus-visible { outline: 2px s
 .ctx-menu button { display: flex; align-items: center; width: 100%; height: 32px; padding: 0 8px; border-radius: var(--radius); text-align: left; font-size: 13px; color: var(--text-2); }
 .ctx-menu button:hover { background: var(--surface-2); color: var(--text); }
 
-/* ---- changed files -------------------------------------------------------------------- */
-.filelog { width: 300px; flex: none; display: flex; flex-direction: column; min-height: 0; border-left: 1px solid var(--line); background: var(--surface); }
-.filelog-head { display: flex; align-items: center; gap: 8px; height: 44px; flex: none; padding: 0 8px 0 14px; border-bottom: 1px solid var(--line); font-size: 13px; color: var(--text); }
-.filelog-head .dim { flex: 1; font-size: 11px; }
-.filelog-list { overflow-y: auto; flex: 1; }
-.filelog-empty { padding: 20px 14px; background: var(--bg); color: var(--text-2); font-size: 13px; line-height: 1.6; }
-.file-row { border-bottom: 1px solid var(--line); }
-.file-main { display: flex; flex-direction: column; align-items: flex-start; width: 100%; text-align: left; padding: 8px 14px; gap: 2px; }
+/* ---- changed files (a section of the sidebar, so a row is two narrow lines) ------------- */
+.file-row + .file-row { border-top: 1px solid var(--line); }
+.file-main { display: flex; flex-direction: column; align-items: stretch; width: 100%; text-align: left; padding: 6px 8px; gap: 1px; }
 .file-main:hover { background: var(--surface-2); }
 .file-main:hover .file-dir, .file-main:hover .file-meta { color: var(--text-2); }
-.file-name { font-weight: 500; color: var(--text); font-family: ui-monospace, Consolas, monospace; font-size: 12px; }
-.file-dir { font-size: 11px; color: var(--text-3); font-family: ui-monospace, Consolas, monospace; max-width: 100%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; direction: rtl; }
-.file-meta { font-size: 11px; color: var(--text-3); font-variant-numeric: tabular-nums; }
+.file-top { display: flex; align-items: baseline; gap: 8px; min-width: 0; }
+.file-name { flex: 1; min-width: 0; font-weight: 500; color: var(--text); font-family: ui-monospace, Consolas, monospace; font-size: 12px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+/* rtl keeps the *end* of the path (the folder you are in), which is the half that identifies it */
+.file-dir { font-size: 11px; color: var(--text-3); font-family: ui-monospace, Consolas, monospace; max-width: 100%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; direction: rtl; text-align: left; }
+.file-meta { flex: none; font-size: 11px; color: var(--text-3); font-variant-numeric: tabular-nums; }
 .file-meta .add { color: var(--accent); }
 .file-meta .rem { color: var(--danger); }
-.file-preview { padding: 0 14px 12px; }
+.file-preview { padding: 0 8px 10px; }
 .pv-label { font-size: 11px; color: var(--text-3); margin: 6px 0; }
 .file-preview pre { margin: 0 0 6px; padding: 8px; border-radius: var(--radius); font-size: 12px; max-height: 220px; overflow: auto; white-space: pre-wrap; word-break: break-all; font-family: ui-monospace, Consolas, monospace; line-height: 1.5; }
-.pv-old { background: #fae7e2; color: #6d2417; }
-.pv-new { background: #e3f1e7; color: #1c4a31; }
+.pv-old { background: var(--diff-old-bg); color: var(--diff-old-text); }
+.pv-new { background: var(--diff-new-bg); color: var(--diff-new-text); }
 
 /* ---- the studio: light chrome floating over a bright voxel island ---------------------- */
 /* Everything here sits on sand and sea, so a white panel needs a hairline and a shadow of its
@@ -243,90 +338,99 @@ button:focus-visible, select:focus-visible, input:focus-visible { outline: 2px s
 .desk-canvas-host { position: absolute; inset: 0; }
 .desk-studio .desk-canvas { display: block; width: 100%; height: 100%; }
 .office-nogl { position: absolute; inset: 0; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 4px; text-align: center; line-height: 1.7; background: var(--bg); color: var(--text-2); font-size: 13px; }
-/* Name plates, bubbles and thought glyphs float in the DOM over the canvas, positioned by projection. */
-.desk3d-overlay { position: absolute; inset: 0; pointer-events: none; overflow: hidden; }
-.office-nameplate { position: absolute; top: 0; left: 0; display: grid; grid-template-columns: auto 1fr; grid-template-rows: auto auto; align-items: center; gap: 1px 6px; padding: 4px 9px 5px; border: 1px solid #17201a1f; border-radius: var(--radius); background: #ffffffef; box-shadow: 0 2px 8px #17201a24; white-space: nowrap; pointer-events: none; }
-.office-nameplate.is-selected { border-color: var(--accent); box-shadow: 0 0 0 2px var(--accent-soft), 0 2px 8px #17201a24; }
+/* Name plates, bubbles and thought glyphs float in the DOM over the canvas, positioned by
+   projection. They sit above the header's fade: a feed stacked over a hamster's head reaches into
+   that band, and the gradient used to wash the oldest rows out until they could not be read. */
+.desk3d-overlay { position: absolute; inset: 0; z-index: 1; pointer-events: none; overflow: hidden; }
+.office-nameplate { position: absolute; top: 0; left: 0; display: grid; grid-template-columns: auto 1fr; grid-template-rows: auto auto; align-items: center; gap: 1px 6px; padding: 4px 9px 5px; border: 1px solid var(--plate-line); border-radius: var(--radius); background: var(--plate-bg); box-shadow: 0 2px 8px var(--overlay-shadow); white-space: nowrap; pointer-events: none; }
+.office-nameplate.is-selected { border-color: var(--accent); box-shadow: 0 0 0 2px var(--accent-soft), 0 2px 8px var(--overlay-shadow); }
 .office-nameplate .np-dot { width: 5px; height: 5px; border-radius: 50%; grid-row: span 2; }
-.office-nameplate .np-name { font-size: 11px; font-weight: 600; color: var(--text); }
+.office-nameplate .np-name { font-size: 11px; font-weight: 600; color: var(--overlay-text); }
 .office-nameplate .np-name.is-main { color: var(--warn); }
-.office-nameplate .np-sub { font-size: 11px; color: var(--text-3); }
-.office-glyph { position: absolute; top: 0; left: 0; font: 600 13px Consolas, monospace; color: var(--text); text-shadow: 0 1px 3px #fff, 0 0 6px #fff; pointer-events: none; }
+.office-nameplate .np-sub { font-size: 11px; color: var(--overlay-text-2); }
+.office-glyph { position: absolute; top: 0; left: 0; font: 600 13px Consolas, monospace; color: var(--overlay-text); text-shadow: 0 1px 3px var(--overlay-bg-strong), 0 0 6px var(--overlay-bg-strong); pointer-events: none; }
 .office-glyph.is-alert { color: var(--danger); }
 .office-vignette { position: absolute; inset: 0; pointer-events: none; background: linear-gradient(180deg, #17201a14, transparent 26%, transparent 74%, #17201a14); }
-.office-header { position: absolute; inset: 0 0 auto; padding: 16px 20px 26px; display: flex; align-items: flex-start; justify-content: space-between; gap: 16px; background: linear-gradient(#ffffffe8, #ffffffad 55%, transparent); cursor: default; }
+.office-header { position: absolute; inset: 0 0 auto; padding: 16px 20px 26px; display: flex; align-items: flex-start; justify-content: space-between; gap: 16px; background: linear-gradient(var(--overlay-bg-strong), var(--overlay-bg) 55%, transparent); cursor: default; }
 .office-heading { display: flex; flex-direction: column; gap: 5px; min-width: 0; }
-.office-eyebrow { display: flex; align-items: center; gap: 7px; color: var(--text-3); font-size: 11px; letter-spacing: 0.12em; font-weight: 600; white-space: nowrap; }
+.office-eyebrow { display: flex; align-items: center; gap: 7px; color: var(--overlay-text-2); font-size: 11px; letter-spacing: 0.12em; font-weight: 600; white-space: nowrap; }
 .office-live-dot { width: 5px; height: 5px; border-radius: 50%; background: var(--accent); box-shadow: 0 0 0 3px var(--accent-soft); }
-.office-floor { margin-left: 3px; padding-left: 10px; border-left: 1px solid #17201a2e; color: var(--text-3); font-family: Consolas, monospace; letter-spacing: 0.08em; }
-.office-title { font-size: 15px; font-weight: 600; letter-spacing: -0.2px; color: var(--text); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.office-status { display: flex; align-items: center; gap: 14px; color: var(--text-2); font-size: 11px; padding-top: 8px; white-space: nowrap; }
+.office-floor { margin-left: 3px; padding-left: 10px; border-left: 1px solid var(--overlay-line); color: var(--overlay-text-2); font-family: Consolas, monospace; letter-spacing: 0.08em; }
+.office-title { font-size: 15px; font-weight: 600; letter-spacing: -0.2px; color: var(--overlay-text); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.office-status { display: flex; align-items: center; gap: 14px; color: var(--overlay-text-2); font-size: 11px; padding-top: 8px; white-space: nowrap; }
 .office-status > span { display: flex; align-items: center; gap: 5px; }
 .office-status i { width: 5px; height: 5px; background: var(--line-strong); border-radius: 50%; }
 .office-status i.status-active { background: var(--accent); }
 .office-status .needs-attention { color: var(--danger); }
 .office-status .needs-attention i { background: var(--danger); }
-.office-status .office-occupancy { border-left: 1px solid #17201a2e; padding-left: 14px; font: 15px Consolas, monospace; color: var(--text); font-variant-numeric: tabular-nums; }
-.office-occupancy small { font-size: 11px; color: var(--text-3); }
+.office-status .office-occupancy { border-left: 1px solid var(--overlay-line); padding-left: 14px; font: 15px Consolas, monospace; color: var(--overlay-text); font-variant-numeric: tabular-nums; }
+.office-occupancy small { font-size: 11px; color: var(--overlay-text-2); }
 .office-bottom { position: absolute; left: 18px; right: 18px; bottom: 15px; display: flex; align-items: center; justify-content: space-between; gap: 10px; pointer-events: none; }
-.office-follow, .office-controls { display: flex; align-items: center; height: 32px; border: 1px solid #17201a1f; background: #fffffff2; box-shadow: 0 2px 10px #17201a24; border-radius: 8px; color: var(--text-2); pointer-events: auto; cursor: default; }
+.office-follow, .office-controls { display: flex; align-items: center; height: 32px; border: 1px solid var(--overlay-line); background: var(--overlay-bg-strong); box-shadow: 0 2px 10px var(--overlay-shadow); border-radius: 8px; color: var(--overlay-text-2); pointer-events: auto; cursor: default; }
 .office-follow { min-width: 0; max-width: 46%; padding: 0 9px; gap: 6px; }
-.office-follow-icon { display: inline-flex; align-items: center; color: var(--text-3); }
-.office-follow select { width: 165px; max-width: 100%; background: transparent; border: 0; font: inherit; font-size: 11px; color: var(--text-2); padding: 4px 0; outline: none; text-overflow: ellipsis; cursor: pointer; }
-.office-follow option { background: #fff; color: var(--text); }
+.office-follow-icon { display: inline-flex; align-items: center; color: var(--overlay-text-2); }
+.office-follow select { width: 165px; max-width: 100%; background: transparent; border: 0; font: inherit; font-size: 11px; color: var(--overlay-text-2); padding: 4px 0; outline: none; text-overflow: ellipsis; cursor: pointer; }
+.office-follow option { background: var(--surface); color: var(--text); }
 .office-controls { padding: 3px; gap: 1px; }
-.office-controls button { display: inline-flex; align-items: center; justify-content: center; gap: 5px; height: 26px; min-width: 26px; padding: 0 7px; border-radius: 4px; font-size: 11px; color: var(--text-2); }
-.office-controls button:hover { background: var(--surface-2); color: var(--text); }
+.office-controls button { display: inline-flex; align-items: center; justify-content: center; gap: 5px; height: 26px; min-width: 26px; padding: 0 7px; border-radius: 4px; font-size: 11px; color: var(--overlay-text-2); }
+.office-controls button:hover { background: var(--surface-2); color: var(--overlay-text); }
 .office-controls button.is-on { background: var(--accent-soft); color: var(--accent); }
-.office-zoom { min-width: 40px; text-align: center; font: 11px Consolas, monospace; color: var(--text-2); font-variant-numeric: tabular-nums; }
-.control-divider { height: 14px; width: 1px; background: #17201a1f; margin: 0 3px; }
+.office-zoom { min-width: 40px; text-align: center; font: 11px Consolas, monospace; color: var(--overlay-text-2); font-variant-numeric: tabular-nums; }
+.control-divider { height: 14px; width: 1px; background: var(--overlay-line); margin: 0 3px; }
 /* Dark ink reads on the island but not over open water, and at overview zoom that is most of the
    frame. A halo was not enough at 11px, so both lines get the same soft white chip the follow bar,
    the controls and the minimap wear — legible over sand, deck and sea alike. */
-.office-help { position: absolute; bottom: 53px; left: 20px; padding: 3px 9px; border-radius: 999px; background: #ffffffd9; color: var(--text-2); font-size: 11px; pointer-events: none; }
+.office-help { position: absolute; bottom: 53px; left: 20px; padding: 3px 9px; border-radius: 999px; background: var(--overlay-bg); color: var(--overlay-text-2); font-size: 11px; pointer-events: none; }
 .office-help span { margin: 0 6px; opacity: .55; }
-.office-metrics { position: absolute; right: 20px; bottom: 53px; padding: 3px 9px; border-radius: 999px; background: #ffffffd9; font: 11px Consolas, monospace; color: var(--text-2); display: flex; align-items: center; gap: 6px; font-variant-numeric: tabular-nums; pointer-events: none; }
+.office-metrics { position: absolute; right: 20px; bottom: 53px; padding: 3px 9px; border-radius: 999px; background: var(--overlay-bg); font: 11px Consolas, monospace; color: var(--overlay-text-2); display: flex; align-items: center; gap: 6px; font-variant-numeric: tabular-nums; pointer-events: none; }
 .office-metrics span { color: var(--accent); }
-.office-metrics i { width: 1px; height: 9px; background: #17201a33; }
-.office-minimap { position: absolute; bottom: 74px; right: 19px; width: 166px; padding: 9px; border-radius: 8px; border: 1px solid #17201a1f; background: #fffffff2; box-shadow: 0 2px 10px #17201a24; color: var(--text-2); cursor: default; }
-.office-minimap > span { display: flex; justify-content: space-between; align-items: baseline; gap: 8px; white-space: nowrap; color: var(--text-2); font: 11px Consolas, monospace; margin-bottom: 8px; }
-.office-minimap small { font: 11px 'Malgun Gothic', sans-serif; color: var(--text-3); }
+.office-metrics i { width: 1px; height: 9px; background: var(--overlay-line); }
+.office-minimap { position: absolute; bottom: 74px; right: 19px; width: 166px; padding: 9px; border-radius: 8px; border: 1px solid var(--overlay-line); background: var(--overlay-bg-strong); box-shadow: 0 2px 10px var(--overlay-shadow); color: var(--overlay-text-2); cursor: default; }
+.office-minimap > span { display: flex; justify-content: space-between; align-items: baseline; gap: 8px; white-space: nowrap; color: var(--overlay-text-2); font: 11px Consolas, monospace; margin-bottom: 8px; }
+.office-minimap small { font: 11px 'Malgun Gothic', sans-serif; color: var(--overlay-text-2); }
 .office-minimap svg { display: block; width: 100%; border-radius: 3px; overflow: hidden; cursor: crosshair; }
 .office-minimap polygon { pointer-events: none; }
 .office-overflow { font-size: 11px; color: var(--warn); margin-left: 4px; white-space: nowrap; }
-.office-welcome { position: absolute; left: 22px; top: 100px; width: 214px; padding: 16px; border: 1px solid #17201a1f; border-radius: var(--radius-lg); background: #fffffff5; box-shadow: var(--shadow-pop); pointer-events: none; }
-.office-welcome > span { color: var(--text); font-size: 13px; font-weight: 600; }
-.office-welcome p { color: var(--text-2); font-size: 12px; line-height: 1.75; margin: 7px 0 0; }
+.office-welcome { position: absolute; left: 22px; top: 100px; width: 214px; padding: 16px; border: 1px solid var(--overlay-line); border-radius: var(--radius-lg); background: var(--overlay-bg-strong); box-shadow: var(--shadow-pop); pointer-events: none; }
+.office-welcome > span { color: var(--overlay-text); font-size: 13px; font-weight: 600; word-break: keep-all; }
+/* keep-all: Korean has no inter-syllable break opportunity by default, so a 214px card would
+   split '실행하거나' mid-word. `anywhere` is the escape hatch for the odd long path or URL. */
+.office-welcome p { color: var(--overlay-text-2); font-size: 12px; line-height: 1.75; margin: 7px 0 0; word-break: keep-all; overflow-wrap: anywhere; }
 .office-welcome code { background: var(--surface-2); color: var(--text); }
 /* The card itself ignores the pointer so the canvas can be dragged through it; the buttons opt back in. */
 .office-welcome-actions { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 12px; pointer-events: auto; }
 .office-welcome-actions button { flex: 1 1 auto; min-width: 0; height: 28px; padding: 0 10px; border-radius: var(--radius); border: 1px solid var(--line-strong); background: var(--surface); color: var(--text-2); font-size: 12px; font-weight: 500; white-space: nowrap; }
 .office-welcome-actions button:hover { background: var(--surface-2); color: var(--text); }
 .office-welcome-actions button code { padding: 0 2px; background: none; color: inherit; font-size: 11px; opacity: .7; }
-.office-welcome-actions .owa-run { background: var(--accent); border-color: transparent; color: #fff; }
-.office-welcome-actions .owa-run:hover { background: #27593f; color: #fff; }
+/* `--on-accent`, not #fff: the dark accent is a pale green and white on it is 1.9:1 */
+.office-welcome-actions .owa-run { background: var(--accent); border-color: transparent; color: var(--on-accent); }
+.office-welcome-actions .owa-run:hover { background: var(--accent-hover); color: var(--on-accent); }
 
-/* A hamster's bubble: what it is saying (stays until ticked off) over what it is doing now.
-   The cream stays — it is the scene's own voice, not app chrome. */
-.office-bubble { position: absolute; top: 0; left: 0; max-width: 240px; padding: 6px 10px; border: 1px solid #ffffffcc; border-radius: var(--radius-lg) var(--radius-lg) var(--radius-lg) 2px; background: #f4f0df; color: #2f3c32; box-shadow: 0 4px 12px #17201a2e; pointer-events: auto; cursor: pointer; transform-origin: 50% 100%; animation: ob-pop 150ms ease-out; }
-@keyframes ob-pop { from { opacity: 0; scale: 0.92; } }
-.office-bubble.is-speech { padding-right: 24px; }
-.office-bubble.tone-warn { background: #f5e2cf; }
-.office-bubble.tone-name { background: #e9e6f3; }
-.office-bubble.is-activity-only { padding: 4px 9px; background: #f2f5ecf2; color: #3c4a38; cursor: default; pointer-events: none; }
-/* The bubble element itself lives as long as its hamster has anything to show; each new sentence
-   remounts only this inner block (keyed per sentence), which is what replays the pop-in. */
-.ob-speech { display: -webkit-box; -webkit-line-clamp: 3; -webkit-box-orient: vertical; overflow: hidden; max-width: 240px; font-size: 12px; line-height: 1.45; white-space: pre-wrap; word-break: break-word; animation: ob-say 160ms ease-out; }
-@keyframes ob-say { from { opacity: 0; translate: 0 3px; } }
-.ob-activity { max-width: 220px; margin-top: 3px; font-size: 11px; line-height: 1.4; color: #5c6a56; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.ob-activity.is-edit { color: #35603f; }
-.is-activity-only .ob-activity { margin-top: 0; color: #3c4a38; }
-.ob-check { position: absolute; top: 3px; right: 3px; display: inline-flex; align-items: center; justify-content: center; width: 17px; height: 17px; border-radius: 50%; color: #6d7a66; }
-.ob-check:hover { background: #17201a14; color: #2f3c32; }
+/* A hamster's feed: a little chat log above its head. New lines come in at the bottom, nearest
+   the head, and push the older ones up and away; every line times out by itself, so nothing has
+   to be ticked off. The cream stays — it is the scene's own voice, not app chrome.
+   The container never takes a click (the canvas must stay draggable through the gaps); the rows
+   opt back in, and clicking one dismisses just that row. */
+.office-feed { position: absolute; top: 0; left: 0; display: flex; flex-direction: column; align-items: center; justify-content: flex-end; gap: 4px; width: max-content; max-width: 250px; transform-origin: 50% 100%; pointer-events: none; }
+.ob-item { position: relative; display: flex; align-items: baseline; gap: 5px; max-width: 250px; padding: 6px 10px; border-radius: var(--radius-lg) var(--radius-lg) var(--radius-lg) 2px; background: var(--bubble-bg); color: var(--bubble-text); box-shadow: 0 4px 12px var(--overlay-shadow); pointer-events: auto; cursor: pointer; transform-origin: 50% 100%; animation: ob-in 160ms ease-out; }
+@keyframes ob-in { from { opacity: 0; transform: translateY(6px); } }
+.ob-item .ob-text { display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden; min-width: 0; font-size: 12px; line-height: 1.45; white-space: pre-wrap; word-break: keep-all; overflow-wrap: anywhere; }
+.ob-item.tone-warn { background: var(--bubble-warn-bg); }
+.ob-item.tone-name { background: var(--bubble-name-bg); }
+/* what it is *doing*: one dim line, never wrapped — these are the rows that merge into ×N */
+.ob-item.kind-act { padding: 4px 9px; border-radius: var(--radius); background: var(--overlay-bg-strong); color: var(--bubble-dim); }
+.ob-item.kind-act .ob-text { display: block; max-width: 220px; font-size: 11px; line-height: 1.4; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.ob-item.tone-edit .ob-text { color: var(--accent); }
+.ob-count { flex: none; padding: 0 5px; border-radius: 999px; background: var(--overlay-bg); color: var(--bubble-dim); font-size: 10px; line-height: 15px; font-variant-numeric: tabular-nums; }
 
 /* ---- narrow windows -------------------------------------------------------------------- */
+/* The chips give up their parts in order of how much each one adds: the countdown first (it is the
+   longest and the popover still has it), then the segments (redundant with the number next to
+   them), then the weekly chip. Nothing is ever lost — every chip opens the same popover. */
 @media (max-width: 1180px) {
-  /* the segments are the redundant half of a gauge; the number stays */
+  .um-reset { display: none; }
+}
+@media (max-width: 1020px) {
   .meter { display: none; }
 }
 @media (max-width: 900px) {
@@ -354,6 +458,7 @@ button:focus-visible, select:focus-visible, input:focus-visible { outline: 2px s
   .office-controls button .ctl-ico { display: none; } /* labelled buttons drop their icon first */
   .office-zoom { min-width: 32px; }
   .office-help { display: none; }
+  .office-feed, .ob-item { max-width: 190px; }
   .office-welcome { top: 85px; width: 172px; left: 14px; padding: 13px; }
   .office-welcome-actions { gap: 5px; margin-top: 9px; }
   .office-welcome-actions button { flex-basis: 100%; height: 26px; padding: 0 8px; font-size: 11px; }

@@ -106,10 +106,14 @@ function centerOn(c: Camera, x: number, z: number, px: number, py: number, w: nu
 
 const clampScale = (s: number): number => Math.max(MIN_SCALE, Math.min(MAX_SCALE, s))
 
-/** Put a world point just below the middle of the screen, the way the old 2D view framed a desk. */
-export function focusCamera(c: Camera, world: { x: number; z: number }, w: number, h: number, scale = 2.5): void {
+/**
+ * Put a world point just below the middle of the screen, the way the old 2D view framed a desk.
+ * `dy` is how far below centre; the automatic camera drops it further to leave room for the feed
+ * of bubbles that stacks above a hamster's head. ⌂ and the follow menu keep the original offset.
+ */
+export function focusCamera(c: Camera, world: { x: number; z: number }, w: number, h: number, scale = 2.5, dy = 10): void {
   c.scale = clampScale(scale)
-  centerOn(c, world.x, world.z, w / 2, h / 2 + 10, w, h)
+  centerOn(c, world.x, world.z, w / 2, h / 2 + dy, w, h)
   c.initialized = true
 }
 
@@ -150,25 +154,93 @@ export function overviewCamera(c: Camera, bounds: Bounds, w: number, h: number, 
   c.initialized = true
 }
 
-/** auto-framing never zooms in past the desk view, and never out past what a full room needs */
-export const FRAME_MAX_SCALE = 2.5
+/** auto-framing never zooms in past this close-up of a desk, and never out past a full room */
+export const FRAME_MAX_SCALE = 3.4
 /**
  * A full room (every seat and the desk in front of it, padded) fits at 0.60–0.66 in the usual
- * desk viewports; 1.0 would push the far rows off screen, so the floor sits just under that.
+ * desk viewports; the floor is deliberately above that, so a crowded room spills a little at the
+ * edges rather than shrinking every hamster to a speck.
  */
-export const FRAME_MIN_SCALE = 0.6
+export const FRAME_MIN_SCALE = 0.75
+/** the strip along the bottom the controls bar sits in */
+const FRAME_BOTTOM_PAD = 44
+
+/**
+ * How many rows of a hamster's chat feed are worth drawing at this zoom (0 = hide the feed).
+ * The bubbles are DOM at a fixed pixel size, so what changes with the zoom is not their legibility
+ * but how much of the scene they would bury: a room seen from far away can carry the newest line,
+ * a desk close-up can carry the whole stack. DeskStudio's render loop and the automatic framing
+ * both read this, which is what keeps "what is shown" and "what is left room for" in step.
+ */
+export function feedLines(scale: number): number {
+  if (scale >= 2.2) return 4
+  if (scale >= 1.5) return 3
+  if (scale >= 1.1) return 2
+  if (scale >= 0.8) return 1
+  return 0
+}
+/** rough on-screen height of one feed row plus its gap */
+export const FEED_LINE_PX = 26
+
+/**
+ * Below this zoom the nameplates come off. It is the bottom of `feedLines`' two-row band on
+ * purpose: the automatic framing settles at 117% for a boss plus three colleagues, and a room
+ * where you can read what everyone is saying but not who is saying it is the worse trade.
+ */
+export const PLATE_MIN_SCALE = 1.1
+
+/**
+ * The strip of sky a framing keeps clear above the hamsters' heads. It scales with the number of
+ * rows, not with the zoom — a row is the same number of pixels however close the camera is — and
+ * never eats more than a fifth of a short viewport.
+ */
+export function frameHeadPad(h: number, lines: number): number {
+  if (lines <= 0) return 0
+  return Math.max(0, Math.min(lines * FEED_LINE_PX + 10, h * 0.18, h - FRAME_BOTTOM_PAD - 40))
+}
 
 /**
  * Frame a set of hamsters: the tightest overview that shows all of `bounds`, but never closer than
- * `maxScale` (one hamster gets the same 250% desk view as a manual focus) and never farther than
- * `minScale` (a room too big for a tiny viewport spills past the edges rather than shrinking to
- * specks). After clamping, the centre of the bounds goes back to the middle of the viewport, just
- * below centre like `focusCamera`, so a lone hamster ends up exactly where the ⌂ button would put it.
+ * `maxScale` and never farther than `minScale`.
+ *
+ * Two passes, because the head room and the close-up pull against each other. The first fits the
+ * bounds into the whole frame — that answers "how close could we possibly get?" — and that zoom
+ * says how many feed rows will be drawn. The second pass reserves exactly that many rows' worth of
+ * sky and fits again; the subject then sits in the middle of the band below it, which is what
+ * pushes it down the screen. A wide shot of a crowded room shows one line and pays for one line.
+ *
+ * One re-fit is enough, and deliberately so: reserving room can only zoom *out*, so the row count
+ * can only fall, and a strip sized for four rows is simply a little extra sky for three. Iterating
+ * to a fixed point would trade that harmless slack for a framing that oscillates between buckets
+ * whenever the subject sits on a boundary. The single case worth undoing is falling all the way to
+ * no rows at all — a crowded room pushed onto the floor scale — because then the strip bought
+ * nothing: the first pass is both closer and still shows a line, so it wins outright.
  */
-export function frameCamera(c: Camera, bounds: Bounds, w: number, h: number, minScale = FRAME_MIN_SCALE, maxScale = FRAME_MAX_SCALE): void {
-  overviewCamera(c, bounds, w, h)
-  c.scale = Math.max(minScale, Math.min(maxScale, c.scale))
-  centerOn(c, (bounds.minX + bounds.maxX) / 2, (bounds.minZ + bounds.maxZ) / 2, w / 2, h / 2 + 10, w, h)
+export function frameCamera(
+  c: Camera,
+  bounds: Bounds,
+  w: number,
+  h: number,
+  minScale = FRAME_MIN_SCALE,
+  maxScale = FRAME_MAX_SCALE,
+): void {
+  const fit = (top: number): number => {
+    overviewCamera(c, bounds, w, h, top, FRAME_BOTTOM_PAD)
+    return Math.max(minScale, Math.min(maxScale, c.scale))
+  }
+  let top = 0
+  let scale = fit(0)
+  const lines = feedLines(scale)
+  if (lines > 0) {
+    const pad = frameHeadPad(h, lines)
+    const padded = fit(pad)
+    if (feedLines(padded) > 0) {
+      top = pad
+      scale = padded
+    }
+  }
+  c.scale = scale
+  centerOn(c, (bounds.minX + bounds.maxX) / 2, (bounds.minZ + bounds.maxZ) / 2, w / 2, top + (h - top - FRAME_BOTTOM_PAD) / 2, w, h)
   c.initialized = true
 }
 

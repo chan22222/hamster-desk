@@ -1,45 +1,28 @@
-// Recent and favourite folders. Two sources are merged: what Claude Code itself remembers
-// (`projects.recent`, read from its history file by the main process) and the folders opened
-// from this app (`hd.recentDirs` + `hd.recentMeta`, kept in localStorage).
+// Recent projects and favourites, kept in ~/.hamster-desk/ui.json (see `uiGet`/`uiSet` in store.ts).
+//
+// Only folders **this app** opened a terminal in are remembered. It used to merge in Claude Code's
+// own prompt history (`~/.claude/history.jsonl`), which meant the list was full of folders the user
+// had never opened here; that file is no longer read anywhere in the app.
 
-const RECENT_KEY = 'hd.recentDirs'
-const META_KEY = 'hd.recentMeta'
-const FAV_KEY = 'hd.favDirs'
-const MAX_RECENT = 24
+import { uiGet, uiSet } from '../store'
 
-export interface RecentEntry {
+const MAX_RECENT = 40
+
+/** one row of the `recents` list in ui.json */
+export interface RecentDir {
   path: string
-  name: string
-  /** last opened / last active, unix ms (0 when unknown) */
+  /** last opened here, unix ms */
   at: number
-  git: boolean
-  claude: boolean
+  /** how many terminals this app has opened in it */
+  count: number
+}
+
+export interface RecentEntry extends RecentDir {
+  name: string
   fav: boolean
 }
 
-function loadList(key: string): string[] {
-  try {
-    const v = JSON.parse(localStorage.getItem(key) ?? '[]')
-    return Array.isArray(v) ? v.filter((x): x is string => typeof x === 'string') : []
-  } catch {
-    return []
-  }
-}
-function saveList(key: string, v: string[]): void {
-  try {
-    localStorage.setItem(key, JSON.stringify(v))
-  } catch {
-    /* ignore */
-  }
-}
-function loadMeta(): Record<string, number> {
-  try {
-    const v = JSON.parse(localStorage.getItem(META_KEY) ?? '{}')
-    return v && typeof v === 'object' ? (v as Record<string, number>) : {}
-  } catch {
-    return {}
-  }
-}
+const key = (p: string): string => p.replace(/[\\/]+$/, '').toLowerCase()
 
 export function baseName(p: string): string {
   const t = p.replace(/[\\/]+$/, '')
@@ -47,30 +30,75 @@ export function baseName(p: string): string {
   return i >= 0 ? t.slice(i + 1) || t : t
 }
 
+/** The stored list, newest first, with anything that is not a `{ path }` row dropped. */
+export function recentDirs(): RecentDir[] {
+  const raw = uiGet<unknown>('recents', [])
+  if (!Array.isArray(raw)) return []
+  const out: RecentDir[] = []
+  for (const r of raw) {
+    if (!r || typeof r !== 'object') continue
+    const { path, at, count } = r as Partial<RecentDir>
+    if (typeof path !== 'string' || !path) continue
+    out.push({ path, at: typeof at === 'number' && Number.isFinite(at) ? at : 0, count: typeof count === 'number' && count > 0 ? count : 1 })
+  }
+  return out.sort((a, b) => b.at - a.at)
+}
+
 /** Remember a folder we just opened a terminal in. */
 export function rememberRecent(dir: string): void {
-  const list = [dir, ...loadList(RECENT_KEY).filter((d) => d.toLowerCase() !== dir.toLowerCase())].slice(0, MAX_RECENT)
-  saveList(RECENT_KEY, list)
-  const meta = loadMeta()
-  meta[dir.toLowerCase()] = Date.now()
-  try {
-    localStorage.setItem(META_KEY, JSON.stringify(meta))
-  } catch {
-    /* ignore */
-  }
+  if (!dir) return
+  const prev = recentDirs()
+  const hit = prev.find((r) => key(r.path) === key(dir))
+  const rest = prev.filter((r) => key(r.path) !== key(dir))
+  uiSet('recents', [{ path: dir, at: Date.now(), count: (hit?.count ?? 0) + 1 }, ...rest].slice(0, MAX_RECENT))
+}
+
+/** Take a folder off the list (the `×` on a row). Favourites are dropped with it. */
+export function forgetRecent(dir: string): void {
+  uiSet(
+    'recents',
+    recentDirs().filter((r) => key(r.path) !== key(dir)),
+  )
+  const favs = favDirs()
+  if (favs.some((f) => key(f) === key(dir)))
+    uiSet(
+      'favs',
+      favs.filter((f) => key(f) !== key(dir)),
+    )
 }
 
 export function favDirs(): string[] {
-  return loadList(FAV_KEY)
+  const raw = uiGet<unknown>('favs', [])
+  return Array.isArray(raw) ? raw.filter((x): x is string => typeof x === 'string' && !!x) : []
 }
+
 export function toggleFav(dir: string): string[] {
   const favs = favDirs()
-  const next = favs.some((f) => f.toLowerCase() === dir.toLowerCase()) ? favs.filter((f) => f.toLowerCase() !== dir.toLowerCase()) : [...favs, dir]
-  saveList(FAV_KEY, next)
+  const next = favs.some((f) => key(f) === key(dir)) ? favs.filter((f) => key(f) !== key(dir)) : [...favs, dir]
+  uiSet('favs', next)
   return next
 }
+
 export function isFav(dir: string, favs: string[]): boolean {
-  return favs.some((f) => f.toLowerCase() === dir.toLowerCase())
+  return favs.some((f) => key(f) === key(dir))
+}
+
+/** The folder the next window should start in. */
+export function lastCwd(): string {
+  const v = uiGet<unknown>('lastCwd', '')
+  return typeof v === 'string' ? v : ''
+}
+export function setLastCwd(dir: string): void {
+  uiSet('lastCwd', dir)
+}
+
+/** Favourites first, then newest. Starred folders that were never opened here still show up. */
+export function recentEntries(limit = MAX_RECENT): RecentEntry[] {
+  const favs = favDirs()
+  const byKey = new Map<string, RecentEntry>()
+  for (const r of recentDirs()) byKey.set(key(r.path), { ...r, name: baseName(r.path), fav: isFav(r.path, favs) })
+  for (const f of favs) if (!byKey.has(key(f))) byKey.set(key(f), { path: f, at: 0, count: 0, name: baseName(f), fav: true })
+  return [...byKey.values()].sort((a, b) => (a.fav === b.fav ? b.at - a.at : a.fav ? -1 : 1)).slice(0, limit)
 }
 
 /** "방금", "12분 전", "3시간 전", "어제", "9/12" */
@@ -92,40 +120,20 @@ export function middlePath(p: string, max = 38): string {
   return `${p.slice(0, keep)}…${p.slice(p.length - keep)}`
 }
 
-/** Claude Code's own recent projects merged with the folders opened here, newest first. */
-export async function recentProjects(limit = 30): Promise<RecentEntry[]> {
-  const favs = favDirs()
-  const byKey = new Map<string, RecentEntry>()
-  const add = (e: RecentEntry): void => {
-    const key = e.path.toLowerCase()
-    const prev = byKey.get(key)
-    if (prev) {
-      prev.at = Math.max(prev.at, e.at)
-      prev.git = prev.git || e.git
-      prev.claude = prev.claude || e.claude
-      return
-    }
-    byKey.set(key, e)
-  }
-
+/**
+ * Which of these folders are still there. One IPC call for the whole list; the bridge is missing in
+ * the browser preview, where every path is simply assumed to exist.
+ */
+export async function missingDirs(paths: string[]): Promise<Set<string>> {
+  const out = new Set<string>()
+  if (!paths.length || !window.desk) return out
   try {
-    const rows = (await window.desk?.projects.recent(limit)) ?? []
-    for (const r of rows) {
-      if (r.exists === false) continue
-      add({ path: r.path, name: baseName(r.path), at: r.lastActiveAt, git: r.git, claude: r.claude, fav: isFav(r.path, favs) })
-    }
+    const map = await window.desk.fs.exists(paths)
+    for (const p of paths) if (map[p] === false) out.add(key(p))
   } catch {
-    /* the bridge may not be there (browser preview) */
+    /* treat an unreachable main process as "all fine" */
   }
-
-  const meta = loadMeta()
-  for (const p of loadList(RECENT_KEY)) {
-    add({ path: p, name: baseName(p), at: meta[p.toLowerCase()] ?? 0, git: false, claude: false, fav: isFav(p, favs) })
-  }
-  for (const p of favs) add({ path: p, name: baseName(p), at: meta[p.toLowerCase()] ?? 0, git: false, claude: false, fav: true })
-
-  return [...byKey.values()]
-    .map((e) => ({ ...e, fav: isFav(e.path, favs) }))
-    .sort((a, b) => (a.fav === b.fav ? b.at - a.at : a.fav ? -1 : 1))
-    .slice(0, limit)
+  return out
 }
+
+export const dirKey = key

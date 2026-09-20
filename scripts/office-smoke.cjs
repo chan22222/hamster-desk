@@ -31,7 +31,7 @@ app.whenReady().then(async () => {
     assert.equal(await evaluate("return !!document.querySelector('.office-nogl')"), false, 'WebGL context could not be created')
     await evaluate(`
       const {useDesk} = await import('/store.ts'); window.testStore = useDesk;
-      useDesk.setState(s => ({sessions: {...s.sessions, 'studio-preview': {...s.sessions['studio-preview'], hamsters: Object.fromEntries(Object.entries(s.sessions['studio-preview'].hamsters).map(([id,h],i) => [id,{...h,name:'동료'+i,state:'idle',bubble:null}]))}}}));
+      useDesk.setState(s => ({sessions: {...s.sessions, 'studio-preview': {...s.sessions['studio-preview'], hamsters: Object.fromEntries(Object.entries(s.sessions['studio-preview'].hamsters).map(([id,h],i) => [id,{...h,name:'동료'+i,state:'idle',feed:[]}]))}}}));
     `)
     await settle()
     await shot('studio-default')
@@ -39,27 +39,53 @@ app.whenReady().then(async () => {
     // row (studio-4, at 250%) to get a roomful of name plates to compare positions against.
     await evaluate(`const select=document.querySelector('.office-follow select');select.value='studio-4';select.dispatchEvent(new Event('change',{bubbles:true}));`)
     await settle()
-    // Regression: two sentences 300 ms apart must leave ONE visible bubble holding the second one.
-    // The bubble element used to be re-keyed per sentence, and the replaced node's ref cleanup
-    // could run after the new node registered — the fresh bubble then stayed at opacity 0 until
-    // ✓ was pressed. The camera is on studio-4 at 250%, so the bubble is allowed to show.
+    // The feed is a chat log: rows stack up, identical rows merge into one with a ×N badge, and
+    // everything times out on its own. The camera is on studio-4 at 250%, so its feed is visible.
+    // (The life spans are shortened first, so the expiry case does not cost nine seconds.)
     assert.equal(await evaluate("return document.querySelector('.office-controls button[aria-pressed]').getAttribute('aria-pressed')"), 'false', 'locating a colleague must switch automatic framing off')
+    await evaluate("window.__studio.feedLife({ act: 500, say: 4000 })")
+    // How many rows a feed shows depends on the zoom (`feedLines`): 2 rows need 110%, 3 need 150%.
+    // The follow menu put the camera at 250%, which carries the whole stack — assert that rather
+    // than trust it, because every count below is a count of *visible* rows.
+    const lines = await evaluate("const {feedLines} = await import('/desk/office-camera.ts'); return feedLines(parseInt(document.querySelector('.office-zoom').textContent) / 100)")
+    assert.ok(lines >= 2, `the bubble cases need a zoom showing at least two rows, got ${lines}`)
+    const feedOf = id => evaluate(`
+      const box = document.querySelector('.office-feed[data-hid=' + JSON.stringify(${JSON.stringify(id)}) + ']');
+      const rows = box ? Array.from(box.children).filter(r => getComputedStyle(r).display !== 'none') : [];
+      return { count: rows.length, texts: rows.map(r => r.querySelector('.ob-text').textContent), badges: rows.map(r => (r.querySelector('.ob-count') || {}).textContent || null), opacity: box ? getComputedStyle(box).opacity : null };
+    `)
+    // (a) two different sentences stack, newest at the bottom (nearest the head)
     await evaluate("window.__studio.say('studio-4', '첫 번째 문장입니다')")
     await new Promise(r => setTimeout(r, 300))
-    await evaluate("window.__studio.say('studio-4', '두 번째 문장이 자동으로 떠야 해요')")
+    await evaluate("window.__studio.say('studio-4', '두 번째 문장이 아래에 쌓여야 해요')")
     await settle()
-    const bubbles = await evaluate(`
-      const els = Array.from(document.querySelectorAll('.office-bubble.is-speech')).filter(e => e.title === '두 번째 문장이 자동으로 떠야 해요' || (e.querySelector('.ob-speech') || {}).textContent === '두 번째 문장이 자동으로 떠야 해요');
-      const all = Array.from(document.querySelectorAll('.office-bubble.is-speech')).map(e => (e.querySelector('.ob-speech') || {}).textContent);
-      return { count: els.length, all, text: els[0] ? els[0].querySelector('.ob-speech').textContent : null, opacity: els[0] ? getComputedStyle(els[0]).opacity : null };
+    const stacked = await feedOf('studio-4')
+    assert.equal(stacked.count, 2, `two sentences should stack: ${JSON.stringify(stacked)}`)
+    assert.deepEqual(stacked.texts, ['첫 번째 문장입니다', '두 번째 문장이 아래에 쌓여야 해요'], 'the newest sentence must be the last row')
+    assert.equal(stacked.opacity, '1', `the feed stayed hidden (opacity ${stacked.opacity})`)
+    // (b) the same activity three times is one row with a ×3 badge
+    for (let i = 0; i < 3; i++) await evaluate("window.__studio.act('studio-4', 'npm run build')")
+    await settle()
+    const merged = await feedOf('studio-4')
+    assert.equal(merged.count, 3, `the repeated activity must merge into one row: ${JSON.stringify(merged)}`)
+    assert.equal(merged.badges[2], '×3', `expected a ×3 badge on the merged row: ${JSON.stringify(merged)}`)
+    // (c) a row disappears on its own once its life is up — no ✓ to press
+    await new Promise(r => setTimeout(r, 1400))
+    const aged = await feedOf('studio-4')
+    assert.ok(!aged.texts.some(t => t.includes('npm run build')), `the activity row outlived its life: ${JSON.stringify(aged)}`)
+    assert.equal(aged.count, 2, `only the two sentences should be left: ${JSON.stringify(aged)}`)
+    // clicking a row drops just that row
+    await evaluate("Array.from(document.querySelectorAll('.ob-item')).find(e => e.querySelector('.ob-text').textContent === '첫 번째 문장입니다').click()")
+    await settle()
+    const clicked = await feedOf('studio-4')
+    assert.equal(clicked.count, 1, `a click should drop one row only: ${JSON.stringify(clicked)}`)
+    assert.deepEqual(clicked.texts, ['두 번째 문장이 아래에 쌓여야 해요'])
+    await evaluate("window.__studio.feedLife({ act: 3000, say: 9000 })")
+    await evaluate(`
+      const store = window.testStore, s = store.getState().sessions['studio-preview'];
+      store.setState({ sessions: { ...store.getState().sessions, 'studio-preview': { ...s, hamsters: Object.fromEntries(Object.entries(s.hamsters).map(([id, h]) => [id, { ...h, feed: [] }])) } } });
     `)
-    assert.equal(bubbles.count, 1, `expected one bubble for studio-4, got ${JSON.stringify(bubbles)}`)
-    assert.ok(!bubbles.all.includes('첫 번째 문장입니다'), `the first sentence is still on screen: ${JSON.stringify(bubbles.all)}`)
-    assert.equal(bubbles.text, '두 번째 문장이 자동으로 떠야 해요')
-    assert.equal(bubbles.opacity, '1', `the replaced bubble stayed hidden (opacity ${bubbles.opacity})`)
-    await evaluate(`Array.from(document.querySelectorAll('.office-bubble.is-speech')).find(e => e.querySelector('.ob-speech').textContent === '두 번째 문장이 자동으로 떠야 해요').querySelector('.ob-check').click()`)
     await settle()
-    assert.equal(await evaluate("return Array.from(document.querySelectorAll('.office-bubble.is-speech')).some(e => e.querySelector('.ob-speech').textContent === '두 번째 문장이 자동으로 떠야 해요')"), false, '✓ did not remove the bubble')
     const before = await plates()
     assert.ok(Object.keys(before).length >= 4, `expected visible occupied desks, got ${JSON.stringify(before)}`)
     const art = await evaluate(`
@@ -147,8 +173,8 @@ app.whenReady().then(async () => {
     await settle()
     assert.ok(await evaluate("return document.querySelector('.office-welcome').textContent.includes('자리는 준비되어 있어요')"))
     assert.deepEqual(errors, [])
-    fs.writeFileSync(path.resolve('work/office-smoke-result.json'),JSON.stringify({passed:true,checks:['webgl context','voxel hamster rig','bubble replacement (one element per hamster)','add/remove/reorder stability','stationary animation','drag pan','minimap click','zoom','wheel','overview','locate agent','session camera isolation','fold camera persistence','compact viewport','48-agent overflow','empty office','no renderer errors'],art},null,2))
-    console.log('PASS: renderer, voxel rig, bubble replacement, occupancy changes, navigation, session switches, folding, compact layout')
+    fs.writeFileSync(path.resolve('work/office-smoke-result.json'),JSON.stringify({passed:true,checks:['webgl context','voxel hamster rig','feed stacking, merging, expiry, click-to-dismiss and the zoom row budget','add/remove/reorder stability','stationary animation','drag pan','minimap click','zoom','wheel','overview','locate agent','session camera isolation','fold camera persistence','compact viewport','48-agent overflow','empty office','no renderer errors'],art},null,2))
+    console.log('PASS: renderer, voxel rig, chat feed (stack/merge/expiry/dismiss), occupancy changes, navigation, session switches, folding, compact layout')
   } catch(e) { console.error(e); process.exitCode=1 }
   finally { win.destroy(); app.quit() }
 })
