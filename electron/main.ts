@@ -6,7 +6,7 @@ import type { BubbleRequest, DeskEvent, FileEntry, RecentProject, StatusSnapshot
 import { spawnPty, PromptDetector, type PtyHandle } from './pty'
 import { StatusWatcher, installStatusLine, uninstallStatusLine, statusLineState } from './statusline'
 import { checkVersion } from './version'
-import { harnessState, enableHarness, disableHarness, migrateHarness, readHarnessConfig, saveHarnessConfig, type HarnessConfig } from './harness'
+import { harnessState, enableHarness, disableHarness, migrateHarness, readHarnessConfig, refreshHarnessFiles, saveHarnessConfig, type HarnessConfig } from './harness'
 import { BubbleSummarizer } from './summarize'
 import { claudeDir } from './watcher/paths'
 
@@ -476,6 +476,8 @@ if (gotLock) {
   app.whenReady().then(() => {
     // first run after the update: hand back the global settings.json `agent` key (see harness.ts)
     if (migrateHarness()) console.log('[harness] moved collaboration mode to this app only')
+    // agent files from an older build still carry the old prompts; bring them up to date
+    if (refreshHarnessFiles()) console.log('[harness] agent prompts updated')
     createWindow()
     startWatchers()
     scheduleCapture()
