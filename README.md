@@ -9,7 +9,8 @@ Claude Code CLI 를 그대로 쓰면서, 지금 누가(메인·서브에이전�
   - `.../<sessionId>/subagents/agent-*.jsonl` + `.meta.json` — 서브에이전트별 기록(종류·설명)
   - `~/.hamster-desk/status/<sessionId>.json` — (선택) 상태줄 스크립트가 남기는 사용량·컨텍스트 스냅샷
 - Max/Pro 구독 로그인 그대로. 앱은 모델을 직접 호출하지 않는다(Claude Code 자체가 돈다).
-- 앱은 Claude Code 의 설정(`~/.claude`)을 바꾸지 않는다. 예외는 사용자가 직접 켜는 사용량 연동(statusLine)뿐이다.
+- 앱은 Claude Code 의 설정(`~/.claude`)을 바꾸지 않는다. 예외는 사용자가 직접 켜는 사용량 연동(statusLine)뿐이다. **단, 세션 컨트롤 바의 `/effort` 는 터미널에 그 명령을 대신 쳐 주는 것인데, 그 명령을 받은 Claude Code 가 스스로 값을 `~/.claude/settings.json` 의 새 세션 기본값으로도 저장한다** — 앱이 쓰는 파일이 아니라 CLI 의 동작이지만, 버튼 한 번에 그 파일이 바뀐다는 사실은 같으므로 여기 적어 둔다. 같은 이유로 모델은 바에서 **보여 주기만** 한다(`/model <alias>` 도 저장된 기본 모델을 덮어쓴다).
+- 읽는 범위도 좁게 잡았다: 지난 대화 목록은 **트랜스크립트 파일만**(파일마다 앞 64KB + 꼬리 512KB), git 은 **읽기 전용 명령만**, `~/.claude/history.jsonl` 은 읽지 않는다.
 
 ## 실행
 
@@ -21,9 +22,21 @@ npx electron .          # 또는 npm run dev (HMR)
 
 포터블 exe: `npm run dist` → `release/Hamster Desk 0.1.0.exe`.
 
-프로필은 실행 모드별로 나뉜다: 포터블 `%APPDATA%\hamster-desk`, 개발 실행 `%APPDATA%\hamster-desk-dev`, 스모크 `%TEMP%\hamster-desk-smoke`. 그래서 포터블을 켜 둔 채 `npm run dev` 를 띄워도 캐시(`Unable to move the cache`)가 충돌하지 않는다. 포터블은 단일 인스턴스라 두 번째로 실행하면 이미 떠 있는 창을 앞으로 가져온다.
+프로필은 실행 모드별로 나뉜다: 포터블 `%APPDATA%\hamster-desk`, 개발 실행 `%APPDATA%\hamster-desk-dev`, 캡처 실행(`HAMSTER_CAPTURE`) `%TEMP%\hamster-desk-smoke-<pid>`. 캡처 실행의 프로필은 **실행마다 따로**다 — 예전에는 `hamster-desk-smoke` 하나를 같이 써서, 캡처 둘을 나란히 돌리면 뒤에 뜬 쪽이 `Unable to move the cache` 로 부팅이 늦어지고 자기 `HAMSTER_CLICK` 타이머를 놓쳤다. 폴더는 종료할 때 지우고(best-effort), Chromium 이 아직 쥐고 있어 못 지운 것은 다음 캡처 실행이 시작하면서 치운다(그 pid 의 프로세스가 더는 없을 때만). `test:office:ui`·`shot:studio` 는 따로 `%TEMP%\hamster-desk-smoke` 를 쓴다. 그래서 포터블을 켜 둔 채 `npm run dev` 를 띄워도 캐시(`Unable to move the cache`)가 충돌하지 않는다. 포터블은 단일 인스턴스라 두 번째로 실행하면 이미 떠 있는 창을 앞으로 가져온다.
 
 **설정은 프로필 밖 파일 하나에 저장된다**: `~/.hamster-desk/ui.json`(언어·테마·패널·책상 위치와 크기·사이드바 폭·최근 프로젝트·즐겨찾기·마지막 폴더). 예전에는 `localStorage` 에 있었는데 그건 Electron **프로필** 소유라, 포터블에서 바꾼 언어가 `npm run dev` 에는 안 보이고 캐시를 지우면 같이 날아갔다. 메인 프로세스가 300ms 디바운스로 원자적 쓰기(`.tmp` → rename)를 하고, 종료 시 남은 변경을 flush 한다(`electron/ui-store.ts`). 파일이 없으면 첫 실행 때 옛 `localStorage` 키(`hd.prefs`·`hd.recentDirs`·`hd.recentMeta`·`hd.favDirs`·`hd.lastCwd`)에서 **파일에 아직 없는 키만** 한 번 옮기고 지운다. 파일이 깨져 있으면 `ui.corrupt.json` 으로 치워 두고 기본값으로 뜬다. `prefs` 에는 **버전 표식 `v`** 가 붙는다(`PREFS_VERSION`, 지금 2): 이름이 바뀐 키는 이름으로 옮기면 되지만(`showFolders` → `showSidebar`) **뜻이 바뀐 키**는 옛 값이 새 값으로도 멀쩡해서 구분할 길이 없다. 표식이 없는 파일(v1)은 `showLog`(예전 "오른쪽 패널 표시", 지금 "사이드바의 바뀐 파일 섹션 펼침")를 버리고 새 기본값을 쓰며, 나머지는 그대로 병합해 `v: 2` 로 한 번 다시 쓴다. 다음에 또 뜻이 바뀌면 `PREFS_VERSION` 을 올리고 `adoptPrefs` 의 같은 자리에 규칙 한 줄을 더한다. 경로는 `⋯` 메뉴 맨 아래 줄에 있고, 누르면 탐색기에서 열린다. 검증은 `npm run smoke:ui`.
+
+기능 확장으로 늘어난 키는 전부 **추가**라 `PREFS_VERSION` 은 2 그대로다.
+
+| 키 | 모양 | 쓰는 쪽 |
+|---|---|---|
+| `workspaces` | `{ tabs: [{ cwd, title }], active }` | 마지막 터미널 탭들과 활성 탭. 렌더러가 400ms 디바운스로 쓴다(`src/workspaces-persist.ts`). 업데이트 탭은 빠진다 |
+| `window` | `{ x, y, width, height, maximized }` | 창 위치. 메인이 resize/move 500ms 디바운스 + 닫는 순간에 쓴다(`electron/window-state.ts`) |
+| `prefs.notify` | `{ permission, question, turnEnd, sound }` | 알림 종류별 on/off. 기본 `true, true, true, false`. 옛 파일에 일부만 있어도 기본값과 깊은 병합 |
+| `prefs.termFont` | 10~24, 기본 14 | 터미널 글꼴 크기 |
+| `prefs.showFeedLog` | 기본 `true` | 사이드바 `말풍선 로그` 섹션 펼침 |
+
+`HAMSTER_PREFS` 로 설정을 강제한 실행은 새 키도 같이 잠기고, 캡처 실행(`HAMSTER_CAPTURE`)은 `workspaces`·`window` 를 **읽기만** 한다(복원은 찍어야 하니까 하되, 되쓰지 않는다).
 
 ## 화면
 
@@ -32,7 +45,8 @@ npx electron .          # 또는 npm run dev (HMR)
 **레이아웃은 사용자가 움직인다**(전부 `ui.json` 에 저장된다).
 - **사이드바 폭**: 오른쪽 가장자리 4px 핸들을 끌면 200~480px, 더블클릭하면 기본값 248px.
 - **책상 위치**: `⋯` 메뉴의 `책상 위치` 가 `위`(터미널 위, 높이 220~700px)와 `오른쪽`(터미널 옆, 폭 320~900px) 중 하나. 스플리터는 두 방향 모두 끌어서 조절하고 더블클릭하면 기본값(420 / 520)으로 돌아간다. 오른쪽 배치에서는 컨테이너 쿼리(`container-name: office`)가 좁은 폭을 알아채 스튜디오 오버레이를 알아서 접는다.
-- 사이드바의 두 섹션(`바뀐 파일`·`탐색`) 접힘 상태도 저장된다.
+- 사이드바의 세 섹션(`바뀐 파일`·`말풍선 로그`·`탐색`) 접힘 상태도 저장된다.
+- **터미널 탭과 창 위치도 돌아온다**(아래 `탭·창 복원`).
 
 **테마는 라이트와 다크 두 벌**(`⋯` 메뉴의 `테마`: 라이트 · 다크 · 시스템). 고른 값은 `<html data-theme>` 에 쓰이고, `시스템` 이면 `prefers-color-scheme` 를 구독해 OS 를 계속 따라간다(`src/widgets/theme.ts`). 토큰 이름은 두 테마가 똑같아서 규칙은 한 벌만 있으면 된다 — `:root` 가 라이트, `:root[data-theme='dark']` 가 다크 값을 덮는다. 라이트는 종이 같은 흰 표면(`--surface`)에 회녹색 배경(`--bg`)과 깊은 숲 초록(`--accent #2f6b4f`), 다크는 이끼색 표면(`--surface #161b18`)에 밝은 세이지 강조색(`--accent #79c79a`)이다. 강조색 **위에** 얹는 글자는 `--on-accent` 로, 라이트에서는 흰색이지만 다크에서는 `#10241a` 다(밝은 세이지 위의 흰 글자는 1.9:1 밖에 안 나온다). 본문 글자는 자기 표면에서 최소 4.5:1 — 라이트 `--text` 16.7:1 · `--text-2` 6.6:1 · `--text-3` 4.8:1, 다크 `--text` 15.3:1 · `--text-2` 9.3:1 · `--text-3` 5.7:1. 색만으로 상태를 말하는 곳은 없다(게이지에는 늘 숫자가 붙는다). 타이포는 11/12/13/15px 네 단만 쓰고, 숫자는 `tnum` 으로 폭을 고정한다. 한글이 들어가는 좁은 상자(환영 카드·말풍선)는 `word-break: keep-all` 이라 어절 단위로만 끊는다 — 기본값이면 214px 카드에서 `실행 / 하거나` 처럼 낱말 가운데가 갈라진다. 긴 경로·URL 은 같이 준 `overflow-wrap: anywhere` 가 받아 낸다. 폰트는 CSP(`font-src 'self' data:`)가 외부 폰트를 막으므로 시스템 폰트(Pretendard → system-ui → Malgun Gothic)만 쓴다.
 
@@ -44,16 +58,17 @@ npx electron .          # 또는 npm run dev (HMR)
 
 **상단 바** (한 줄)
 - 맨 왼쪽 패널 아이콘 = 사이드바 열고 닫기(`Ctrl+B`). 그 옆 🐹 는 앱 표시.
-- 터미널 탭: 각 탭에서 띄운 `claude` 세션은 프로세스 계보로 그 탭에 묶인다(초록 점 = 작업 중, 빨강 = 입력 대기, 🐹×N = 서브에이전트 수). 다른 터미널에서 돌아가는 세션은 기울임체 탭으로 붙고 책상만 볼 수 있다. Claude 가 실행 중인 탭의 `×` 는 바로 닫지 않고 "그래도 닫기" 를 한 번 묻는다.
+- 터미널 탭: 각 탭에서 띄운 `claude` 세션은 프로세스 계보로 그 탭에 묶인다(초록 점 = 작업 중, 빨강 = 입력 대기, 🐹×N = 서브에이전트 수). 다른 터미널에서 돌아가는 세션은 기울임체 탭으로 붙고 책상만 볼 수 있다. Claude 가 실행 중인 탭의 `×` 는 바로 닫지 않고 "그래도 닫기" 를 한 번 묻는다. 탭 이름 뒤에는 칩이 둘 붙을 수 있다: **컨텍스트 `72%`**(사용량 연동 시, 70% 부터 주의색 · 90% 부터 경고색)와 **git `⎇ main · 3`**(그 탭 폴더의 브랜치와 바뀐 경로 수, 0 이면 숫자 생략). 창 폭이 1180px 아래로 내려가면 git 칩은 브랜치 이름을 놓고 아이콘 + 숫자만 남긴다(1000px 에서 칩이 탭 이름을 `h…` 로 짓눌렀다). 이름은 툴팁에 있다.
 - `+` 아이콘은 **"새 터미널" 화면**이다(320px 팝오버): 검색 한 칸 + **이 앱에서 연 프로젝트 전체 목록**(즐겨찾기 먼저, 그다음 최신순, 최대 420px 스크롤; 행에 마우스를 올리면 ★ 즐겨찾기와 × 목록에서 지우기) + `폴더 찾아보기…`(시스템 폴더 선택 창) + `사이드바에서 고르기`. 사라진 폴더는 취소선으로 흐리게 나오고, 눌러도 열리는 대신 `폴더를 찾을 수 없어요` 한 줄을 띄운다(× 로 지우면 된다). 터미널이 하나도 없으면 같은 목록이 가운데 시작 카드로 나온다.
 - 오른쪽 상태 칩(순서 고정, 전부 팝오버):
   - **사용량**: 5시간과 주간이 **각각 독립된 게이지 칩**이다(`5h ▰▰▰▰▱ 81%` │ `주 ▰▰▱▱▱ 42%`, 사이에 세로 hairline). 칩 하나는 라벨 + 5칸 세그먼트 미터 + 퍼센트로, 채운 칸수는 `⌈pct/20⌉`, 색은 `<70%` 초록 · `70~89%` 주의색 · `≥90%` 경고색이고 같은 단계 색이 퍼센트 글자에도 붙는다. **초기화까지 남은 시간은 늘 붙어 있다** — `5h ▰▰▰▱▱ 81% · 2시간 10분`(1시간 미만이면 `38분`, 하루 넘게 남았으면 `3일`). 30초마다 다시 계산한다. 초기화 **시각**(`18:20`)은 칩의 툴팁과 팝오버에 있다. 창이 좁아지면 칩은 덜 중요한 순서로 조각을 놓는다: 1180px 아래에서 남은 시간, 1020px 아래에서 세그먼트(퍼센트 숫자와 중복이다), 900px 아래에서 주간 칩 — 어느 칩을 눌러도 팝오버에는 두 창이 다 있고 누른 쪽이 강조된다. 팝오버에 두 창의 막대·퍼센트·초기화 시각·남은 시간과 `연동 해제`. 아직 연동 전이면 칩이 `사용량 연동` 이고, 팝오버의 설명 아래 `연동하기`(다른 상태줄이 이미 있으면 `기존 상태줄 교체하기`)를 누르면 `~/.claude/settings.json` 에 `statusLine` 항목을 넣고 `~/.hamster-desk/statusline.cjs` 를 설치한다. Claude Code 가 대화가 갱신될 때마다 이 스크립트를 **비동기로**(300ms 디바운스, 모델 호출을 막지 않음) 실행해 JSON 을 남기고, 터미널 하단에도 `Fable 5.1 · high · 5h 63% (18:20) · 7d 15% (9/21 10:00)` 한 줄이 표시된다. 첫 메시지 전에는 칩이 `사용량 대기 중`.
   - **바뀐 파일 N**: 활성 세션이 파일을 고쳤을 때만 나온다. 누르면 사이드바가 열리면서 그 안의 `바뀐 파일` 섹션이 펴지고, 한 번 더 누르면 접힌다.
   - **업데이트**: 설치된 Claude Code 보다 새 버전이 npm 에 있을 때만(1시간마다 확인). 누르면 새 터미널 탭에서 `claude update`.
-  - **⋯**(점 세 개): `사이드바 (Ctrl+B)` · `책상 펼치기` · `바뀐 파일` · `항상 위` 체크 항목, `책상 위치`(위·오른쪽)와 `테마`(라이트·다크·시스템) 라디오, **말풍선** 의 `요약해서 말하기`(요약기를 쓸 수 없으면 비활성 + 이유)와 언어(자동/한국어/English/日本語/中文/…), **Claude Code** 의 현재 버전·`다시 확인`·업데이트 설치, 그리고 맨 아래 11px 로 `설정 파일: ~\.hamster-desk\ui.json`(누르면 탐색기에서 열린다).
+  - **⋯**(점 세 개): `사이드바 (Ctrl+B)` · `책상 펼치기` · `바뀐 파일` · `항상 위` · `미니 모드 (Ctrl+Shift+M)` 체크 항목, **알림** 의 `권한 요청`·`질문`·`턴 완료`·`소리`, `터미널 글꼴`(12·13·14·16), `책상 위치`(위·오른쪽)와 `테마`(라이트·다크·시스템) 라디오, **말풍선** 의 `요약해서 말하기`(요약기를 쓸 수 없으면 비활성 + 이유)와 언어(자동/한국어/English/日本語/中文/…), **Claude Code** 의 현재 버전·`다시 확인`·업데이트 설치, 그리고 맨 아래 11px 로 `설정 파일: ~\.hamster-desk\ui.json`(누르면 탐색기에서 열린다).
 
-**사이드바** (사이드바 아이콘 또는 `Ctrl+B`, 기본 숨김) — `[검색] / [바뀐 파일 N ▾] / [탐색 ▾]`
-- **바뀐 파일**: 활성 세션이 뭔가 고쳤을 때만 나오는 섹션이다(예전엔 오른쪽 300px 패널이었다). 사이드바 높이의 **최대 45%** 까지만 차지하고 그 안에서 스크롤하므로 아래의 탐색을 밀어내지 않는다. 한 행은 두 줄 — 파일명(모노 12px)과 오른쪽 끝 `+N −N`, 그 아래 11px 경로(끝이 남게 말줄임). 클릭하면 마지막 Edit/Write 의 old/new 미리보기가 그 자리에서 펼쳐진다(지운 줄 붉은 바탕, 넣은 줄 초록 바탕). 횟수·누가·언제는 행 툴팁에.
+**사이드바** (사이드바 아이콘 또는 `Ctrl+B`, 기본 숨김) — `[검색] / [바뀐 파일 N ▾] / [말풍선 로그 N ▾] / [탐색 ▾]`
+- **바뀐 파일**: 활성 세션이 뭔가 고쳤을 때만 나오는 섹션이다(예전엔 오른쪽 300px 패널이었다). 사이드바 높이의 **최대 45%** 까지만 차지하고 그 안에서 스크롤하므로 아래의 탐색을 밀어내지 않는다. 한 행은 두 줄 — 파일명(모노 12px)과 오른쪽 끝 `+N −N`, 그 아래 11px 경로(끝이 남게 말줄임). 클릭하면 마지막 Edit/Write 의 old/new 미리보기가 그 자리에서 펼쳐진다(지운 줄 붉은 바탕, 넣은 줄 초록 바탕). 횟수·누가·언제는 행 툴팁에. 미리보기 머리줄 오른쪽의 **`git diff`** 를 누르면 Edit 한 번의 old/new 가 아니라 **작업 트리의 실제 diff** 로 바뀐다(추가 초록 · 삭제 붉은색 · hunk 머리줄 흐리게; 아직 git 에 없는 파일이면 `아직 git 에 없는 파일이에요`, 20,000자를 넘으면 잘렸다는 꼬리표).
+- **말풍선 로그**: 머리 위 말풍선은 몇 초면 사라지지만 여기에는 남는다(세션별 최근 500줄, 세션이 사라지면 같이 사라진다). 검색 한 칸 + `전체·말·활동` 필터, 최신이 위. 한 줄은 `HH:MM:SS · 이름 · 글`(겹쳐 센 줄은 `×N`, 원문은 툴팁, 요약이 도착하면 같은 줄의 글이 바뀐다). **줄을 누르면 그 햄스터로 카메라가 간다** — 이미 퇴근한 햄스터의 줄은 흐리게 나온다. 새 프롬프트가 머리 위 피드를 비워도 로그는 그대로다. 사이드바 높이의 최대 40%.
 - **탐색**: 드라이브 · 경로 조각 · 하위 폴더에 이어 **파일**도 보인다. 폴더는 클릭 = 들어가기, 더블클릭 또는 `열기` = 터미널 열기. 파일은 더블클릭 = 기본 앱으로 열기, 우클릭 = 경로 복사 · 탐색기에서 보기 · 기본 앱으로 열기. 아래 줄에 초록 `여기서 터미널 열기` 버튼과 아이콘 버튼 셋 — 위로 · 즐겨찾기 · `…`(시스템 폴더 선택 창).
 - 맨 위 `이 폴더에서 검색` 한 칸이 탐색 목록을 거른다. 목록 행은 좌우 6px 마진 + 라운드로 카드처럼 떨어져 있고, 폴더 아이콘은 `.git` 이면 branch, `CLAUDE.md`/`.claude` 면 🐹 다.
 - **최근 목록은 사이드바에 없다.** 늘 보고 있을 것이 아니라 새로 시작할 때 필요한 것이라, `+`(새 터미널)과 빈 화면의 시작 카드에만 있다.
@@ -61,8 +76,56 @@ npx electron .          # 또는 npm run dev (HMR)
 
 **터미널**
 - 복사·붙여넣기는 Windows Terminal 과 같은 규칙이다. **선택이 있으면 `Ctrl+C` 가 복사**(선택이 풀리므로 한 번 더 누르면 평소처럼 `^C` 인터럽트), 선택이 없으면 그대로 `^C`. `Ctrl+Shift+C`·`Ctrl+Insert` 는 언제나 복사, `Ctrl+V`·`Ctrl+Shift+V`·`Shift+Insert` 는 붙여넣기(bracketed paste 라 Claude Code 가 한 번의 붙여넣기로 인식한다). **우클릭**은 선택이 있으면 복사, 없으면 붙여넣기.
-- `Ctrl+B` 는 셸로 가지 않고 앱이 사이드바에 쓴다.
+- **검색**(`Ctrl+F`): 터미널 오른쪽 위에 입력 칸 · `↑` `↓` · `Aa`(대소문자) · `2/4` 카운터 · `×` 가 뜬다. `Enter`/`Shift+Enter` 로 다음/이전, `Esc` 로 닫으면 커서가 터미널로 돌아간다. `@xterm/addon-search` 0.16.0 을 쓴다(0.17 베타는 xterm 6.1 베타를 요구해서 뺐다).
+- **글꼴 크기**: `Ctrl+=` / `Ctrl+-` / `Ctrl+0`(14로), 또는 `⋯` 메뉴의 `터미널 글꼴`. 10~24px, `ui.json` 에 저장되고 모든 탭에 같이 적용된다(바꾸면 cols/rows 를 다시 맞춰 셸에 알린다).
+- **단축키**는 전부 창의 `keydown` 한 곳에서 처리한다(`src/shortcuts.ts`). xterm 은 이 조합을 셸로 보내지 않고 흘려보내므로, 커서가 터미널에 있든 사이드바에 있든 똑같이 동작한다.
+
+| 키 | 동작 |
+|---|---|
+| `Ctrl+B` | 사이드바 열고 닫기 |
+| `Ctrl+T` | 새 터미널 탭(지금 탭의 폴더 → 마지막 폴더 → 홈) |
+| `Ctrl+F` | 터미널 검색(입력 칸 안에서는 그 칸의 것) |
+| `Ctrl+Shift+W` | 지금 탭 닫기. `claude` 가 돌고 있으면 탭의 `×` 와 똑같이 한 번 묻는다 |
+| `Ctrl+1` ~ `Ctrl+9` | N번째 탭으로 |
+| `` Ctrl+` `` | 책상 접기/펴기 |
+| `Ctrl+Shift+M` | 미니 모드 들어가기/나오기(미니 모드에서는 이 키만 듣는다) |
+| `Ctrl+=` · `Ctrl+-` · `Ctrl+0` | 터미널 글꼴 키우기 · 줄이기 · 기본값 |
+
+  - **`Ctrl+T`·`Ctrl+B`·`Ctrl+F` 는 앱이 가져간다. 그래서 Claude Code TUI(와 셸)에서 같은 키에 걸린 기능은 이 앱 안에서는 동작하지 않는다** — 그 키는 터미널에 아예 도달하지 않는다. 필요하면 Windows Terminal 같은 바깥 터미널에서 쓰면 된다.
+  - **탭 닫기가 `Ctrl+W` 가 아닌 이유**: PSReadLine 과 Claude Code 입력줄이 둘 다 `Ctrl+W` 를 "앞 단어 지우기"로 쓴다. 문장을 고치다가 탭이(그리고 그 안의 세션이) 닫히면 안 되므로 `Ctrl+Shift+W` 다.
 - **두 테마 모두 어두운 패널**이다(라이트 `--term-bg #121814` / 전경 `#dfe6da` / 커서 `#7fd4a3`, 다크 `#0e1310` / `#e3eade` / `#8fdcb0`). Claude Code 가 자기 테마 색으로 출력하므로 여기만 밝게 하면 글자가 안 보인다.
+
+**세션 컨트롤 바** (터미널 바로 위 한 줄. 그 탭에 `claude` 세션이 붙어 있을 때만 나온다)
+- 왼쪽부터 **모델 이름**(표시 전용) · **effort 세그먼트**(`low·medium·high·xhigh·max`) · 여백 · **컨텍스트 미터** · `/compact` · `/clear`(한 번 묻는다) · `지난 대화`.
+- 버튼 뒤에 API 는 없다. **이미 떠 있는 TUI 에 슬래시 명령을 대신 쳐 주는 것**이 전부다. 입력줄에 쓰다 만 글이 있을 수 있으므로 명령 앞에 `\x15`(Ctrl+U, 입력줄 비우기)를 같은 청크로 붙이고 Enter(`\r`)는 따로 보낸다. Claude Code 가 권한 요청·질문을 띄운 동안에는 입력줄이 앱의 것이 아니므로 바 전체가 비활성이고 `프롬프트에 답한 뒤 쓸 수 있어요.` 가 뜬다. 다른 터미널에서 도는 세션(기울임체 탭)은 읽기만 하므로 명령 버튼이 꺼져 있다.
+- **`/effort` 는 그 세션만 바꾸지 않는다.** Claude Code 가 그 값을 `~/.claude/settings.json` 의 새 세션 기본값으로도 저장한다(CLI 의 동작이고, 세그먼트 툴팁에도 적혀 있다). 작업 중에 누르면 다음 턴부터 적용된다.
+- **모델은 보여 주기만 한다.** `/model <alias>` 는 사용자의 저장된 기본 모델을 덮어쓰는데 실제 세션에서 검증하지 못해 버튼을 두지 않았다. 바꾸려면 터미널에서 `/model`.
+- **컨텍스트 %** 는 상태줄 스냅샷의 `contextUsedPct` 다 — **사용량 연동을 켠 사용자에게만** 보인다(미연동이면 미터도 탭의 `%` 도 없고, 바 툴팁이 `사용량 연동 시 컨텍스트가 보여요.`). 70% 부터 `/compact` 버튼이 강조되고 90% 부터 `압축 권장` 이 붙는다.
+
+**지난 대화 이어서 열기** (컨트롤 바의 `지난 대화`, 320px 팝오버)
+- 그 탭 폴더에서 나눈 대화 목록이다: 제목 / 마지막 프롬프트 / `3시간 전` · `⎇ branch` · `실행 중`. 3개 이상이면 검색 칸이 생긴다. 행을 누르면 **새 터미널 탭**에서 `claude --resume <sessionId>`, 맨 아래 줄은 `claude --continue`. 이미 돌고 있는 대화는 `실행 중` 배지와 함께 비활성이다(앱 밖에서 같은 대화를 또 여는 것까지 막지는 못한다). 프롬프트가 하나뿐이라 제목과 부제가 같은 대화는 부제를 숨긴다.
+- 목록은 **트랜스크립트 파일만** 읽는다(`~/.claude/projects/<cwd 슬러그>/*.jsonl`, 최근 60개). 파일 하나에서 읽는 양은 **앞 64KB**(첫 프롬프트·브랜치) + **꼬리 512KB**(마지막 `custom-title`/`ai-title`/`last-prompt`)뿐이고 전량 파싱은 하지 않는다 — 95MB 짜리 트랜스크립트도 있다. 제목 우선순위는 `custom-title > ai-title > 첫 프롬프트 60자 > id 앞 8자`. 직접 친 프롬프트가 없는 파일(슬래시 명령만 있는 세션 등)은 목록에서 빠진다. 결과는 `경로:크기:mtime` 으로 캐시한다(`electron/transcripts.ts`).
+
+**알림**
+- 창이 **포커스 밖일 때만** 권한 요청 · 질문 · 턴 완료를 Windows 알림으로 띄우고 작업표시줄 버튼을 깜빡인다(창을 보면 멈춘다). 종류별 on/off 와 소리는 `⋯` 메뉴의 `알림`. 알림을 누르면 창이 앞으로 오고 그 탭의 터미널에 커서가 간다. 턴 완료는 이 앱에서 띄운 세션만 울린다.
+- 네 겹으로 거른다: 설정, 포커스, **이벤트 나이 30초**(렌더러를 새로 고치면 백로그가 옛 `waiting`/`turn_end` 를 다시 흘린다), 같은 종류 + 같은 터미널 5초 중복 억제.
+- Windows 토스트는 **AUMID**(Application User Model ID) 아래에 등록된다. 포터블은 `kr.amag.hamsterdesk`(electron-builder 의 `appId` 와 같다), 개발 실행은 `process.execPath` 를 쓰고, `HAMSTER_AUMID`(`none`·`app`·`exec` 또는 임의의 id)로 바꿔 볼 수 있다. **토스트가 안 뜨는 환경**(`failed` 이벤트, 또는 2.5초 안에 `show` 도 `failed` 도 없음)에서는 같은 제목·본문이 **앱 안 배너**로 8초 뜬다(누르면 그 탭으로). 깜빡임은 어느 쪽이든 동작하므로 알림이 조용히 사라지는 일은 없다.
+
+**턴 완료 요약 토스트**
+- 턴이 끝나면 오른쪽 아래에 `파일 3 · +120 −40 · 2분 10초` 와 마지막으로 한 말 한 줄이 8초 뜬다. 그 턴의 프롬프트 **이후** 편집만 세고(대화 전체가 아니다), 시간은 `turn_end.durationMs` 가 있으면 그 값이다. 모델을 더 부르지 않는다. 누르면 그 탭으로 가서 사이드바의 `바뀐 파일` 이 열린다. 미니 모드에서는 상태줄 한 줄로 대신 나온다.
+- 문구는 말풍선과 같은 언어 규칙을 따른다(`src/i18n.ts`, 기간은 `formatDuration` 한 곳 — ko `2분 10초`·`45초`·`1시간 3분`, en `2m 10s`·`45s`·`1h 3m`). `⋯` 메뉴의 언어가 `자동` 이면 `~/.claude/settings.json` 의 `language` 를 보는데, 이 값은 자유 입력이라 **원어 이름**(`한국어`·`日本語`·`中文`·`Español`…), 영어 이름(`korean`), 로캘 코드(`ko`·`ko-KR`)를 모두 받는다. 표에 없는 값은 앞 두 글자로 추측하지 않고 브라우저 언어로 넘어간다 — `"한국어".slice(0, 2)` 는 `"한국"` 이라, 예전에는 한국어 사용자의 고정 문구·토스트·알림 제목이 전부 영어로 나왔다.
+
+**탭·창 복원**
+- 마지막에 열려 있던 **터미널 탭들**(폴더·제목·활성 탭)과 **창 크기·위치·최대화**가 다음 실행에 돌아온다. 돌아오는 것은 셸까지다 — `claude` 는 다시 띄우지 않는다(이어서 하려면 `지난 대화`). 사라진 폴더의 탭은 건너뛰고, 탭이 3개 이상이면 셸을 400ms 간격으로 띄운다.
+- 창 위치는 지금 연결된 모니터와 100×100 이상 겹칠 때만 되살린다(모니터를 뽑았으면 기본 위치). 미니 모드·최소화 중에는 저장하지 않는다.
+
+**미니 모드** (`⋯` 메뉴 또는 `Ctrl+Shift+M`)
+- **항상 위 480×360 창**이 된다(지금 모니터 작업 영역의 오른쪽 아래, 가장자리에서 12px). 스튜디오 + 28px 상태줄(`제목 · 작업 N · 확인 N · 72%`, 소리 토글, `⤢ 복귀`)만 남고, 상태줄이 곧 창을 끄는 손잡이다. 터미널은 언마운트하지 않으므로 셸과 `claude` 는 그대로 돈다.
+- 복귀하면 미니 직전의 크기·위치·최대화로 돌아간다. 미니 상태로 종료해도 저장되는 것은 **미니 직전의** 창이고, `mini` 자체는 저장하지 않는다(다음 실행은 늘 보통 창). `항상 위` 설정은 미니 동안 강제로 켜지고 나오면 원래 값으로 돌아간다.
+
+**Git** (탭의 `⎇ main · 3`, 바뀐 파일의 `git diff`)
+- **읽기 전용 명령만** 돌린다: `rev-parse` · `status --porcelain=v1 --branch` · `diff` · `diff --cached`. 쓰기 명령은 하나도 없고, 모든 호출에 `--no-optional-locks` 와 `GIT_OPTIONAL_LOCKS=0` 을 붙여 **index 를 새로 고쳐 쓰는 것조차** 하지 않는다 — 10초마다 폴링해도 사용자가 돌리는 git 과 `index.lock` 을 다투지 않는다(`electron/git.ts`).
+- 활성 탭만 10초마다, 그리고 편집이 들어오면 1.5초 뒤에 한 번 더 읽는다. 5초 안에 답이 없거나 git 이 없거나 저장소가 아니면 칩은 그냥 안 나온다(틀린 것을 보여 주느니 아무것도 안 보여 준다). 외부 세션 탭에는 칩이 없다.
 
 **책상 — 복셀 스튜디오(three.js)**
 - 시드로 생성한 **복셀 섬** 하나 위에 **나무 데크 사무실**이 한 단(24) 올라앉아 있다. 섬은 `src/desk/vox/world.ts` 의 고정 시드(20260920) LCG 로 매번 똑같이 만들어진다: 12갈래 블롭 → 매끈화 2패스 → 사무실 자리 강제 육지 → 타일 바닥 상자(가려지는 옆면은 굽지 않음) → 흙기둥·해안 모래·거품 띠 → 나무·바위·그루터기·꽃·풀포기 배치(90° 랜덤 회전, 숨쉬기·살랑임). 물은 파도 셰이더, 하늘은 그라데이션 돔이다.
@@ -108,8 +171,19 @@ npx electron .          # 또는 npm run dev (HMR)
 npm run watch:cli                  # Electron 없이 감시기만: 모든 이벤트를 콘솔에 출력
 npm run replay -- <session.jsonl>  # 지난 세션 → src/dev/replay.json (브라우저 미리보기용)
 npm run typecheck
+npm run test:unit                  # scripts/unit/*.test.ts — 아래 표
 npm run smoke:ui                   # ~/.hamster-desk/ui.json: 병합·null 삭제·디바운스·원자적 쓰기·손상 복구
 ```
+
+`npm run test:unit`(`tsx --test`)은 창 없이 도는 순수 로직만 본다 — 틀려도 조용한 곳들이다.
+
+| 파일 | 지키는 것 |
+|---|---|
+| `i18n.test.ts` | `'한국어'`·`'korean'`·`'ko-KR'`·`'한국어 (Korean)'` → ko, `'Klingon'`·`'Kotava'`·`'it-IT'` → 추측하지 않고 브라우저 언어로, 명시한 언어가 둘 다 이김, 요약기에는 사용자가 쓴 그대로(`한국어`) 넘김, `formatDuration` ko/en |
+| `transcripts.test.ts` | 첫 줄이 `last-prompt` 인 파일, `ai-title` 이 여럿이면 마지막, 프롬프트 없는 파일·슬래시 명령뿐인 세션은 제외, 제목 우선순위, 앞 64KB 를 넘는 첫 프롬프트 |
+| `turn-git.test.ts` | `summarizeTurn` 이 그 턴의 편집만 세는지, `parseStatus`(`## main...origin/main [ahead 1]`, CRLF, detached, 새 저장소), `classifyDiffLine` |
+| `window-state.test.ts` | `fitBounds`(화면 밖·과소·정상·최대화), `miniPlacement`(보조 모니터 포함), 탭 직렬화(업데이트 탭 제외, 외부 세션이 앞일 때) |
+| `contracts.test.ts` | 새 prefs 기본값과 `adoptPrefs` 의 `notify` 깊은 병합 |
 
 스모크 테스트(창을 보지 않고 스크린샷만). `HAMSTER_TYPE` 은 첫 셸에 자동 입력할 텍스트(`\r` = Enter, `|` 로 단계 구분, 단계 간격 `HAMSTER_TYPE_DELAY` ms), `HAMSTER_CWD` 는 셸 시작 폴더. 긴 문장은 Claude 입력창이 붙여넣기로 보므로 Enter(`
 `)를 별도 단계로 보낸다:
@@ -124,6 +198,55 @@ HAMSTER_CWD=C:/proj HAMSTER_CAPTURE=/tmp/shot.png HAMSTER_CAPTURE_DELAY=18000 HA
 HAMSTER_CAPTURE=work/ui-dark.png HAMSTER_CAPTURE_DELAY=8000 HAMSTER_CAPTURE_QUIT=1 \
   HAMSTER_PREFS='{"showSidebar":true,"theme":"dark","deskSide":"right"}' npx electron .
 ```
+
+**디버그 훅** — 전부 `app.isPackaged` 로 막혀 있어 포터블 exe 에서는 환경변수가 있어도 아무 일도 하지 않는다. 목적은 하나다: 창을 보지 않는 실행이 "그 버튼이 정말 그 일을 한다"를 `claude` 세션 없이(토큰 0) 증명하게 하는 것.
+
+| 환경변수 | 동작 |
+|---|---|
+| `HAMSTER_CAPTURE=<png>` `HAMSTER_CAPTURE_DELAY=<ms>[,<ms>…]` `HAMSTER_CAPTURE_QUIT=1` | 스크린샷. 지연을 쉼표로 여럿 주면 **한 실행에서 여러 장**(`shot.png` → `shot-1.png`, `shot-2.png` …; 하나면 이름 그대로). 전/후 비교가 한 번에 된다 |
+| `HAMSTER_EVENTS='[…]'` | desk 이벤트를 부팅 뒤 store 에 그대로 흘린다(`src/dev/debug.ts`). `"$sid"` → `debug-session`, `"$pty"` → 첫 터미널 id, `"$now"` → `Date.now()`. 첫 이벤트 앞에 `session{mine:true, ptyId:$pty, sessionId:$sid, cwd}` 가 자동으로 들어간다. desk 이벤트가 아닌 `{"kind":"debug:search","q":"needle"}` 은 터미널 검색을 연다 |
+| `HAMSTER_CLICK='more@4000\|mini-toggle@5000'` | `[data-debug-click="<이름>"]` 을 그 시각(ms)에 누른다. 500ms 폴링이라 아직 없는 버튼은 생길 때까지 기다리고, 끝내 없으면 `[debug] click <이름> missing`. 이름만 쓰면 `@3000` |
+| `HAMSTER_KEYS='ctrl+f@6000\|ctrl+shift+m@9000'` | 메인이 `webContents.sendInputEvent` 로 **진짜 키 이벤트**를 넣는다 — 핸들러를 직접 부르는 게 아니라 단축키가 실제로 타는 경로다 |
+| `HAMSTER_UNFOCUSED=1` | 창을 `showInactive()` 로 띄운다. 알림은 포커스 밖에서만 울리므로 이게 없으면 그 경로에 닿을 수 없다 |
+| `HAMSTER_NOTIFY_PROBE=1` | 시작 5초 뒤부터 3초 간격으로 AUMID 세 변형(`none`·`app`·`exec`)의 알림을 하나씩 띄우고 `[notify] probe aumid=… result=…` 를 찍는다 — 이 PC 가 토스트를 어떻게 다루는지 한 번에 본다 |
+| `HAMSTER_NOTIFY_FAIL=1` | 모든 알림 요청에 `failed` 로 답한다(토스트 없음) → 배너 폴백 경로를 찍을 수 있다 |
+| `HAMSTER_AUMID=none\|app\|exec\|<id>` | 이번 실행의 AUMID |
+| `HAMSTER_PTY_LOG=<파일>` | 셸이 찍은 것을 그대로, **셸에 써 넣은 것**은 `>> ` 로 시작하는 한 줄씩 남긴다. 제어문자는 풀어 쓴다: 컨트롤 바의 `/compact` 는 `>> \x15/compact` 와 `>> \r` **두 줄**(= 두 청크)로 남는다. 친 글이 전부 남으므로(비밀번호 포함) 패키지 빌드에는 없다 |
+| `HAMSTER_TYPE` `HAMSTER_TYPE_DELAY` `HAMSTER_TYPE_VIA=renderer` `HAMSTER_CWD` `HAMSTER_PREFS` | 위 문단 참고 |
+| `HAMSTER_HOME=<폴더>` | `~/.hamster-desk` 대신 쓸 폴더. 검증은 늘 임시 폴더로 돌려 사용자의 `ui.json` 을 건드리지 않는다 |
+
+캡처 실행은 stdout 에 **꼬리표 달린 줄**을 남긴다 — 스크린샷에 안 찍히는 사실을 말하는 길이다: `[capture]` `[keys]` `[pty]`(create/exit) `[debug]`(events·click) `[notify]` `[mini]` `[bounds]` `[restore]` `[git]` `[transcripts]` `[bar]`(보낸 바이트) `[history]` `[shortcut]` `[term]`(search N/M · font) 그리고 렌더러의 `[renderer:error]`·`[renderer:warning]`. 렌더러 쪽 꼬리표(`[`로 시작하는 콘솔 줄)는 캡처 실행에서만 stdout 으로 넘어온다.
+
+`data-debug-click` 이름: `welcome-run` · `more` · `mini-toggle` · `mini-exit` · `mini-sound` · `notify-permission` · `notify-question` · `notify-turn` · `notify-sound` · `notify-banner` · `bar-effort-<low|medium|high|xhigh|max>` · `bar-compact` · `bar-clear` · `bar-clear-yes` · `bar-history` · `history-<n>` · `history-continue` · `toast` · `log-<n>` · `file-<n>` · `file-<n>-diff` · `term-search-close`. (`⋯` 메뉴 안의 항목은 `more` 를 먼저 눌러 팝오버를 열어야 존재한다.)
+
+읽을 때 알아 둘 것:
+- **캡처 PNG 는 창이 아니라 콘텐츠 영역 크기다.** Windows 에서 창보다 16×39 작다 — 1280×880 창은 1264×841, 미니 480×360 은 464×321. `[mini] on 480x360` 같은 stdout 의 숫자가 창 크기다.
+- **`HAMSTER_CLICK` 의 시각은 렌더러가 뜬 뒤부터 잰다.** 메인의 캡처 타이머(`HAMSTER_CAPTURE_DELAY`)는 프로세스 시작부터 재므로, 부팅이 느린 실행에서는 클릭이 캡처보다 뒤로 밀릴 수 있다. 클릭과 캡처 사이를 1.5초 이상 띄우고, `[debug] click … ok` 가 `[capture]` 보다 먼저 찍혔는지 본다.
+- **캡처는 한 번에 하나씩** 돌린다. 프로필은 실행마다 따로지만(`hamster-desk-smoke-<pid>`) 알림·포커스·항상 위는 데스크톱 하나를 같이 쓴다.
+- 창을 보지 않는 실행(`HAMSTER_CAPTURE`/`EVENTS`/`CLICK`/`KEYS`/`UNFOCUSED` 중 하나라도 있으면)은 `backgroundThrottling: false` 와 `--disable-features=CalculateNativeWinOcclusion` 으로 뜬다. 가려졌거나 뒤에 있는 창은 Chromium 이 그리기를 멈추고 타이머를 늦추는데, 그러면 스크린샷이 한두 프레임 전 화면이 된다.
+- 검색 검수의 기대값은 **`2/4`** 다: `HAMSTER_TYPE='echo needle-1\r|echo needle-2\r'` 은 `needle` 을 네 번 남기고(친 줄 둘 + 출력 둘) 검색을 열면 `[term] search 2/4` 가 찍힌다. `2/2` 가 아니다.
+
+기능별 캡처(전부 임시 `HAMSTER_HOME`, 한 번에 하나씩):
+
+```bash
+# 알림: 포커스 없이 띄우고 권한 요청을 흘린다 → stdout 에 [notify] show tag=permission … result=shown (안 뜨는 PC 면 result=failed + 배너)
+HAMSTER_UNFOCUSED=1 HAMSTER_EVENTS='[{"kind":"waiting","ptyId":"$pty","reason":"permission","ts":"$now"}]' \
+  HAMSTER_CAPTURE=work/f-notify.png HAMSTER_CAPTURE_DELAY=7000 HAMSTER_CAPTURE_QUIT=1 npx electron .
+
+# 컨트롤 바 + 지난 대화: 컨텍스트 92% → 탭의 빨간 92%, 강조된 /compact, 모델은 글자만. 그다음 지난 대화 목록
+HAMSTER_CWD=C:/proj HAMSTER_EVENTS='[{"kind":"status","sessionId":"$sid","ts":"$now","model":{"id":"claude-fable-5-1","displayName":"Fable 5.1"},"effort":"high","contextUsedPct":92,"contextSize":200000,"costUSD":null,"linesAdded":null,"linesRemoved":null,"fiveHour":null,"sevenDay":null,"otherWindows":{}}]' \
+  HAMSTER_CLICK='bar-history@7000' HAMSTER_CAPTURE=work/f-bar.png HAMSTER_CAPTURE_DELAY=6000,9000 HAMSTER_CAPTURE_QUIT=1 npx electron .
+
+# 토스트 → 바뀐 파일 → git diff (file 은 작업 트리에서 실제로 바뀐 파일이어야 diff 가 나온다)
+HAMSTER_CWD=C:/proj HAMSTER_EVENTS='[{"kind":"prompt","sessionId":"$sid","agentId":null,"text":"t","ts":"$now"},{"kind":"edit","sessionId":"$sid","agentId":null,"toolUseId":"t1","file":"C:/proj/README.md","op":"edit","added":12,"removed":3,"preview":{"old":"a","new":"b"},"ts":"$now"},{"kind":"text","sessionId":"$sid","agentId":null,"text":"정리를 마쳤어요","ts":"$now"},{"kind":"turn_end","sessionId":"$sid","durationMs":130000,"ts":"$now"}]' \
+  HAMSTER_CLICK='toast@7000|file-0@8500|file-0-diff@10000' HAMSTER_CAPTURE=work/f-toast.png HAMSTER_CAPTURE_DELAY=6000,9500,11500 HAMSTER_CAPTURE_QUIT=1 npx electron .
+
+# 미니 모드: 들어갔다 나온다 → [mini] on 480x360 saved=1280x880, [mini] off 1280x880
+HAMSTER_CLICK='more@4000|mini-toggle@5000|mini-exit@9000' \
+  HAMSTER_CAPTURE=work/f-mini.png HAMSTER_CAPTURE_DELAY=3500,7500,11000 HAMSTER_CAPTURE_QUIT=1 npx electron .
+```
+
+사람이 한 번 봐야 하는 것(캡처 실행은 저장을 막아 두었거나 실제 세션이 필요해서 자동으로는 못 본다): **포터블 exe 에서 Windows 토스트가 뜨는지**, **창 크기를 바꾸고 종료한 뒤 `ui.json` 의 `window` 가 바뀌었는지**, **`지난 대화` 의 행을 눌렀을 때 실제로 `claude --resume` 이 그 대화를 이어 여는지**.
 
 내장 셸의 환경은 앱을 띄운 프로세스가 아니라 사용자의 터미널처럼 보이도록 정리한다(`electron/env.ts` `cleanEnv`): npm/npx 가 끼워 넣는 `node_modules\.bin` PATH 항목과 `npm_*` 변수, 그리고 다른 Claude Code 세션 안에서 띄웠을 때 상속되는 `CLAUDE_CODE_CHILD_SESSION` 같은 내부 표식을 제거하고, 네이티브 설치 경로 `~/.local/bin` 을 PATH 맨 앞에 둔다. 이 정리가 없으면 중첩 세션으로 오인돼 트랜스크립트·세션 파일이 생기지 않아 햄스터가 아무것도 못 본다.
 
@@ -140,20 +263,33 @@ electron/watcher/       sessions(세션 파일·pty 소유 판별) · project(�
 electron/legacy.ts      예전 협업 모드가 남긴 파일 정리(첫 실행 1회)
 electron/statusline.ts  상태줄 스크립트 설치/해제, 스냅샷 감시
 electron/ui-store.ts    ~/.hamster-desk/ui.json 읽기/쓰기(디바운스·원자적 쓰기·손상 복구) — electron 의존 없음
+electron/notify.ts      OS 알림(Notification + flashFrame) · AUMID 세 변형 · 안 뜨면 'failed' 로 답해 렌더러가 배너로
+electron/window-state.ts 창 위치 저장·복원(fitBounds) · 미니 모드(setMini·miniPlacement) — 순수 함수는 단위 테스트
+electron/transcripts.ts 지난 대화 목록: 트랜스크립트 앞 64KB + 꼬리 512KB 만, `경로:크기:mtime` 캐시
+electron/git.ts         읽기 전용 git: info(브랜치·바뀐 수·ahead/behind) · diff(작업 트리 → staged → untracked), 5초 타임아웃
 electron/version.ts     claude --version / npm 최신 비교
 shared/events.ts        이벤트 타입
 src/store.ts            zustand: 세션·햄스터 상태기계(말풍선 = 수명이 있는 채팅 피드)·작업 공간(터미널 탭)·사용량·버전·설정
 src/App.tsx             상단 바·레이아웃(책상 위/오른쪽, 스플리터)·부팅 순서 · src/widgets/ Popover(공용)·사용량 게이지 둘·버전·⋯ 메뉴·+ 메뉴(새 터미널)·RecentList·theme.ts(라이트/다크 판정)·icons.tsx(인라인 SVG 아이콘 한 벌)
 src/styles.css          라이트/다크 토큰 두 벌(`:root` · `:root[data-theme='dark']`)과 모든 크롬 스타일, 3D 오버레이용 공용 토큰
-src/i18n.ts             고정 말풍선 문구(ko/en)와 효과 언어 판정 · src/bubbles/summarize.ts 요약 요청(lane 별 600ms 디바운스, 늦은 답 폐기)
+src/i18n.ts             고정 문구(말풍선·알림·토스트, ko/en) · 효과 언어 판정(codeOfLanguage: 원어 이름·영어 이름·로캘 코드) · formatDuration · src/bubbles/summarize.ts 요약 요청(lane 별 600ms 디바운스, 늦은 답 폐기)
 src/desk/DeskStudio.tsx three.js 렌더러·씬·리그·라벨·UI(모듈 싱글턴 렌더러라 접었다 펴도 컨텍스트를 새로 만들지 않음)
 src/desk/office-world.ts 타일 좌표·좌석 배정(reconcileSeats)·복도 경로(Walker) — DOM/three 없음
 src/desk/office-camera.ts 3D 궤도 카메라 상태·광선/투영 수학(groundHit·focus·overview·pan·orbit·zoom)
 src/desk/vox/            복셀 코어: builder.ts(상자→지오메트리) · material.ts(셰이더·물·하늘) · hamster.ts(직립 리그) · props.ts(사무실·자연 소품) · world.ts(시드 섬 생성)
 src/desk/skins.ts        모델별 스킨 · src/desk/anim.ts 상태→애니메이션·화면색·에이전트 색
 src/sidebar/            사이드바(Sidebar.tsx: 바뀐 파일·탐색·폭 핸들) · recent.ts(ui.json 의 최근/즐겨찾기·상대 시간)
-src/dev/                브라우저 재생(replay-driver.ts) · 데모 햄스터(demo.ts)
-src/Terminal.tsx        xterm 탭(복사·붙여넣기 키 처리, 테마 연동) · src/log/FileLog.tsx 바뀐 파일 목록(사이드바 섹션)
+src/dev/                브라우저 재생(replay-driver.ts) · 데모 햄스터(demo.ts) · debug.ts(HAMSTER_EVENTS 재생 · HAMSTER_CLICK)
+src/Terminal.tsx        xterm 탭(복사·붙여넣기 키 처리, 테마 연동, 검색 애드온, 글꼴 크기, 앱 단축키는 셸로 안 보냄)
+src/term/               TermSearch.tsx(검색 오버레이) · search.ts(검색 옵션, 캡처 실행용 꼬리표 로그)
+src/shortcuts.ts        전역 단축키 전부(창 keydown 한 곳)
+src/session/            SessionBar.tsx(컨트롤 바) · ContextMeter.tsx(탭의 % · 바의 미터) · TranscriptList.tsx(지난 대화)
+src/log/                FileLog.tsx(바뀐 파일) · FeedLog.tsx(말풍선 로그) · TurnToast.tsx(턴 요약 토스트) · turn.ts(summarizeTurn, 순수)
+src/git/                GitChip.tsx(탭 칩) · useGit.ts(10초 폴링 + 편집 디바운스) · DiffView.tsx · diff.ts(줄 분류, 순수)
+src/notify/             notifier.ts(store 구독 → 알림, 네 겹 게이트) · Banner.tsx(토스트가 안 뜰 때의 배너) · src/assets/notify.wav
+src/mini/               MiniShell.tsx(미니 모드: 스튜디오 + 상태줄)
+src/workspaces-persist.ts 터미널 탭 저장·복원(ui.json 의 workspaces)
+scripts/unit/           단위 테스트(i18n · transcripts · turn-git · window-state · contracts)
 ```
 
 트랜스크립트 JSONL 은 Claude Code 내부 형식이라 버전이 바뀌면 파서(`electron/watcher/parse.ts`)를 손봐야 할 수 있다. 모르는 레코드는 무시한다.
