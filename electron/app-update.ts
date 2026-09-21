@@ -97,7 +97,7 @@ Write-Host 'Hamster Desk 가 닫히기를 기다리는 중...'
 try { Wait-Process -Id $AppPid -Timeout 30 -ErrorAction Stop } catch {}
 Set-Location -LiteralPath $Repo
 $ok = $true
-foreach ($step in 'git pull --ff-only', 'npm install --legacy-peer-deps', 'npm run build') {
+foreach ($step in 'git pull --ff-only', 'npm install --legacy-peer-deps', 'npm run build:dir') {
   Write-Host ''
   Write-Host "> $step" -ForegroundColor Cyan
   cmd /c $step
