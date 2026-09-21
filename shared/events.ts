@@ -100,6 +100,13 @@ export interface AppUpdateInfo {
   canSelfUpdate: boolean
   checkedAt: number
   error: string | null
+  /** the running app's version (package.json) */
+  version?: string
+  /**
+   * An *installed* build does not follow commits: it follows GitHub Releases (electron/app-release.ts).
+   * A newer release is downloaded in the background; 'ready' means a restart installs it.
+   */
+  release?: { version: string; state: 'downloading' | 'ready'; percent: number } | null
 }
 
 export type DeskEvent =

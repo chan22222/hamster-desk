@@ -20,7 +20,21 @@ npm run build:vite      # out/ 만 만든다(패키징 없음)
 npx electron .          # 또는 npm run dev (HMR)
 ```
 
-패키지 빌드: `npm run build` → `release/win-unpacked/Hamster Desk.exe`(`npm run dist` 도 같은 명령). 압축하지 않은 폴더 그대로다 — 단일 포터블 exe 는 켤 때마다 앱 전체(약 410MB)를 `%TEMP%` 에 풀고 끌 때 지워서 시작이 느렸다. 옮길 때는 `win-unpacked` 폴더째로 옮긴다.
+**설치 프로그램**(git·node 없이 쓰는 사람용): `npm run dist` → `release/Hamster-Desk-Setup-0.1.0.exe`(약 120MB, NSIS 원클릭, 사용자 단위 설치라 관리자 권한 없음). `%LOCALAPPDATA%\Programs` 아래에 풀어 두고 시작 메뉴·바탕 화면 바로가기를 만든다 — 그 바로가기에 앱의 AUMID 가 처음부터 들어 있어서, 어떻게 고정하든 작업 표시줄 버튼이 하나다. 제거는 Windows 의 앱 제거에서 하고, 설정(`~/.hamster-desk`, `%APPDATA%\hamster-desk`)은 남긴다. 서명이 없어서 내려받은 파일을 처음 실행하면 SmartScreen 경고("Windows의 PC 보호" → 추가 정보 → 실행)가 뜬다.
+
+**설치한 앱은 스스로 새 버전이 된다**(`electron/app-release.ts`, electron-updater). 설치판은 커밋이 아니라 **GitHub Releases** 를 본다: 시작할 때와 한 시간마다 확인하고, 자기 버전보다 높은 릴리스가 있으면 백그라운드로 받는다(설치 파일 옆에 올리는 `.blockmap` 덕에 바뀐 블록만). 다 받으면 상단에 **앱 업데이트** 버튼이 뜨고 **다시 시작해서 업데이트** 를 누르면 설치 프로그램이 조용히 돌고 앱이 다시 열린다 — 누르지 않아도 앱을 끌 때 설치된다. 다시 설치할 일은 없다. 어떤 빌드인지는 exe 옆을 보고 가른다: `Uninstall Hamster Desk.exe` 가 있으면 설치판(릴리스), 저장소 안의 `release/win-unpacked` 면 커밋 비교 + 닫고 업데이트, 둘 다 아니면 링크만. electron-updater 는 설치판에서만, 시작 경로 밖에서 늦게 불러온다.
+
+릴리스 올리기:
+
+```bash
+# 1. package.json 의 "version" 을 올리고 평소처럼 커밋·푸시
+# 2.
+npm run release            # 검사만: npm run release -- --check
+```
+
+`scripts/release.ts` 가 작업 폴더가 깨끗하고 `HEAD` 가 `origin/main` 과 같은지, 그 버전이 이미 나가지 않았는지 확인한 뒤, 설치 파일을 빌드해 **초안** 릴리스에 올리고(`Hamster-Desk-Setup-<버전>.exe` · `.blockmap` · `latest.yml`) 다 올라간 다음 한 번에 공개한다 — 반만 올라간 릴리스를 설치된 앱이 보는 일이 없다. 공개가 `v<버전>` 태그를 만든다. 릴리스 노트는 이전 태그 이후의 커밋 제목이다. GitHub CLI 로그인(`gh auth login`)이 필요하다: 업로드에 그 토큰을 쓴다. 버전을 올리지 않으면 설치된 앱은 새 릴리스로 보지 않는다(semver 비교).
+
+패키지 빌드: `npm run build` → `release/win-unpacked/Hamster Desk.exe`. 압축하지 않은 폴더 그대로다 — 단일 포터블 exe 는 켤 때마다 앱 전체(약 410MB)를 `%TEMP%` 에 풀고 끌 때 지워서 시작이 느렸다. 옮길 때는 `win-unpacked` 폴더째로 옮긴다.
 
 창은 페이지가 그려지기를 기다리지 않고 **바로 뜬다**. 첫 화면은 `src/index.html` 에 마크업과 인라인 CSS 로 들어 있는 로딩 화면(햄스터 + 점 셋)이라 번들을 받기도 전에 그려지고, 설정과 저장된 탭을 다 읽으면(`App.tsx` 의 `booting`) 0.22초 페이드로 사라진다. 애니메이션은 transform·opacity 만 써서 앱을 띄우느라 메인 스레드가 바빠도 멈추지 않는다. 색은 OS 의 밝게/어둡게를 따르다가 `<html data-theme>` 가 정해지면 그쪽을 따른다.
 
@@ -34,13 +48,15 @@ npx electron .          # 또는 npm run dev (HMR)
 
 **앱 업데이트 확인**(`electron/app-update.ts`). 릴리스가 없는 앱이라 "새 버전" = GitHub `main` 에 이 빌드에 없는 커밋이 있다는 뜻이다. 빌드가 자기 커밋을 메인 번들에 박아 두고(`__BUILD_COMMIT__`, `electron.vite.config.ts`), 시작할 때와 한 시간마다 `GET /repos/chan22222/hamster-desk/compare/<그 커밋>...main` 한 번으로 몇 개 뒤처졌는지와 그 제목들을 받는다(공개 저장소라 토큰 없음, 익명 한도 시간당 60회). 뒤처져 있으면 상단에 **앱 업데이트** 버튼이 뜨고, 누르면 바뀐 내용과 함께 묻는다 — `claude update` 와 달리 앱을 닫아야 하기 때문이다. 앱이 자기 저장소 안(`<repo>/release/win-unpacked`)에서 돌고 있으면 **닫고 업데이트**: 앱이 꺼지고 콘솔 창 하나가 `git pull --ff-only` → `npm install --legacy-peer-deps` → `npm run build` 를 돌린 뒤 앱을 다시 연다(실패하면 오류를 보여 주고 기존 버전을 다시 연다). 폴더만 복사해 온 경우에는 GitHub 의 변경 내역을 연다. 푸시하지 않은 커밋으로 만든 빌드(GitHub 이 모르는 커밋)와 git 밖에서 만든 빌드는 비교하지 않는다. `⋯` 메뉴의 Hamster Desk 줄에 빌드 커밋과 상태, `다시 확인`이 있다. 캡처 실행은 확인하지 않는다(네트워크에 따라 달라지는 버튼은 사진을 비교할 수 없게 만든다).
 
-**작업 표시줄 고정**(`electron/shortcuts.ts`). 작업 표시줄은 고정된 바로가기와 창의 AUMID 가 같아야 한 버튼으로 합친다. 이 앱은 토스트 때문에 AUMID 를 직접 정하는데(`kr.amag.hamsterdesk`) 설치 프로그램이 없어 그 ID 를 바로가기에 적어 줄 주체가 없었다. 그래서 (1) 탐색기에서 exe 를 고정하면 ID 없는 바로가기가 되어, 거기서 켠 앱이 고정 버튼 옆에 **두 번째 버튼**으로 떴고, (2) Electron 이 토스트를 처음 띄울 때 스스로 만드는 `시작 메뉴\프로그램\Hamster Desk.lnk` 는 한 번 만들어지면 다시 보지 않아서, 예전 포터블이 풀리던 `%TEMP%` 폴더를 가리킨 채 남았다 — 실행 중인 창을 고정하면 Windows 가 **그 바로가기를 복사**하므로, 고정 버튼은 창과 합쳐지지만 **눌러도 아무것도 켜지지 않았다**. 패키지 빌드는 시작 2초 뒤 이 둘을 바로잡는다: 시작 메뉴 바로가기가 없으면 만들고, 시작 메뉴·작업 표시줄의 바로가기 가운데 "이 exe 를 켜는데 ID 가 없는 것"과 "ID 는 우리 것인데 exe 가 사라진 것"을 현재 exe + ID 로 고친다(`update` 라 Electron 이 넣어 둔 토스트 CLSID 는 그대로). 아직 존재하는 다른 복사본을 가리키는 바로가기와 남의 바로가기는 건드리지 않는다. 고정은 **앱을 켠 뒤 작업 표시줄 버튼을 우클릭 → 작업 표시줄에 고정**, 또는 시작 메뉴의 Hamster Desk 에서 한다.
+**작업 표시줄 고정**(`electron/shortcuts.ts`). 작업 표시줄은 고정된 바로가기와 창의 AUMID 가 같아야 한 버튼으로 합친다. 이 앱은 토스트 때문에 AUMID 를 직접 정하는데(`kr.amag.hamsterdesk`) 설치 프로그램이 없어 그 ID 를 바로가기에 적어 줄 주체가 없었다. 그래서 (1) 탐색기에서 exe 를 고정하면 ID 없는 바로가기가 되어, 거기서 켠 앱이 고정 버튼 옆에 **두 번째 버튼**으로 떴고, (2) Electron 이 토스트를 처음 띄울 때 스스로 만드는 `시작 메뉴\프로그램\Hamster Desk.lnk` 는 한 번 만들어지면 다시 보지 않아서, 예전 포터블이 풀리던 `%TEMP%` 폴더를 가리킨 채 남았다 — 실행 중인 창을 고정하면 Windows 가 **그 바로가기를 복사**하므로, 고정 버튼은 창과 합쳐지지만 **눌러도 아무것도 켜지지 않았다**. 패키지 빌드는 시작 2초 뒤 이 둘을 바로잡는다: 시작 메뉴 바로가기가 없으면 만들고, 시작 메뉴·작업 표시줄의 바로가기 가운데 "이 exe 를 켜는데 ID 가 없는 것"과 "ID 는 우리 것인데 exe 가 사라진 것"을 현재 exe + ID 로 고친다(`update` 라 Electron 이 넣어 둔 토스트 CLSID 는 그대로). 아직 존재하는 다른 복사본을 가리키는 바로가기와 남의 바로가기는 건드리지 않는다. 고정은 **앱을 켠 뒤 작업 표시줄 버튼을 우클릭 → 작업 표시줄에 고정**, 또는 시작 메뉴의 Hamster Desk 에서 한다. 창에는 재실행 정보(`setAppDetails`: 이 exe·아이콘·ID)도 달려 있어, 실행 중인 창을 고정할 때 시작 메뉴 바로가기가 아직 낡았더라도 고정 버튼은 이 exe 를 켠다. **한계**: 앱을 한 번도 켜기 전에 exe 를 끌어다 고정한 버튼은 ID 없이 만들어지고, 탐색기는 고정 버튼의 ID 를 기억해 두기 때문에 나중에 바로가기를 고쳐도 탐색기를 다시 시작하기 전에는 버튼이 둘로 남는다 — 그 버튼은 한 번 고정 해제하고 위 방법으로 다시 고정한다. 설치 프로그램으로 깐 경우에는 처음부터 생기지 않는 문제다.
 
 아이콘은 `npm run icon`(`scripts/make-icon.ts`)이 16×16 픽셀 그림 하나에서 `build/icon.ico`(exe·작업 표시줄) · `build/icon.png`(개발 실행의 창 아이콘) · `src/assets/hamster.png`(로딩 화면)를 만든다. 결과물은 커밋되어 있으므로 그림을 바꿨을 때만 다시 돌린다.
 
 프로필은 실행 모드별로 나뉜다: 패키지 빌드 `%APPDATA%\hamster-desk`, 개발 실행 `%APPDATA%\hamster-desk-dev`, 캡처 실행(`HAMSTER_CAPTURE`) `%TEMP%\hamster-desk-smoke-<pid>`. 캡처 실행의 프로필은 **실행마다 따로**다 — 예전에는 `hamster-desk-smoke` 하나를 같이 써서, 캡처 둘을 나란히 돌리면 뒤에 뜬 쪽이 `Unable to move the cache` 로 부팅이 늦어지고 자기 `HAMSTER_CLICK` 타이머를 놓쳤다. 폴더는 종료할 때 지우고(best-effort), Chromium 이 아직 쥐고 있어 못 지운 것은 다음 캡처 실행이 시작하면서 치운다(그 pid 의 프로세스가 더는 없을 때만). `test:office:ui`·`shot:studio` 는 따로 `%TEMP%\hamster-desk-smoke` 를 쓴다. 그래서 패키지 빌드를 켜 둔 채 `npm run dev` 를 띄워도 캐시(`Unable to move the cache`)가 충돌하지 않는다. 패키지 빌드는 단일 인스턴스라 두 번째로 실행하면 이미 떠 있는 창을 앞으로 가져온다.
 
 **설정은 프로필 밖 파일 하나에 저장된다**: `~/.hamster-desk/ui.json`(언어·테마·패널·책상 위치와 크기·사이드바 폭·최근 프로젝트·즐겨찾기·마지막 폴더). 예전에는 `localStorage` 에 있었는데 그건 Electron **프로필** 소유라, 패키지 빌드에서 바꾼 언어가 `npm run dev` 에는 안 보이고 캐시를 지우면 같이 날아갔다. 메인 프로세스가 300ms 디바운스로 원자적 쓰기(`.tmp` → rename)를 하고, 종료 시 남은 변경을 flush 한다(`electron/ui-store.ts`). 파일이 없으면 첫 실행 때 옛 `localStorage` 키(`hd.prefs`·`hd.recentDirs`·`hd.recentMeta`·`hd.favDirs`·`hd.lastCwd`)에서 **파일에 아직 없는 키만** 한 번 옮기고 지운다. 파일이 깨져 있으면 `ui.corrupt.json` 으로 치워 두고 기본값으로 뜬다. `prefs` 에는 **버전 표식 `v`** 가 붙는다(`PREFS_VERSION`, 지금 2): 이름이 바뀐 키는 이름으로 옮기면 되지만(`showFolders` → `showSidebar`) **뜻이 바뀐 키**는 옛 값이 새 값으로도 멀쩡해서 구분할 길이 없다. 표식이 없는 파일(v1)은 `showLog`(예전 "오른쪽 패널 표시", 지금 "사이드바의 바뀐 파일 섹션 펼침")를 버리고 새 기본값을 쓰며, 나머지는 그대로 병합해 `v: 2` 로 한 번 다시 쓴다. 다음에 또 뜻이 바뀌면 `PREFS_VERSION` 을 올리고 `adoptPrefs` 의 같은 자리에 규칙 한 줄을 더한다. 경로는 `⋯` 메뉴 맨 아래 줄에 있고, 누르면 탐색기에서 열린다. 검증은 `npm run smoke:ui`.
+
+**이 파일을 앱이 스스로 날리지 않게 한다.** `ui.json` 에는 계정 목록과 저장된 탭도 들어 있는데, 예전에는 세 가지 경로로 통째로 사라질 수 있었다. (1) 읽기가 실패하면 — 재부팅 직후 백신이나 동기화 프로그램이 파일을 잠깐 쥐고 있을 때 — "파일 없음"과 똑같이 빈 설정으로 취급했고, 곧이은 저장(창을 옮기기만 해도)이 그 빈 설정으로 전체를 덮어썼다. 이제 **있는데 못 읽은 파일**은 60ms 간격으로 8번 다시 읽고, 그래도 안 되면 읽힐 때까지 **아무것도 쓰지 않는다**. (2) 쓰기는 원자적이었지만 내구적이지 않았다: fsync 없는 rename 은 정전 뒤에 0 으로 채워진 파일을 남길 수 있다. 이제 rename 전에 fsync 한다. (3) 깨진 파일은 곧 빈 설정이었다. 이제 직전의 온전한 파일을 `ui.bak.json` 으로 남겨 두고, 깨졌을 때 그것을 읽는다(깨진 파일은 전처럼 `ui.corrupt.json` 으로). 그리고 목록은 잃었어도 **계정 폴더와 그 안의 로그인은 남아 있으므로**, 시작할 때 `~/.hamster-desk/profiles/acc-N` 가운데 목록에 없고 CLI 가 쓴 흔적(`.credentials.json`·`.claude.json`)이 있는 폴더를 목록에 되돌린다(`adoptOrphanProfiles`; 이름은 로그인 이메일의 앞부분). 일부러 지웠는데 파일이 잠겨 다 못 지운 폴더는 `.hamster-deleted` 표식이 있어 되살아나지 않고, 그때 다시 지운다.
 
 기능 확장으로 늘어난 키는 전부 **추가**라 `PREFS_VERSION` 은 2 그대로다.
 

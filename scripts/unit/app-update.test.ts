@@ -9,6 +9,7 @@ import { mkdirSync, mkdtempSync, readFileSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { buildCommit, checkAppUpdate, parseCompare, repoDirOf } from '../../electron/app-update'
+import { isInstalled, releaseInfo, uninstallerOf } from '../../electron/app-release'
 
 const commit = (n: number, message: string): unknown => ({ sha: String(n).repeat(40).slice(0, 40), commit: { message } })
 
@@ -81,4 +82,19 @@ test('the boot log writes one line per launch with the gaps between marks', asyn
   assert.match(lines[0], /^\d{4}-\d\d-\d\dT[\d:.]+Z 0\.1\.0 abc1234 dev \| os>main \d+ \| ready \+\d+ \| booted \+\d+ \| total \d+ms$/)
   const osToMain = Number(lines[0].match(/os>main (\d+)/)?.[1])
   assert.ok(osToMain >= 4900 && osToMain < 6000, `os>main was ${osToMain}`)
+})
+
+test('an installed build is told apart by the uninstaller the setup leaves next to the exe', () => {
+  const dir = mkdtempSync(join(tmpdir(), 'hd-installed-'))
+  const exe = join(dir, 'Hamster Desk.exe')
+  assert.equal(uninstallerOf(exe), join(dir, 'Uninstall Hamster Desk.exe'))
+  assert.equal(isInstalled(exe, true), false) // win-unpacked, or a copied folder
+  writeFileSync(uninstallerOf(exe), '')
+  assert.equal(isInstalled(exe, true), process.platform === 'win32')
+  assert.equal(isInstalled(exe, false), false) // a dev run is never 'installed'
+})
+
+test('an installed build reports its version and no commits to be behind', () => {
+  const u = releaseInfo('0.1.0', null)
+  assert.deepEqual([u.version, u.behind, u.commits, u.canSelfUpdate, u.release], ['0.1.0', 0, [], false, null])
 })

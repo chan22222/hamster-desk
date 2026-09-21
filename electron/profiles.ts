@@ -1,4 +1,4 @@
-import { closeSync, existsSync, mkdirSync, openSync, readFileSync, readSync, rmSync, statSync } from 'node:fs'
+import { closeSync, existsSync, mkdirSync, openSync, readFileSync, readSync, readdirSync, rmSync, statSync, writeFileSync } from 'node:fs'
 import { homedir } from 'node:os'
 import { dirname, join, resolve } from 'node:path'
 import { DEFAULT_PROFILE_ID, type Profile, type ProfilesState } from '../shared/events'
@@ -19,6 +19,8 @@ import { claudeDir } from './watcher/paths'
 
 const NAME_MAX = 24
 const DEFAULT_NAME = '기본'
+/** left inside an account folder whose delete could not finish, so that nothing takes it for a live account */
+const TOMBSTONE = '.hamster-deleted'
 
 /** Read from the env on every call so tests can point HAMSTER_HOME at a temp dir. */
 function profilesRoot(): string {
@@ -127,7 +129,48 @@ export function deleteProfileDir(p: Profile | null): boolean {
   } catch {
     /* locked by something still running */
   }
-  return !existsSync(dir)
+  if (!existsSync(dir)) return true
+  try {
+    writeFileSync(join(dir, TOMBSTONE), '', 'utf8') // see adoptOrphanProfiles: this one was deleted on purpose
+  } catch {
+    /* ignore */
+  }
+  return false
+}
+
+/**
+ * Accounts whose folder is still there but which the list no longer knows — put back on the list.
+ *
+ * The list lives in ui.json; the login lives in the folder. When ui.json is lost (see ui-store.ts
+ * for how that used to happen after a reboot) every account vanished from the app while its folder,
+ * login included, sat untouched under profiles/. Called once at start: a folder is adopted when its
+ * name is one this app hands out (`acc-N`), nothing on the list points at it, the CLI has written
+ * into it (so it was really used), and it was not deleted on purpose — a folder carrying the
+ * tombstone is a delete that could not finish, and gets another try instead.
+ */
+export function adoptOrphanProfiles(): Profile[] {
+  let names: string[]
+  try {
+    names = readdirSync(profilesRoot())
+  } catch {
+    return [] // no profiles folder: nothing was ever added
+  }
+  const state = loadProfiles()
+  const adopted: Profile[] = []
+  for (const id of names.sort((a, b) => a.localeCompare(b, undefined, { numeric: true }))) {
+    if (!/^acc-\d{1,6}$/.test(id)) continue
+    const dir = join(profilesRoot(), id)
+    if (state.list.some((p) => p.id === id || (p.dir !== null && sameDir(p.dir, dir)))) continue
+    if (existsSync(join(dir, TOMBSTONE))) {
+      deleteProfileDir({ id, name: id, dir })
+      continue
+    }
+    if (!existsSync(join(dir, '.credentials.json')) && !existsSync(join(dir, '.claude.json'))) continue
+    const email = emailOf({ id, name: id, dir })
+    adopted.push({ id, name: cleanName(email?.split('@')[0], `계정 ${state.list.length + adopted.length + 1}`), dir })
+  }
+  if (adopted.length) store({ ...state, list: [...state.list, ...adopted] })
+  return adopted
 }
 
 export function setCurrentProfile(id: string): ProfilesState {

@@ -19,6 +19,7 @@ import { flushUi } from '../../electron/ui-store'
 import {
   UNKNOWN_PROFILE_ID,
   addProfile,
+  adoptOrphanProfiles,
   baseDirOf,
   configDirOf,
   deleteProfileDir,
@@ -175,4 +176,29 @@ test('a stored tab remembers its account, and the default one is left out of the
   assert.deepEqual(stored, { tabs: [{ cwd: 'C:\\a', title: 'a' }, { cwd: 'C:\\b', title: 'b', profileId: 'acc-2' }], active: 1 })
   assert.deepEqual(readStoredWorkspaces(stored), stored)
   assert.deepEqual(readStoredWorkspaces({ tabs: [{ cwd: 'C:\\a', title: 'a', profileId: 7 }], active: 0 }).tabs, [{ cwd: 'C:\\a', title: 'a' }])
+})
+
+test('an account the list lost comes back from its folder; a deleted or never-used one does not', () => {
+  const { added } = addProfile('잃어버릴 계정')
+  writeFileSync(join(added.dir as string, '.credentials.json'), '{}')
+  writeFileSync(join(added.dir as string, '.claude.json'), JSON.stringify({ oauthAccount: { emailAddress: 'lost@example.com' } }))
+  const { added: unused } = addProfile('로그인 안 한 계정') // an empty folder: nothing to recover
+  const { added: deleted } = addProfile('지운 계정')
+  writeFileSync(join(deleted.dir as string, '.credentials.json'), '{}')
+  writeFileSync(join(deleted.dir as string, '.hamster-deleted'), '') // a delete that could not finish
+  flushUi()
+
+  // ui.json is lost — what a reboot could do (electron/ui-store.ts)
+  writeFileSync(join(HOME, 'ui.json'), '{}')
+  assert.deepEqual(loadProfiles().list.map((p) => p.id), ['default'])
+
+  // (folders that earlier tests left behind with a login in them come back too — that is the feature)
+  const back = adoptOrphanProfiles()
+  assert.deepEqual(back.filter((p) => p.id === added.id).map((p) => [p.name, p.dir]), [['lost', added.dir]])
+  assert.ok(!back.some((p) => p.id === unused.id || p.id === deleted.id))
+  assert.ok(loadProfiles().list.some((p) => p.id === added.id && p.dir === added.dir))
+  assert.ok(!loadProfiles().list.some((p) => p.id === unused.id || p.id === deleted.id))
+  assert.equal(existsSync(deleted.dir as string), false) // the unfinished delete got its second try
+  assert.deepEqual(adoptOrphanProfiles(), []) // nothing left to adopt: the second start changes nothing
+  flushUi()
 })

@@ -73,7 +73,8 @@ console.log('\n[5] corrupt file')
 {
   writeFileSync(uiPath(), '{{{', 'utf8')
   const s = loadUi()
-  check(JSON.stringify(s) === '{}', 'loadUi() falls back to {}', s)
+  // the file before the last write ([4]'s flush replaced {"b":2}) is kept as ui.bak.json, and beats starting from nothing
+  check(JSON.stringify(s) === '{"b":2}', 'loadUi() falls back to the previous good file (ui.bak.json)', s)
   const bad = join(tmpRoot, 'ui.corrupt.json')
   check(existsSync(bad), 'ui.corrupt.json kept the damaged file')
   check(existsSync(bad) && readFileSync(bad, 'utf8') === '{{{', 'ui.corrupt.json holds the original bytes')
@@ -90,12 +91,12 @@ console.log('\n[6] oversized save is ignored, not thrown')
     threw = e
   }
   check(threw === null, 'saveUi did not throw', threw instanceof Error ? threw.message : threw)
-  check(JSON.stringify(result) === '{}', 'state unchanged', result)
+  check(JSON.stringify(result) === '{"b":2}', 'state unchanged (what [5] restored)', result)
   flushUi()
   check(!existsSync(uiPath()), 'nothing was written', onDisk())
   const ok = saveUi({ small: 'still works' })
   flushUi()
-  check(JSON.stringify(ok) === '{"small":"still works"}', 'the store still accepts normal saves', ok)
+  check(JSON.stringify(ok) === '{"b":2,"small":"still works"}', 'the store still accepts normal saves', ok)
 }
 
 flushUi()

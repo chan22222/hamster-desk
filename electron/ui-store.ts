@@ -1,4 +1,4 @@
-import { copyFileSync, mkdirSync, readFileSync, renameSync, rmSync, writeFileSync } from 'node:fs'
+import { closeSync, copyFileSync, fsyncSync, mkdirSync, openSync, readFileSync, renameSync, rmSync, writeSync } from 'node:fs'
 import { homedir } from 'node:os'
 import { dirname, join } from 'node:path'
 import type { UiState } from '../shared/events'
@@ -15,11 +15,25 @@ export type { UiState }
  *
  * Deliberately free of any `electron` import: pure node, so scripts/ui-store-smoke.ts can drive it
  * with tsx. Every failure is swallowed — losing a UI preference must never take the app down.
+ *
+ * What must never happen is the opposite: the app *causing* the loss. The file also holds the list
+ * of accounts and the saved tabs, and three things used to be able to wipe it:
+ *  - a read that failed because something held the file for a moment (an antivirus or a sync client
+ *    going over the user folder right after a reboot) counted as "no file", and the next save — a
+ *    window move is enough — wrote that emptiness over everything. Now a file that exists but cannot
+ *    be read is retried, and while it stays unreadable nothing is written at all;
+ *  - the write was atomic but not durable: rename without fsync can leave a file of zeros after a
+ *    power cut. Now the data is flushed before the rename;
+ *  - a damaged file meant starting from nothing. Now the previous good file is kept as ui.bak.json
+ *    and read instead.
  */
 
 const DEBOUNCE_MS = 300
 /** A UI preference file this big is a bug (or an accident); refuse rather than write it. */
 const MAX_BYTES = 256 * 1024
+/** a file that is there but will not open: how often to look again, and how long to wait in between */
+const READ_RETRIES = 8
+const READ_RETRY_MS = 60
 
 /** ~/.hamster-desk/ui.json. Read from the env on every call so tests can point HAMSTER_HOME at a temp dir. */
 export function uiPath(): string {
@@ -31,19 +45,44 @@ export function uiPath(): string {
 let cache: UiState | null = null
 let timer: ReturnType<typeof setTimeout> | null = null
 
-function readFromDisk(): UiState {
-  const file = uiPath()
-  let raw: string
-  try {
-    raw = readFileSync(file, 'utf8')
-  } catch {
-    return {} // missing, or unreadable
-  }
+const backupPath = (): string => join(dirname(uiPath()), 'ui.bak.json')
+
+function sleepSync(ms: number): void {
+  Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, ms)
+}
+
+function parseState(raw: string): UiState | null {
   try {
     const j: unknown = JSON.parse(raw)
     if (j && typeof j === 'object' && !Array.isArray(j)) return j as UiState
   } catch {
-    /* fall through: corrupt */
+    /* corrupt */
+  }
+  return null
+}
+
+/** `null`: the file exists but could not be read. That is *not* an empty file — see the header. */
+function readFromDisk(): UiState | null {
+  const file = uiPath()
+  let raw = ''
+  for (let attempt = 0; ; attempt++) {
+    try {
+      raw = readFileSync(file, 'utf8')
+      break
+    } catch (e) {
+      if ((e as NodeJS.ErrnoException).code === 'ENOENT') return {} // no file yet: a first run
+      if (attempt >= READ_RETRIES) return null
+      sleepSync(READ_RETRY_MS)
+    }
+  }
+  const state = parseState(raw)
+  if (state) return state
+  // damaged: the previous good file, if there is one, beats starting from nothing
+  let restored: UiState | null = null
+  try {
+    restored = parseState(readFileSync(backupPath(), 'utf8'))
+  } catch {
+    restored = null
   }
   // Keep the damaged file around once (overwriting an older copy) instead of silently deleting it.
   try {
@@ -57,7 +96,7 @@ function readFromDisk(): UiState {
   } catch {
     /* ignore */
   }
-  return {}
+  return restored ?? {}
 }
 
 function writeNow(state: UiState): void {
@@ -67,7 +106,19 @@ function writeNow(state: UiState): void {
     if (Buffer.byteLength(text, 'utf8') > MAX_BYTES) return
     mkdirSync(dirname(file), { recursive: true })
     const tmp = `${file}.tmp`
-    writeFileSync(tmp, text, 'utf8')
+    // flushed before the rename: without it the rename can survive a power cut that the data does not
+    const fd = openSync(tmp, 'w')
+    try {
+      writeSync(fd, text, null, 'utf8')
+      fsyncSync(fd)
+    } finally {
+      closeSync(fd)
+    }
+    try {
+      copyFileSync(file, backupPath()) // what is about to be replaced was read (or written) by us: it is good
+    } catch {
+      /* no file yet */
+    }
     renameSync(tmp, file) // atomic: a crash mid-write leaves the previous ui.json intact
   } catch {
     /* a settings file we cannot write is not worth an exception */
@@ -75,7 +126,8 @@ function writeNow(state: UiState): void {
 }
 
 export function loadUi(): UiState {
-  if (!timer) cache = readFromDisk() // nothing pending → the file is the truth (it may have changed elsewhere)
+  // nothing pending → the file is the truth (it may have changed elsewhere); unreadable → what we last knew
+  if (!timer) cache = readFromDisk() ?? cache
   return { ...(cache ?? {}) }
 }
 
@@ -86,6 +138,8 @@ export function loadUi(): UiState {
  */
 export function saveUi(patch: UiState): UiState {
   if (cache === null) cache = readFromDisk()
+  // never merge into — and then write over — a file we could not read
+  if (cache === null) return {}
   if (!patch || typeof patch !== 'object' || Array.isArray(patch)) return { ...cache }
 
   const next: UiState = { ...cache }

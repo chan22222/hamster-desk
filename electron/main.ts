@@ -5,7 +5,7 @@ import { DeskWatcher } from './watcher'
 import { DEFAULT_PROFILE_ID, type BubbleRequest, type DeskEvent, type FileEntry, type NotifyRequest, type Profile, type SessionInfo, type StatusSnapshot, type UiState, type AppUpdateInfo } from '../shared/events'
 import { spawnPty, PromptDetector, type PtyHandle } from './pty'
 import { HAMSTER_HOME, StatusWatcher, installStatusLine, uninstallStatusLine, statusLineState, refreshStatusScripts } from './statusline'
-import { addProfile, baseDirOf, configDirOf, deleteProfileDir, loadProfiles, profileOfConfigDir, removeProfile, renameProfile, setCurrentProfile, withEmails } from './profiles'
+import { addProfile, adoptOrphanProfiles, baseDirOf, configDirOf, deleteProfileDir, loadProfiles, profileOfConfigDir, removeProfile, renameProfile, setCurrentProfile, withEmails } from './profiles'
 import { flushUi, loadUi, saveUi, uiPath } from './ui-store'
 import { checkVersion } from './version'
 import { BubbleSummarizer } from './summarize'
@@ -16,6 +16,7 @@ import { attachWindowStateSaver, isMini, persistWindowState, readWindowState, se
 import { listTranscripts } from './transcripts'
 import { gitDiff, gitInfo } from './git'
 import { COMMITS_URL, buildCommit, checkAppUpdate, repoDirOf, startSelfUpdate } from './app-update'
+import { checkRelease, installRelease, isInstalled, releaseInfo } from './app-release'
 import { bootMark, writeBootLog } from './boot-log'
 import { listDir, pathExists, repairShortcuts } from './shortcuts'
 
@@ -254,6 +255,22 @@ function createWindow(): void {
   // un-maximizes to (see `getNormalBounds` in window-state.ts)
   if (saved?.maximized) win.maximize()
   attachWindowStateSaver(win)
+  // "Pin to taskbar" on the running window normally copies whatever Start-menu shortcut carries our
+  // id — which can be stale (electron/shortcuts.ts). With relaunch details on the window itself,
+  // Windows builds the pin from these instead: this exe, this icon, this id.
+  if (app.isPackaged && process.platform === 'win32') {
+    try {
+      win.setAppDetails({
+        appId: appUserModelId(true),
+        appIconPath: process.execPath,
+        appIconIndex: 0,
+        relaunchCommand: `"${process.execPath}"`,
+        relaunchDisplayName: 'Hamster Desk',
+      })
+    } catch {
+      /* cosmetic: the window still works without it */
+    }
+  }
   // the taskbar button blinks while a notification is unanswered; looking at the window answers it
   win.on('focus', () => {
     try {
@@ -333,6 +350,9 @@ function profileOfSnapshot(s: StatusSnapshot): string {
 }
 
 function startWatchers(): void {
+  // accounts the list lost but whose folder (and login) is still on disk come back first
+  const adopted = adoptOrphanProfiles()
+  if (adopted.length) console.log(`[profiles] recovered: ${adopted.map((p) => p.id).join(', ')}`)
   for (const p of loadProfiles().list) watchProfile(p)
 
   refreshStatusScripts()
@@ -526,8 +546,16 @@ ipcMain.handle('version:check', async (_e, force?: boolean) => {
 /** the checkout a packaged build can rebuild itself from; a dev run is updated by whoever runs it */
 const selfUpdateRepo = (): string | null => (app.isPackaged ? repoDirOf(process.execPath, app.getAppPath(), true) : null)
 
+/** an installed build follows GitHub Releases (electron/app-release.ts); every other kind follows commits */
+const installedBuild = (): boolean => isInstalled(process.execPath, app.isPackaged)
+const emitRelease = (): void => emitDesk({ kind: 'app_update', ...releaseInfo(app.getVersion(), buildCommit()) })
+
 async function appUpdate(force = false): Promise<AppUpdateInfo> {
-  const u = await checkAppUpdate(force, selfUpdateRepo() !== null)
+  if (installedBuild()) {
+    await checkRelease(emitRelease) // emits by itself, now and as the download moves along
+    return releaseInfo(app.getVersion(), buildCommit())
+  }
+  const u = { ...(await checkAppUpdate(force, selfUpdateRepo() !== null)), version: app.getVersion() }
   emitDesk({ kind: 'app_update', ...u })
   return u
 }
@@ -536,6 +564,8 @@ ipcMain.handle('appUpdate:check', (_e, force?: boolean) => appUpdate(force === t
 
 /** 'updating': the app is about to quit and come back rebuilt. 'opened': the commits page, to update by hand. */
 ipcMain.handle('appUpdate:run', () => {
+  // installed: the downloaded setup runs silently once we are gone, and reopens the app
+  if (installedBuild() && installRelease()) return 'updating'
   const repoDir = selfUpdateRepo()
   if (repoDir && startSelfUpdate({ repoDir, exe: process.execPath, pid: process.pid, home: HAMSTER_HOME })) {
     setTimeout(() => app.quit(), 200) // let this reply reach the renderer first

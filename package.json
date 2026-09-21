@@ -1,12 +1,12 @@
 {
   "name": "hamster-desk",
-  "version": "0.1.0",
+  "version": "0.1.1",
   "description": "Pixel hamsters that show what Claude Code is doing — embedded terminal + live desk",
   "main": "./out/main/main.js",
   "private": true,
   "scripts": {
     "dev": "electron-vite dev",
-    "build": "electron-vite build && electron-builder --win dir",
+    "build": "electron-vite build && electron-builder --win dir --publish never",
     "build:vite": "electron-vite build",
     "preview": "electron-vite preview",
     "start": "electron-vite preview",
@@ -22,7 +22,8 @@
     "shot:studio": "electron scripts/office-shot.cjs",
     "rebuild": "electron-rebuild -f -w node-pty",
     "icon": "tsx scripts/make-icon.ts",
-    "dist": "npm run build"
+    "dist": "electron-vite build && electron-builder --win nsis --publish never",
+    "release": "tsx scripts/release.ts"
   },
   "build": {
     "appId": "kr.amag.hamsterdesk",
@@ -34,11 +35,26 @@
       "out/**",
       "package.json"
     ],
+    "publish": [
+      {
+        "provider": "github",
+        "owner": "chan22222",
+        "repo": "hamster-desk"
+      }
+    ],
     "win": {
       "target": [
         "dir"
       ],
       "icon": "build/icon.ico"
+    },
+    "nsis": {
+      "oneClick": true,
+      "perMachine": false,
+      "artifactName": "Hamster-Desk-Setup-${version}.${ext}",
+      "shortcutName": "Hamster Desk",
+      "createDesktopShortcut": true,
+      "deleteAppDataOnUninstall": false
     },
     "npmRebuild": false,
     "nodeGypRebuild": false,
@@ -65,6 +81,7 @@
     "@xterm/addon-search": "^0.16.0",
     "@xterm/addon-webgl": "^0.19.0",
     "@xterm/xterm": "^6.0.0",
+    "electron-updater": "^6.8.9",
     "node-pty": "^1.1.0",
     "react": "^19.3.0",
     "react-dom": "^19.3.0",
