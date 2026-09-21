@@ -46,6 +46,21 @@
 .log-who { flex: none; max-width: 76px; color: var(--text-2); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .log-text { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .log-n { flex: none; padding: 0 5px; border-radius: 999px; background: var(--surface-3); color: var(--text-2); font-size: 11px; line-height: 16px; }
+/* a row opened in place: what was really said, in full — the bubble only had room for one line */
+.log-item.is-open { background: var(--surface-2); }
+.log-item.is-open .log-text { white-space: normal; overflow: visible; }
+.log-detail { padding: 2px 8px 8px; }
+.log-meta { font-size: 11px; color: var(--text-3); font-variant-numeric: tabular-nums; }
+.log-raw {
+  margin: 4px 0 6px; padding: 6px 8px; max-height: 220px; overflow: auto;
+  border: 1px solid var(--line); border-radius: var(--radius); background: var(--surface);
+  color: var(--text); font: 12px/1.55 ui-monospace, Consolas, monospace;
+  white-space: pre-wrap; overflow-wrap: anywhere; user-select: text;
+}
+.log-actions { display: flex; gap: 6px; }
+.log-actions button { padding: 2px 8px; border: 1px solid var(--line-strong); border-radius: var(--radius); color: var(--text-2); font-size: 11px; }
+.log-actions button:hover:not(:disabled) { background: var(--surface-3); color: var(--text); }
+.log-actions button:disabled { opacity: 0.45; cursor: default; }
 
 /* ---- the `git diff` toggle in a changed-file preview -------------------------------------- */
 .pv-head { display: flex; align-items: center; gap: 8px; margin: 6px 0; }

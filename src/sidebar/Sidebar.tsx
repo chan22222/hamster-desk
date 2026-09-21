@@ -57,12 +57,22 @@ function crumbs(p: string): { label: string; path: string }[] {
   return out
 }
 
+/** a dragged section never gets smaller than its header plus a couple of rows */
+export const SECTION_MIN = 84
+/** what a drag may not take from the rest of the sidebar (the search box and the file browser) */
+const SIDE_RESERVE = 180
+
+/** which preference holds a section's dragged height */
+type SectionHeightKey = 'sideChangedH' | 'sideFeedH'
+
 function Section({
   title,
   count,
   open,
   className,
   onToggle,
+  heightKey,
+  emptyHint,
   children,
 }: {
   title: string
@@ -70,18 +80,77 @@ function Section({
   open: boolean
   className: string
   onToggle: () => void
+  /** set on the sections that can be dragged taller or shorter; the file browser takes the rest */
+  heightKey?: SectionHeightKey
+  /**
+   * Set while the section has nothing to show: it stays in the sidebar as one quiet line saying so,
+   * instead of only coming into existence with the first edit — nobody looks for a section they
+   * have never seen. It cannot be opened (there is nothing in it) and keeps the user's open/closed
+   * choice for when it fills.
+   */
+  emptyHint?: string
   children: React.ReactNode
 }) {
+  const empty = emptyHint !== undefined
+  if (empty) open = false
+  const height = useDesk((s) => (heightKey ? s.prefs[heightKey] : null))
+  const setPrefs = useDesk((s) => s.setPrefs)
+  const ref = useRef<HTMLElement>(null)
+  // a hand-edited ui.json can hold anything; only a real number counts as a dragged height
+  const sized = open && typeof height === 'number' && Number.isFinite(height)
+
+  // Same rule as the sidebar's width: the drag writes straight to the store and saves once, on
+  // release. It starts from the height on screen, so the first drag out of the automatic layout
+  // does not jump; and it saves the height the layout actually gave, which can be less than asked
+  // for when the file browser is already down to its third.
+  const onDrag = (e: React.MouseEvent): void => {
+    const el = ref.current
+    if (!el || !heightKey) return
+    e.preventDefault()
+    const startY = e.clientY
+    const startH = el.getBoundingClientRect().height
+    const max = Math.max(SECTION_MIN, (el.parentElement?.clientHeight ?? 600) - SIDE_RESERVE)
+    const move = (ev: MouseEvent): void => {
+      const h = Math.round(Math.max(SECTION_MIN, Math.min(max, startH + ev.clientY - startY)))
+      useDesk.setState((s) => ({ prefs: { ...s.prefs, [heightKey]: h } }))
+    }
+    const up = (): void => {
+      window.removeEventListener('mousemove', move)
+      window.removeEventListener('mouseup', up)
+      document.body.classList.remove('is-row-resizing')
+      setPrefs({ [heightKey]: Math.round(el.getBoundingClientRect().height) })
+    }
+    document.body.classList.add('is-row-resizing')
+    window.addEventListener('mousemove', move)
+    window.addEventListener('mouseup', up)
+  }
+
   return (
-    <section className={`side-section ${className} ${open ? 'is-open' : ''}`}>
-      <button className="side-title" onClick={onToggle} aria-expanded={open}>
+    <section
+      ref={ref}
+      className={`side-section ${className} ${open ? 'is-open' : ''} ${sized ? 'is-sized' : ''} ${empty ? 'is-empty' : ''}`}
+      style={sized ? { flexBasis: height } : undefined}
+    >
+      <button className="side-title" onClick={empty ? undefined : onToggle} aria-expanded={open} aria-disabled={empty} title={empty ? emptyHint : undefined}>
         <span className="side-caret">
           <IconChevron dir={open ? 'down' : 'right'} size={14} />
         </span>
         {title}
         {count !== undefined && <span className="side-count">{count}</span>}
+        {empty && <span className="side-hint">{emptyHint}</span>}
       </button>
       {open && <div className="side-rows">{children}</div>}
+      {open && heightKey && (
+        <div
+          className="side-split"
+          role="separator"
+          aria-orientation="horizontal"
+          aria-label={`${title} 높이`}
+          title="끌어서 높이 조절 · 더블클릭: 자동"
+          onMouseDown={onDrag}
+          onDoubleClick={() => setPrefs({ [heightKey]: null })}
+        />
+      )}
     </section>
   )
 }
@@ -181,17 +250,29 @@ export function Sidebar({ start, session, onOpen }: { start: string; session: Se
         <input className="side-filter" placeholder="이 폴더에서 검색" value={filter} onChange={(e) => setFilter(e.target.value)} aria-label="폴더·파일 검색" />
       </div>
 
-      {changed > 0 && (
-        <Section title="바뀐 파일" count={changed} className="side-changed" open={prefs.showLog} onToggle={() => setPrefs({ showLog: !prefs.showLog })}>
-          <FileLog session={session} />
-        </Section>
-      )}
+      <Section
+        title="바뀐 파일"
+        count={changed}
+        className="side-changed"
+        heightKey="sideChangedH"
+        open={prefs.showLog}
+        onToggle={() => setPrefs({ showLog: !prefs.showLog })}
+        emptyHint={changed > 0 ? undefined : 'Claude 가 파일을 고치면 여기에'}
+      >
+        <FileLog session={session} />
+      </Section>
 
-      {logged > 0 && (
-        <Section title="말풍선 로그" count={logged} className="side-feedlog" open={prefs.showFeedLog} onToggle={() => setPrefs({ showFeedLog: !prefs.showFeedLog })}>
-          <FeedLog session={session} />
-        </Section>
-      )}
+      <Section
+        title="말풍선 로그"
+        count={logged}
+        className="side-feedlog"
+        heightKey="sideFeedH"
+        open={prefs.showFeedLog}
+        onToggle={() => setPrefs({ showFeedLog: !prefs.showFeedLog })}
+        emptyHint={logged > 0 ? undefined : '햄스터가 한 말과 일이 여기에'}
+      >
+        <FeedLog session={session} />
+      </Section>
 
       <Section title="탐색" className="side-browse" open={prefs.showExplorer} onToggle={() => setPrefs({ showExplorer: !prefs.showExplorer })}>
         <div className="side-crumbs">

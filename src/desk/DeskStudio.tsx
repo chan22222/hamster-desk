@@ -433,6 +433,7 @@ export function DeskStudio({ session, height }: { session: SessionState | null; 
   /** DOM nodes the render loop has already hidden once, so a re-render does not blank them again */
   const primed = useRef(new WeakSet<HTMLElement>())
   const dismissFeedItem = useDesk((s) => s.dismissFeedItem)
+  const requestLogReveal = useDesk((s) => s.requestLogReveal)
   // The welcome card can start claude for the user, but only in a terminal this window owns:
   // an external session's tab has no pty of ours to type into.
   const activeTab = useDesk((s) => s.activeTab)
@@ -985,8 +986,9 @@ export function DeskStudio({ session, height }: { session: SessionState | null; 
                 className={`ob-item kind-${f.kind} tone-${f.tone}`}
                 data-ts={f.ts}
                 data-life={feedLife(f)}
-                title={f.raw}
-                onClick={() => { if (session) dismissFeedItem(session.info.sessionId, h.id, f.id) }}
+                title={`${f.raw}\n\n클릭: 말풍선 로그에서 자세히 · 우클릭: 닫기`}
+                onClick={() => { if (session) requestLogReveal(session.info.sessionId, f.id) }}
+                onContextMenu={(e) => { e.preventDefault(); if (session) dismissFeedItem(session.info.sessionId, h.id, f.id) }}
               >
                 <span className="ob-text">{f.text}</span>
                 {f.count > 1 && <span className="ob-count">×{f.count}</span>}

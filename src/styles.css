@@ -259,16 +259,35 @@ button:focus-visible, select:focus-visible, input:focus-visible { outline: 2px s
 .side-search svg { flex: none; }
 .side-filter { flex: 1; min-width: 0; background: none; border: 0; color: var(--text); font: inherit; font-size: 12px; outline: none; }
 .side-filter::placeholder { color: var(--text-2); }
-.side-section { display: flex; flex-direction: column; min-height: 0; }
+.side-section { position: relative; display: flex; flex-direction: column; min-height: 0; }
 /* Three sections share the sidebar evenly: what changed and the bubble log each take at most a third
    (less when they have little to show) and scroll inside themselves; the browser fills the rest and
    never drops below a third. A collapsed section is only its header. */
 .side-changed { flex: none; max-height: 33%; border-bottom: 1px solid var(--line); }
 .side-browse { flex: 1 1 0; min-height: 33%; }
 .side-browse:not(.is-open) { flex: none; min-height: 0; }
+/* A section the user dragged: its height is the flex-basis set inline (prefs.sideChangedH / sideFeedH)
+   and the third-at-most rule no longer applies. It may still shrink — a short window, or the file
+   browser holding on to its third — but never below its header and a couple of rows. */
+.side-section.is-sized { flex: 0 1 auto; max-height: none; min-height: 84px; }
+/* the handle sits on the section's bottom edge, over the border, and only shows itself when pointed at */
+.side-split { position: absolute; left: 0; right: 0; bottom: -3px; height: 6px; z-index: 4; cursor: row-resize; }
+.side-split::after { content: ''; position: absolute; left: calc(50% - 14px); top: 2px; width: 28px; height: 2px; border-radius: 2px; background: var(--line-strong); opacity: 0; }
+.side-split:hover, .side-split:active { background: var(--accent-soft); }
+.side-split:hover::after, .side-split:active::after { opacity: 1; }
+/* while dragging, the cursor must not flicker back to an arrow over rows, nor select their text */
+body.is-row-resizing { cursor: row-resize; user-select: none; }
+body.is-row-resizing * { cursor: row-resize !important; }
 .side-rows { flex: 1; min-height: 0; overflow-y: auto; padding-bottom: 8px; }
 .side-title { display: flex; align-items: center; gap: 4px; flex: none; width: 100%; padding: 8px; color: var(--text-2); font-size: 12px; font-weight: 600; }
 .side-title:hover { color: var(--text); }
+/* A section with nothing in it yet is still there, as one quiet line: what the sidebar can show
+   should not be a secret until the first edit. It does not open — there is nothing to open. */
+.side-section.is-empty { flex: none; max-height: none; min-height: 0; }
+.side-section.is-empty .side-title { color: var(--text-3); cursor: default; }
+.side-section.is-empty .side-title:hover { color: var(--text-3); }
+.side-section.is-empty .side-caret { opacity: 0.4; }
+.side-hint { margin-left: auto; padding-left: 8px; font-size: 11px; font-weight: 400; color: var(--text-3); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .side-count { padding: 0 6px; border-radius: 999px; background: var(--surface-2); color: var(--text-2); font-size: 11px; line-height: 16px; font-variant-numeric: tabular-nums; }
 .side-caret { display: inline-flex; align-items: center; justify-content: center; width: 14px; color: var(--text-3); }
 .side-empty { margin: 4px 6px; padding: 10px 12px; border-radius: var(--radius); background: var(--bg); color: var(--text-2); font-size: 13px; line-height: 1.6; }

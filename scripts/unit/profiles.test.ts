@@ -31,6 +31,7 @@ import {
   renameProfile,
   sanitizeProfiles,
   setCurrentProfile,
+  withEmails,
 } from '../../electron/profiles'
 import { claudeDir, projectsDir, sessionsDir } from '../../electron/watcher/paths'
 import { parseSnapshot } from '../../electron/statusline'
@@ -201,4 +202,22 @@ test('an account the list lost comes back from its folder; a deleted or never-us
   assert.equal(existsSync(deleted.dir as string), false) // the unfinished delete got its second try
   assert.deepEqual(adoptOrphanProfiles(), []) // nothing left to adopt: the second start changes nothing
   flushUi()
+})
+
+test('on screen the CLI account is one account among the others: named after its login until the user names it', () => {
+  const cli = mkdtempSync(join(tmpdir(), 'hd-cli-'))
+  process.env.CLAUDE_CONFIG_DIR = cli // where the default account's .claude.json is looked up, instead of the real home
+  try {
+    assert.equal(withEmails(loadProfiles()).list[0].name, '계정 1') // nobody logged in: no "기본" on screen either
+    writeFileSync(join(cli, '.claude.json'), JSON.stringify({ oauthAccount: { emailAddress: 'me@example.com' } }))
+    const shown = withEmails(loadProfiles()).list[0]
+    assert.deepEqual([shown.id, shown.name, shown.email], ['default', 'me', 'me@example.com'])
+    assert.equal(loadProfiles().list[0].name, '기본') // what is stored does not change: an older build reads the same file
+    renameProfile('default', '개인')
+    assert.equal(withEmails(loadProfiles()).list[0].name, '개인') // a name the user chose always wins
+    renameProfile('default', '기본')
+  } finally {
+    delete process.env.CLAUDE_CONFIG_DIR
+    flushUi()
+  }
 })

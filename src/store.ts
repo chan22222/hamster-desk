@@ -179,6 +179,13 @@ export interface Prefs {
   termFont: number
   /** the sidebar's "말풍선 로그" section is expanded */
   showFeedLog: boolean
+  /**
+   * Heights (px) of the two upper sidebar sections, dragged by the handle under each. `null` is the
+   * automatic layout: as tall as the content, a third of the sidebar at most. The file browser has
+   * no height of its own — it takes what the other two leave.
+   */
+  sideChangedH: number | null
+  sideFeedH: number | null
 }
 
 export const DEFAULT_PREFS: Prefs = {
@@ -198,6 +205,8 @@ export const DEFAULT_PREFS: Prefs = {
   notify: { permission: true, question: true, turnEnd: true, sound: false },
   termFont: 14,
   showFeedLog: true,
+  sideChangedH: null,
+  sideFeedH: null,
 }
 
 interface DeskStore {
@@ -227,6 +236,8 @@ interface DeskStore {
   focusTerminal: { ptyId: number; at: number } | null
   /** the last request to point the studio camera at one hamster */
   focusHamster: { sessionId: string; hid: string; at: number } | null
+  /** the last request to show one speech bubble in full: its row in the sidebar's bubble log, opened */
+  revealLog: { sessionId: string; id: string; at: number } | null
   /** the last request to open the terminal search box */
   searchRequest: { wsId: number; q?: string; at: number } | null
   /** read-only git snapshots, keyed by `gitKey(cwd)` */
@@ -235,6 +246,8 @@ interface DeskStore {
   setToast(t: TurnToast | null): void
   requestTerminalFocus(ptyId: number): void
   requestHamsterFocus(sessionId: string, hid: string): void
+  /** a bubble was clicked: bring up the sidebar's bubble log with that row opened (a bubble's id is its log row's id) */
+  requestLogReveal(sessionId: string, id: string): void
   requestTermSearch(wsId: number, q?: string): void
   setGit(cwd: string, info: GitInfo): void
   apply(e: DeskEvent): void
@@ -725,6 +738,7 @@ export const useDesk = create<DeskStore>((set, get) => {
     toast: null,
     focusTerminal: null,
     focusHamster: null,
+    revealLog: null,
     searchRequest: null,
     git: {},
     toggleMini() {
@@ -738,6 +752,12 @@ export const useDesk = create<DeskStore>((set, get) => {
     setToast: (t) => set({ toast: t }),
     requestTerminalFocus: (ptyId) => set({ focusTerminal: { ptyId, at: Date.now() } }),
     requestHamsterFocus: (sessionId, hid) => set({ focusHamster: { sessionId, hid, at: Date.now() } }),
+    requestLogReveal: (sessionId, id) => {
+      // the row lives in a section of the sidebar, and either may be closed
+      const p = get().prefs
+      if (!p.showSidebar || !p.showFeedLog) get().setPrefs({ showSidebar: true, showFeedLog: true })
+      set({ revealLog: { sessionId, id, at: Date.now() } })
+    },
     requestTermSearch: (wsId, q) => set({ searchRequest: { wsId, q, at: Date.now() } }),
     setGit: (cwd, info) => set({ git: { ...get().git, [gitKey(cwd)]: info } }),
 

@@ -1,7 +1,11 @@
 // Several Claude Code accounts, one config folder each (electron/profiles.ts).
 //
+// Every account is registered the same way and one of them is *active*: the one new terminals open
+// under. The CLI's own folder (~/.claude) is simply the first of them — it has no "default" label,
+// it logs in with the same button, and only differs in that it cannot be deleted (it is not ours).
+//
 // Three small pieces, all invisible until there is a second account:
-//   AccountPicker   — "which account do new terminals open under", at the top of the `+` menu
+//   AccountPicker   — "which account is active", at the top of the `+` menu
 //   AccountBadge    — the account's name on a tab, so two tabs of one folder can be told apart
 //   AccountsSection — add / rename / delete, in the `⋯` menu (the only one that shows with one account)
 //
@@ -83,7 +87,7 @@ export function AccountPicker() {
   if (profiles.length < 2) return null
   return (
     <div className="acct-pick" role="radiogroup" aria-label="새 터미널을 열 계정">
-      <span className="acct-pick-label">계정</span>
+      <span className="acct-pick-label">활성 계정</span>
       <span className="acct-pick-list">
         {profiles.map((p) => (
           <button
@@ -157,7 +161,7 @@ function Row({ p, current, onDone }: { p: Profile; current: boolean; onDone: () 
     )
   }
 
-  const loggedOut = !!p.dir && !p.email
+  const loggedOut = !p.email
 
   return (
     <div className={`acct-row ${current ? 'is-on' : ''}`}>
@@ -185,11 +189,20 @@ function Row({ p, current, onDone }: { p: Profile; current: boolean; onDone: () 
           />
         </div>
       ) : (
-        <button className="acct-main" role="menuitemradio" aria-checked={current} title="새 터미널을 이 계정으로 열기" onClick={() => setCurrentAccount(p.id)}>
+        <button
+          className="acct-main"
+          role="menuitemradio"
+          aria-checked={current}
+          title={current ? '활성 계정: 새 터미널이 이 계정으로 열립니다' : '이 계정을 활성으로: 새 터미널이 이 계정으로 열립니다'}
+          onClick={() => setCurrentAccount(p.id)}
+        >
           <span className="pop-tick">{current && <IconCheck size={14} />}</span>
           <span className="acct-text">
-            <span className="acct-name">{p.name}</span>
-            <span className="acct-sub">{p.email ?? (p.dir ? '로그인 전' : 'CLI 기본 계정')}</span>
+            <span className="acct-name">
+              <span className="acct-name-text">{p.name}</span>
+              {current && <span className="acct-active">활성</span>}
+            </span>
+            <span className="acct-sub">{p.email ?? '로그인 전'}</span>
           </span>
         </button>
       )}
@@ -222,6 +235,7 @@ function Row({ p, current, onDone }: { p: Profile; current: boolean; onDone: () 
           <button className="acct-tool" title="계정 폴더 열기" aria-label={`${p.name} 폴더 열기`} onClick={() => void window.desk?.profiles.openFolder(p.id)}>
             <IconFolder size={13} />
           </button>
+          {/* ~/.claude is the CLI's own folder, not one this app made: it is never deleted from here */}
           {p.id !== DEFAULT_PROFILE_ID && (
             <button className="acct-tool" title="계정 지우기" aria-label={`${p.name} 계정 지우기`} onClick={() => setAsking(true)}>
               <IconClose size={13} />
@@ -270,6 +284,7 @@ export function AccountsSection({ onDone }: { onDone: () => void }) {
   return (
     <>
       <div className="pop-head">계정</div>
+      <p className="pop-note">새 터미널은 활성 계정으로 열려요. 이미 열린 탭은 열 때의 계정 그대로예요.</p>
       {profiles.map((p) => (
         <Row key={p.id} p={p} current={p.id === current} onDone={onDone} />
       ))}

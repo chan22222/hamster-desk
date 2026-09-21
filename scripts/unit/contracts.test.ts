@@ -7,6 +7,14 @@ test('DEFAULT_PREFS carries the keys the new features read', () => {
   assert.deepEqual(DEFAULT_PREFS.notify, { permission: true, question: true, turnEnd: true, sound: false })
   assert.equal(DEFAULT_PREFS.termFont, 14)
   assert.equal(DEFAULT_PREFS.showFeedLog, true)
+  // the sidebar's dragged section heights: null = the automatic layout
+  assert.deepEqual([DEFAULT_PREFS.sideChangedH, DEFAULT_PREFS.sideFeedH], [null, null])
+})
+
+test('adoptPrefs keeps a dragged sidebar height and gives an older file the automatic layout', () => {
+  assert.equal(adoptPrefs({ v: 2, sideChangedH: 240 }).sideChangedH, 240)
+  assert.equal(adoptPrefs({ v: 2, sideChangedH: 240 }).sideFeedH, null)
+  assert.equal(adoptPrefs({ v: 2 }).sideChangedH, null)
 })
 
 test('adoptPrefs fills a partial notify group from the defaults', () => {

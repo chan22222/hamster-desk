@@ -231,6 +231,21 @@ export function emailOf(p: Profile): string | null {
   }
 }
 
+/**
+ * The list as the UI shows it: every account with the login found next to it.
+ *
+ * There is no "default account" on screen. The CLI's own folder (~/.claude) is one account among
+ * the others — it only differs in where it lives — so until the user names it, it is called what
+ * the others are called when they are recovered: the first part of the login's email. `기본` stays
+ * what is *stored* for "never named", so a file written by an older version reads the same.
+ */
 export function withEmails(state: ProfilesState): ProfilesState {
-  return { ...state, list: state.list.map((p) => ({ ...p, email: emailOf(p) })) }
+  return {
+    ...state,
+    list: state.list.map((p) => {
+      const email = emailOf(p)
+      const unnamed = p.id === DEFAULT_PROFILE_ID && p.name === DEFAULT_NAME
+      return { ...p, email, name: unnamed ? cleanName(email?.split('@')[0], '계정 1') : p.name }
+    }),
+  }
 }
