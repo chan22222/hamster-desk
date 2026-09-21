@@ -6,7 +6,7 @@
   "private": true,
   "scripts": {
     "dev": "electron-vite dev",
-    "build": "electron-vite build && electron-builder --win portable",
+    "build": "electron-vite build && electron-builder --win dir",
     "build:vite": "electron-vite build",
     "preview": "electron-vite preview",
     "start": "electron-vite preview",
@@ -35,7 +35,7 @@
     ],
     "win": {
       "target": [
-        "portable"
+        "dir"
       ]
     },
     "npmRebuild": false,

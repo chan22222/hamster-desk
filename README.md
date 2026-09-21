@@ -16,15 +16,15 @@ Claude Code CLI 를 그대로 쓰면서, 지금 누가(메인·서브에이전�
 
 ```bash
 npm install --legacy-peer-deps
-npm run build:vite      # out/ 만 만든다(포터블 패키징 없음)
+npm run build:vite      # out/ 만 만든다(패키징 없음)
 npx electron .          # 또는 npm run dev (HMR)
 ```
 
-포터블 exe: `npm run build` → `release/Hamster Desk 0.1.0.exe`(`npm run dist` 도 같은 명령).
+패키지 빌드: `npm run build` → `release/win-unpacked/Hamster Desk.exe`(`npm run dist` 도 같은 명령). 압축하지 않은 폴더 그대로다 — 단일 포터블 exe 는 켤 때마다 앱 전체(약 410MB)를 `%TEMP%` 에 풀고 끌 때 지워서 시작이 느렸다. 옮길 때는 `win-unpacked` 폴더째로 옮긴다.
 
-프로필은 실행 모드별로 나뉜다: 포터블 `%APPDATA%\hamster-desk`, 개발 실행 `%APPDATA%\hamster-desk-dev`, 캡처 실행(`HAMSTER_CAPTURE`) `%TEMP%\hamster-desk-smoke-<pid>`. 캡처 실행의 프로필은 **실행마다 따로**다 — 예전에는 `hamster-desk-smoke` 하나를 같이 써서, 캡처 둘을 나란히 돌리면 뒤에 뜬 쪽이 `Unable to move the cache` 로 부팅이 늦어지고 자기 `HAMSTER_CLICK` 타이머를 놓쳤다. 폴더는 종료할 때 지우고(best-effort), Chromium 이 아직 쥐고 있어 못 지운 것은 다음 캡처 실행이 시작하면서 치운다(그 pid 의 프로세스가 더는 없을 때만). `test:office:ui`·`shot:studio` 는 따로 `%TEMP%\hamster-desk-smoke` 를 쓴다. 그래서 포터블을 켜 둔 채 `npm run dev` 를 띄워도 캐시(`Unable to move the cache`)가 충돌하지 않는다. 포터블은 단일 인스턴스라 두 번째로 실행하면 이미 떠 있는 창을 앞으로 가져온다.
+프로필은 실행 모드별로 나뉜다: 패키지 빌드 `%APPDATA%\hamster-desk`, 개발 실행 `%APPDATA%\hamster-desk-dev`, 캡처 실행(`HAMSTER_CAPTURE`) `%TEMP%\hamster-desk-smoke-<pid>`. 캡처 실행의 프로필은 **실행마다 따로**다 — 예전에는 `hamster-desk-smoke` 하나를 같이 써서, 캡처 둘을 나란히 돌리면 뒤에 뜬 쪽이 `Unable to move the cache` 로 부팅이 늦어지고 자기 `HAMSTER_CLICK` 타이머를 놓쳤다. 폴더는 종료할 때 지우고(best-effort), Chromium 이 아직 쥐고 있어 못 지운 것은 다음 캡처 실행이 시작하면서 치운다(그 pid 의 프로세스가 더는 없을 때만). `test:office:ui`·`shot:studio` 는 따로 `%TEMP%\hamster-desk-smoke` 를 쓴다. 그래서 패키지 빌드를 켜 둔 채 `npm run dev` 를 띄워도 캐시(`Unable to move the cache`)가 충돌하지 않는다. 패키지 빌드는 단일 인스턴스라 두 번째로 실행하면 이미 떠 있는 창을 앞으로 가져온다.
 
-**설정은 프로필 밖 파일 하나에 저장된다**: `~/.hamster-desk/ui.json`(언어·테마·패널·책상 위치와 크기·사이드바 폭·최근 프로젝트·즐겨찾기·마지막 폴더). 예전에는 `localStorage` 에 있었는데 그건 Electron **프로필** 소유라, 포터블에서 바꾼 언어가 `npm run dev` 에는 안 보이고 캐시를 지우면 같이 날아갔다. 메인 프로세스가 300ms 디바운스로 원자적 쓰기(`.tmp` → rename)를 하고, 종료 시 남은 변경을 flush 한다(`electron/ui-store.ts`). 파일이 없으면 첫 실행 때 옛 `localStorage` 키(`hd.prefs`·`hd.recentDirs`·`hd.recentMeta`·`hd.favDirs`·`hd.lastCwd`)에서 **파일에 아직 없는 키만** 한 번 옮기고 지운다. 파일이 깨져 있으면 `ui.corrupt.json` 으로 치워 두고 기본값으로 뜬다. `prefs` 에는 **버전 표식 `v`** 가 붙는다(`PREFS_VERSION`, 지금 2): 이름이 바뀐 키는 이름으로 옮기면 되지만(`showFolders` → `showSidebar`) **뜻이 바뀐 키**는 옛 값이 새 값으로도 멀쩡해서 구분할 길이 없다. 표식이 없는 파일(v1)은 `showLog`(예전 "오른쪽 패널 표시", 지금 "사이드바의 바뀐 파일 섹션 펼침")를 버리고 새 기본값을 쓰며, 나머지는 그대로 병합해 `v: 2` 로 한 번 다시 쓴다. 다음에 또 뜻이 바뀌면 `PREFS_VERSION` 을 올리고 `adoptPrefs` 의 같은 자리에 규칙 한 줄을 더한다. 경로는 `⋯` 메뉴 맨 아래 줄에 있고, 누르면 탐색기에서 열린다. 검증은 `npm run smoke:ui`.
+**설정은 프로필 밖 파일 하나에 저장된다**: `~/.hamster-desk/ui.json`(언어·테마·패널·책상 위치와 크기·사이드바 폭·최근 프로젝트·즐겨찾기·마지막 폴더). 예전에는 `localStorage` 에 있었는데 그건 Electron **프로필** 소유라, 패키지 빌드에서 바꾼 언어가 `npm run dev` 에는 안 보이고 캐시를 지우면 같이 날아갔다. 메인 프로세스가 300ms 디바운스로 원자적 쓰기(`.tmp` → rename)를 하고, 종료 시 남은 변경을 flush 한다(`electron/ui-store.ts`). 파일이 없으면 첫 실행 때 옛 `localStorage` 키(`hd.prefs`·`hd.recentDirs`·`hd.recentMeta`·`hd.favDirs`·`hd.lastCwd`)에서 **파일에 아직 없는 키만** 한 번 옮기고 지운다. 파일이 깨져 있으면 `ui.corrupt.json` 으로 치워 두고 기본값으로 뜬다. `prefs` 에는 **버전 표식 `v`** 가 붙는다(`PREFS_VERSION`, 지금 2): 이름이 바뀐 키는 이름으로 옮기면 되지만(`showFolders` → `showSidebar`) **뜻이 바뀐 키**는 옛 값이 새 값으로도 멀쩡해서 구분할 길이 없다. 표식이 없는 파일(v1)은 `showLog`(예전 "오른쪽 패널 표시", 지금 "사이드바의 바뀐 파일 섹션 펼침")를 버리고 새 기본값을 쓰며, 나머지는 그대로 병합해 `v: 2` 로 한 번 다시 쓴다. 다음에 또 뜻이 바뀌면 `PREFS_VERSION` 을 올리고 `adoptPrefs` 의 같은 자리에 규칙 한 줄을 더한다. 경로는 `⋯` 메뉴 맨 아래 줄에 있고, 누르면 탐색기에서 열린다. 검증은 `npm run smoke:ui`.
 
 기능 확장으로 늘어난 키는 전부 **추가**라 `PREFS_VERSION` 은 2 그대로다.
 
@@ -118,7 +118,7 @@ npx electron .          # 또는 npm run dev (HMR)
 **알림**
 - 창이 **포커스 밖일 때만** 권한 요청 · 질문 · 턴 완료를 Windows 알림으로 띄우고 작업표시줄 버튼을 깜빡인다(창을 보면 멈춘다). 종류별 on/off 와 소리는 `⋯` 메뉴의 `알림`. 알림을 누르면 창이 앞으로 오고 그 탭의 터미널에 커서가 간다. 턴 완료는 이 앱에서 띄운 세션만 울린다.
 - 네 겹으로 거른다: 설정, 포커스, **이벤트 나이 30초**(렌더러를 새로 고치면 백로그가 옛 `waiting`/`turn_end` 를 다시 흘린다), 같은 종류 + 같은 터미널 5초 중복 억제.
-- Windows 토스트는 **AUMID**(Application User Model ID) 아래에 등록된다. 포터블은 `kr.amag.hamsterdesk`(electron-builder 의 `appId` 와 같다), 개발 실행은 `process.execPath` 를 쓰고, `HAMSTER_AUMID`(`none`·`app`·`exec` 또는 임의의 id)로 바꿔 볼 수 있다. **토스트가 안 뜨는 환경**(`failed` 이벤트, 또는 2.5초 안에 `show` 도 `failed` 도 없음)에서는 같은 제목·본문이 **앱 안 배너**로 8초 뜬다(누르면 그 탭으로). 깜빡임은 어느 쪽이든 동작하므로 알림이 조용히 사라지는 일은 없다.
+- Windows 토스트는 **AUMID**(Application User Model ID) 아래에 등록된다. 패키지 빌드는 `kr.amag.hamsterdesk`(electron-builder 의 `appId` 와 같다), 개발 실행은 `process.execPath` 를 쓰고, `HAMSTER_AUMID`(`none`·`app`·`exec` 또는 임의의 id)로 바꿔 볼 수 있다. **토스트가 안 뜨는 환경**(`failed` 이벤트, 또는 2.5초 안에 `show` 도 `failed` 도 없음)에서는 같은 제목·본문이 **앱 안 배너**로 8초 뜬다(누르면 그 탭으로). 깜빡임은 어느 쪽이든 동작하므로 알림이 조용히 사라지는 일은 없다.
 
 **턴 완료 요약 토스트**
 - 턴이 끝나면 오른쪽 아래에 `파일 3 · +120 −40 · 2분 10초` 와 마지막으로 한 말 한 줄이 8초 뜬다. 그 턴의 프롬프트 **이후** 편집만 세고(대화 전체가 아니다), 시간은 `turn_end.durationMs` 가 있으면 그 값이다. 모델을 더 부르지 않는다. 누르면 그 탭으로 가서 사이드바의 `바뀐 파일` 이 열린다. 미니 모드에서는 상태줄 한 줄로 대신 나온다.
@@ -208,7 +208,7 @@ HAMSTER_CAPTURE=work/ui-dark.png HAMSTER_CAPTURE_DELAY=8000 HAMSTER_CAPTURE_QUIT
   HAMSTER_PREFS='{"showSidebar":true,"theme":"dark","deskSide":"right"}' npx electron .
 ```
 
-**디버그 훅** — 전부 `app.isPackaged` 로 막혀 있어 포터블 exe 에서는 환경변수가 있어도 아무 일도 하지 않는다. 목적은 하나다: 창을 보지 않는 실행이 "그 버튼이 정말 그 일을 한다"를 `claude` 세션 없이(토큰 0) 증명하게 하는 것.
+**디버그 훅** — 전부 `app.isPackaged` 로 막혀 있어 패키지 빌드에서는 환경변수가 있어도 아무 일도 하지 않는다. 목적은 하나다: 창을 보지 않는 실행이 "그 버튼이 정말 그 일을 한다"를 `claude` 세션 없이(토큰 0) 증명하게 하는 것.
 
 | 환경변수 | 동작 |
 |---|---|
@@ -255,7 +255,7 @@ HAMSTER_CLICK='more@4000|mini-toggle@5000|mini-exit@9000' \
   HAMSTER_CAPTURE=work/f-mini.png HAMSTER_CAPTURE_DELAY=3500,7500,11000 HAMSTER_CAPTURE_QUIT=1 npx electron .
 ```
 
-사람이 한 번 봐야 하는 것(캡처 실행은 저장을 막아 두었거나 실제 세션이 필요해서 자동으로는 못 본다): **포터블 exe 에서 Windows 토스트가 뜨는지**, **창 크기를 바꾸고 종료한 뒤 `ui.json` 의 `window` 가 바뀌었는지**, **`지난 대화` 의 행을 눌렀을 때 실제로 `claude --resume` 이 그 대화를 이어 여는지**.
+사람이 한 번 봐야 하는 것(캡처 실행은 저장을 막아 두었거나 실제 세션이 필요해서 자동으로는 못 본다): **패키지 빌드에서 Windows 토스트가 뜨는지**, **창 크기를 바꾸고 종료한 뒤 `ui.json` 의 `window` 가 바뀌었는지**, **`지난 대화` 의 행을 눌렀을 때 실제로 `claude --resume` 이 그 대화를 이어 여는지**.
 
 내장 셸의 환경은 앱을 띄운 프로세스가 아니라 사용자의 터미널처럼 보이도록 정리한다(`electron/env.ts` `cleanEnv`): npm/npx 가 끼워 넣는 `node_modules\.bin` PATH 항목과 `npm_*` 변수, 그리고 다른 Claude Code 세션 안에서 띄웠을 때 상속되는 `CLAUDE_CODE_CHILD_SESSION` 같은 내부 표식을 제거하고, 네이티브 설치 경로 `~/.local/bin` 을 PATH 맨 앞에 둔다. 이 정리가 없으면 중첩 세션으로 오인돼 트랜스크립트·세션 파일이 생기지 않아 햄스터가 아무것도 못 본다.
 
