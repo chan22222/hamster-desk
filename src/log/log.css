@@ -23,7 +23,7 @@
 .tt-x:hover { color: var(--text); background: var(--surface-2); }
 
 /* ---- the speech-bubble log (a sidebar section) -------------------------------------------- */
-.side-feedlog { flex: none; max-height: 40%; border-bottom: 1px solid var(--line); }
+.side-feedlog { flex: none; max-height: 33%; border-bottom: 1px solid var(--line); }
 .log-tools { display: flex; align-items: center; gap: 6px; padding: 2px 8px 6px; }
 .log-search {
   flex: 1; min-width: 0; height: 26px; padding: 0 8px;

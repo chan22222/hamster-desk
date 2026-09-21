@@ -258,9 +258,12 @@ button:focus-visible, select:focus-visible, input:focus-visible { outline: 2px s
 .side-filter { flex: 1; min-width: 0; background: none; border: 0; color: var(--text); font: inherit; font-size: 12px; outline: none; }
 .side-filter::placeholder { color: var(--text-2); }
 .side-section { display: flex; flex-direction: column; min-height: 0; }
-/* what changed must never push the browser off screen: 45% of the sidebar, then it scrolls itself */
-.side-changed { flex: none; max-height: 45%; border-bottom: 1px solid var(--line); }
-.side-browse { flex: 1 1 auto; }
+/* Three sections share the sidebar evenly: what changed and the bubble log each take at most a third
+   (less when they have little to show) and scroll inside themselves; the browser fills the rest and
+   never drops below a third. A collapsed section is only its header. */
+.side-changed { flex: none; max-height: 33%; border-bottom: 1px solid var(--line); }
+.side-browse { flex: 1 1 0; min-height: 33%; }
+.side-browse:not(.is-open) { flex: none; min-height: 0; }
 .side-rows { flex: 1; min-height: 0; overflow-y: auto; padding-bottom: 8px; }
 .side-title { display: flex; align-items: center; gap: 4px; flex: none; width: 100%; padding: 8px; color: var(--text-2); font-size: 12px; font-weight: 600; }
 .side-title:hover { color: var(--text); }
