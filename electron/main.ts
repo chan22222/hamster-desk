@@ -2,9 +2,10 @@ import { app, BrowserWindow, clipboard, dialog, ipcMain, shell } from 'electron'
 import { appendFileSync, readdirSync, readFileSync, rmSync } from 'node:fs'
 import { join } from 'node:path'
 import { DeskWatcher } from './watcher'
-import type { BubbleRequest, DeskEvent, FileEntry, NotifyRequest, StatusSnapshot, UiState } from '../shared/events'
+import { DEFAULT_PROFILE_ID, type BubbleRequest, type DeskEvent, type FileEntry, type NotifyRequest, type Profile, type SessionInfo, type StatusSnapshot, type UiState } from '../shared/events'
 import { spawnPty, PromptDetector, type PtyHandle } from './pty'
-import { StatusWatcher, installStatusLine, uninstallStatusLine, statusLineState } from './statusline'
+import { StatusWatcher, installStatusLine, uninstallStatusLine, statusLineState, refreshStatusScripts } from './statusline'
+import { addProfile, baseDirOf, configDirOf, loadProfiles, profileOfConfigDir, removeProfile, renameProfile, setCurrentProfile, withEmails } from './profiles'
 import { flushUi, loadUi, saveUi, uiPath } from './ui-store'
 import { checkVersion } from './version'
 import { BubbleSummarizer } from './summarize'
@@ -96,7 +97,8 @@ if (process.env.HAMSTER_NOTIFY_PROBE !== '1') app.setAppUserModelId(appUserModel
 
 const ptys = new Map<number, PtyHandle>()
 let win: BrowserWindow | null = null
-let watcher: DeskWatcher | null = null
+/** one watcher per account (profile id → watcher): each account has its own sessions/ and projects/ */
+const watchers = new Map<string, DeskWatcher>()
 let status: StatusWatcher | null = null
 let bubbles: BubbleSummarizer | null = null
 
@@ -275,13 +277,51 @@ function createWindow(): void {
   else void win.loadFile(join(__dirname, '../renderer/index.html'))
 }
 
-function startWatchers(): void {
-  watcher = new DeskWatcher({ ownedShells: () => [...ptys.values()].map((p) => ({ ptyId: p.id, pid: p.pid })) })
-  watcher.on('event', (e: DeskEvent) => emitDesk(e))
-  void watcher.start()
+const liveSessions = (): SessionInfo[] => [...watchers.values()].flatMap((w) => w.liveSessions)
+const rescanAll = (): void => {
+  for (const w of watchers.values()) void w.rescan()
+}
 
+/** Start watching one account's folder. The default account passes no folder: the CLI's own. */
+function watchProfile(p: Profile): void {
+  if (watchers.has(p.id)) return
+  const w = new DeskWatcher({
+    ownedShells: () => [...ptys.values()].map((h) => ({ ptyId: h.id, pid: h.pid })),
+    ...(p.dir ? { baseDir: p.dir } : {}),
+    profileId: p.id,
+  })
+  w.on('event', (e: DeskEvent) => emitDesk(e))
+  watchers.set(p.id, w)
+  void w.start()
+}
+
+/** A forgotten account: its sessions leave the office, the folder itself is left alone. */
+function unwatchProfile(id: string): void {
+  const w = watchers.get(id)
+  if (!w) return
+  const gone = w.liveSessions.map((s) => s.sessionId)
+  w.stop()
+  watchers.delete(id)
+  for (const sessionId of gone) emitDesk({ kind: 'session_gone', sessionId })
+}
+
+/**
+ * Rate limits belong to an account, so a snapshot has to say whose it is. The status-line script
+ * reports the `CLAUDE_CONFIG_DIR` it ran with; a file an older script wrote does not, and then the
+ * session's own watcher is the next best witness.
+ */
+function profileOfSnapshot(s: StatusSnapshot): string {
+  if (s.configDir !== undefined) return profileOfConfigDir(s.configDir)
+  for (const [id, w] of watchers) if (w.liveSessions.some((x) => x.sessionId === s.sessionId)) return id
+  return DEFAULT_PROFILE_ID
+}
+
+function startWatchers(): void {
+  for (const p of loadProfiles().list) watchProfile(p)
+
+  refreshStatusScripts()
   status = new StatusWatcher()
-  status.on('status', (s: StatusSnapshot) => emitDesk({ kind: 'status', ...s }))
+  status.on('status', (s: StatusSnapshot) => emitDesk({ kind: 'status', ...s, profileId: profileOfSnapshot(s) }))
   status.start()
 
   const version = (force = false): void => {
@@ -356,7 +396,10 @@ function visible(data: string): string {
 
 const ptyLogInput = (data: string): void => ptyLog(`\n>> ${visible(data)}\n`)
 
-ipcMain.handle('pty:create',(_e, cols: number, rows: number, cwd?: string) => {
+ipcMain.handle('pty:create', (_e, cols: number, rows: number, cwd?: string, profileId?: string) => {
+  // an account that has been forgotten since the tab was stored falls back to the default one
+  const profiles = loadProfiles()
+  const profile = profiles.list.find((p) => p.id === profileId) ?? profiles.list[0]
   const detector = new PromptDetector((reason) => emitDesk({ kind: 'waiting', ptyId: handle.id, reason, ts: Date.now() }))
   const handle = spawnPty(
     cols,
@@ -372,14 +415,15 @@ ipcMain.handle('pty:create',(_e, cols: number, rows: number, cwd?: string) => {
       send('pty:exit', handle.id, code)
     },
     process.env.HAMSTER_CWD ?? cwd, // HAMSTER_CWD: debug/e2e override
+    profile.dir,
   )
   ptys.set(handle.id, handle)
   // a blind run cannot see a shell being respawned; this is how it says so
-  if (process.env.HAMSTER_CAPTURE) console.log(`[pty] create ${handle.id} ${handle.cwd}`)
+  if (process.env.HAMSTER_CAPTURE) console.log(`[pty] create ${handle.id} ${handle.cwd} profile=${profile.id}`)
   autoType(handle)
   // a claude started in this shell shows up in ~/.claude/sessions a few seconds later; poll a bit sooner
-  for (const ms of [3000, 6000, 10000]) setTimeout(() => void watcher?.rescan(), ms)
-  return { id: handle.id, pid: handle.pid, shell: handle.shell, cwd: handle.cwd }
+  for (const ms of [3000, 6000, 10000]) setTimeout(rescanAll, ms)
+  return { id: handle.id, pid: handle.pid, shell: handle.shell, cwd: handle.cwd, profileId: profile.id }
 })
 
 ipcMain.on('pty:input', (_e, id: number, data: string) => {
@@ -401,19 +445,39 @@ ipcMain.on('pty:kill', (_e, id: number) => {
 
 // ---- IPC: desk data
 
-ipcMain.handle('desk:sessions', () => watcher?.liveSessions ?? [])
+ipcMain.handle('desk:sessions', () => liveSessions())
 ipcMain.handle('desk:backlog', (_e, after: number) => backlog.filter((b) => b.seq > after))
 
-// ---- IPC: status line (usage), version, dialogs
+// ---- IPC: accounts (electron/profiles.ts)
+// An account is a config folder. Adding one only makes an empty folder under ~/.hamster-desk;
+// forgetting one never deletes anything. The default account's folder is never written to here.
 
-ipcMain.handle('statusline:state', () => statusLineState())
-ipcMain.handle('statusline:install', () => {
-  installStatusLine()
-  return statusLineState()
+ipcMain.handle('profiles:list', () => withEmails(loadProfiles()))
+ipcMain.handle('profiles:add', (_e, name: string) => {
+  const { state, added } = addProfile(String(name ?? ''))
+  watchProfile(added)
+  return withEmails(state)
 })
-ipcMain.handle('statusline:uninstall', () => {
-  uninstallStatusLine()
-  return statusLineState()
+ipcMain.handle('profiles:rename', (_e, id: string, name: string) => withEmails(renameProfile(String(id ?? ''), String(name ?? ''))))
+ipcMain.handle('profiles:remove', (_e, id: string) => {
+  const state = removeProfile(String(id ?? ''))
+  if (!state.list.some((p) => p.id === id)) unwatchProfile(String(id ?? ''))
+  return withEmails(state)
+})
+ipcMain.handle('profiles:setCurrent', (_e, id: string) => withEmails(setCurrentProfile(String(id ?? ''))))
+ipcMain.handle('profiles:openFolder', (_e, id: string) => shell.openPath(baseDirOf(String(id ?? ''))))
+
+// ---- IPC: status line (usage), version, dialogs
+// Each account has its own settings.json, so the status line is switched on per account.
+
+ipcMain.handle('statusline:state', (_e, profileId?: string) => statusLineState(configDirOf(profileId)))
+ipcMain.handle('statusline:install', (_e, profileId?: string) => {
+  installStatusLine(configDirOf(profileId))
+  return statusLineState(configDirOf(profileId))
+})
+ipcMain.handle('statusline:uninstall', (_e, profileId?: string) => {
+  uninstallStatusLine(configDirOf(profileId))
+  return statusLineState(configDirOf(profileId))
 })
 
 ipcMain.handle('version:check', async (_e, force?: boolean) => {
@@ -566,8 +630,8 @@ ipcMain.handle('win:mini', (_e, on: boolean) => setMini(win, on === true))
 // ---- IPC: past conversations of a folder (electron/transcripts.ts)
 // `live` is the set the watcher already knows is running, so the list can grey those rows out.
 
-ipcMain.handle('transcripts:list', (_e, cwd: string) =>
-  listTranscripts(String(cwd ?? ''), new Set((watcher?.liveSessions ?? []).map((s) => s.sessionId))),
+ipcMain.handle('transcripts:list', (_e, cwd: string, profileId?: string) =>
+  listTranscripts(String(cwd ?? ''), new Set(liveSessions().map((s) => s.sessionId)), configDirOf(profileId) ?? undefined),
 )
 
 // ---- IPC: git, read-only (electron/git.ts)
@@ -674,8 +738,8 @@ function shutdown(): void {
   flushUi() // a setting changed in the last 300 ms is still only in memory
   for (const p of ptys.values()) p.kill()
   ptys.clear()
-  watcher?.stop()
-  watcher = null
+  for (const w of watchers.values()) w.stop()
+  watchers.clear()
   status?.stop()
   status = null
   bubbles?.dispose()

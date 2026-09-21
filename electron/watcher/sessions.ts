@@ -14,6 +14,10 @@ export interface SessionWatcherOptions {
   /** shells this window owns; a claude process descending from one is flagged `mine` with that ptyId */
   ownedShells: () => OwnedShell[]
   pollMs?: number
+  /** another account's config folder; without it, the CLI's own (~/.claude) */
+  baseDir?: string
+  /** stamped on every session found there */
+  profileId?: string
 }
 
 /**
@@ -33,7 +37,7 @@ export class SessionWatcher extends EventEmitter {
   }
 
   async start(): Promise<void> {
-    const dir = sessionsDir()
+    const dir = sessionsDir(this.opts.baseDir)
     try {
       this.watcher = watch(dir, { persistent: false }, () => void this.scan())
       this.watcher.on('error', () => {})
@@ -68,7 +72,7 @@ export class SessionWatcher extends EventEmitter {
   }
 
   private async scanOnce(): Promise<void> {
-    const dir = sessionsDir()
+    const dir = sessionsDir(this.opts.baseDir)
     let names: string[] = []
     try {
       names = (await fsp.readdir(dir)).filter((n) => /^\d+\.json$/.test(n))
@@ -106,7 +110,7 @@ export class SessionWatcher extends EventEmitter {
         ptyId = owner ? owner.ptyId : null
       }
       const cwd = String(j.cwd ?? '')
-      const transcriptPath = prev?.transcriptPath ?? findTranscript(sessionId, cwd)
+      const transcriptPath = prev?.transcriptPath ?? findTranscript(sessionId, cwd, this.opts.baseDir)
       const info: SessionInfo = {
         sessionId,
         pid,
@@ -120,6 +124,7 @@ export class SessionWatcher extends EventEmitter {
         mine: ptyId !== null,
         ptyId,
         transcriptPath,
+        ...(this.opts.profileId ? { profileId: this.opts.profileId } : {}),
       }
       if (
         !prev ||

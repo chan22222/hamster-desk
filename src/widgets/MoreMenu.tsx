@@ -5,6 +5,7 @@ import { bubbleAvailability, resetBubbleStats, type BubbleAvailability } from '.
 import { Popover } from './Popover'
 import { IconCheck, IconMore } from './icons'
 import { VersionSection } from './Version'
+import { AccountsSection } from '../accounts/Accounts'
 
 function CheckRow({
   on,
@@ -141,6 +142,9 @@ function Body({ onUpdate }: { onUpdate: () => void }) {
       <Segmented label="책상 위치" value={prefs.deskSide} options={SIDES} onChange={(v) => setPrefs({ deskSide: v })} />
       <Segmented label="테마" value={prefs.theme} options={THEMES} onChange={(v) => setPrefs({ theme: v })} />
       <Segmented label="터미널 글꼴" value={String(prefs.termFont)} options={TERM_FONTS} onChange={(v) => setPrefs({ termFont: Number(v) })} />
+
+      <div className="pop-sep" />
+      <AccountsSection />
 
       <div className="pop-sep" />
       <div className="pop-head">알림</div>

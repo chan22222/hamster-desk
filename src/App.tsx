@@ -19,6 +19,7 @@ import { restoreWorkspaces } from './workspaces-persist'
 import { SessionBar } from './session/SessionBar'
 import { TabContext } from './session/ContextMeter'
 import { TabGit } from './git/GitChip'
+import { AccountBadge } from './accounts/Accounts'
 import { TurnToast } from './log/TurnToast'
 import { Banner } from './notify/Banner'
 import { MiniShell } from './mini/MiniShell'
@@ -233,6 +234,7 @@ export default function App() {
                 <button className="tab-main" onClick={() => setActiveTab(id)} title={w.cwd}>
                   <span className={`dot ${s ? (busy ? 'busy' : 'idle') : ''} ${waiting ? 'wait' : ''}`} />
                   <span className="tab-label">{s?.title || w.title}</span>
+                  <AccountBadge profileId={w.profileId} />
                   <TabContext session={s ?? null} />
                   <TabGit cwd={w.cwd} />
                   {n > 1 && <span className="count">🐹×{n}</span>}
@@ -250,6 +252,7 @@ export default function App() {
                 <button className="tab-main" onClick={() => setActiveTab(id)} title={`${s.info.cwd} (다른 터미널에서 실행 중)`}>
                   <span className={`dot ${s.info.status === 'busy' ? 'busy' : 'idle'}`} />
                   <span className="tab-label">{s.title || s.info.name || s.info.sessionId.slice(0, 8)}</span>
+                  <AccountBadge profileId={s.info.profileId} />
                   <TabContext session={s} />
                   {s.order.length > 1 && <span className="count">🐹×{s.order.length}</span>}
                 </button>

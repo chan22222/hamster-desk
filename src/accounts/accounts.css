@@ -1,0 +1,84 @@
+/* Accounts: the picker in the `+` menu, the badge on a tab, the list in the `⋯` menu and the
+   per-account rows of the usage popover. Kept out of styles.css like the other feature sheets. */
+
+/* ---- the picker: which account new terminals open under ----------------------------------- */
+.acct-pick { display: flex; align-items: center; gap: 8px; min-height: 28px; }
+.acct-pick-label { flex: none; font-size: 12px; color: var(--text-3); }
+.acct-pick-list { display: flex; flex-wrap: wrap; gap: 4px; min-width: 0; }
+.acct-pill {
+  max-width: 120px; padding: 3px 9px; border-radius: 999px;
+  border: 1px solid var(--line); background: var(--surface-2);
+  color: var(--text-2); font-size: 12px;
+  overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+}
+.acct-pill:hover { color: var(--text); border-color: var(--line-strong); }
+.acct-pill.is-on { background: var(--accent-soft); border-color: var(--accent); color: var(--text); font-weight: 500; }
+
+/* ---- the badge on a tab ---------------------------------------------------------------------- */
+.acct-badge {
+  flex: none; max-width: 64px; padding: 0 5px; border-radius: 4px;
+  background: var(--surface-3); color: var(--text-2);
+  font-size: 10px; line-height: 15px; font-style: normal;
+  overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+}
+
+/* ---- the list in the `⋯` menu -------------------------------------------------------------- */
+.acct-row { display: flex; align-items: center; gap: 2px; border-radius: var(--radius); }
+.acct-row:hover { background: var(--surface-2); }
+.acct-row.is-asking { flex-wrap: wrap; gap: 6px; padding: 6px; background: var(--surface-2); }
+.acct-ask { flex: 1 1 100%; font-size: 12px; line-height: 1.55; color: var(--text-2); }
+.acct-ask b { color: var(--text); font-weight: 600; }
+.acct-main {
+  display: flex; align-items: center; gap: 8px; flex: 1; min-width: 0; min-height: 36px;
+  padding: 3px 6px; text-align: left; color: var(--text-2);
+}
+.acct-row.is-on .acct-main { color: var(--text); }
+.acct-text { display: flex; flex-direction: column; gap: 1px; min-width: 0; }
+.acct-name { font-size: 13px; color: var(--text); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.acct-sub { font-size: 11px; color: var(--text-3); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.acct-tools { display: flex; flex: none; gap: 1px; padding-right: 3px; opacity: 0; }
+.acct-row:hover .acct-tools, .acct-row:focus-within .acct-tools { opacity: 1; }
+.acct-tool {
+  display: inline-flex; align-items: center; justify-content: center; width: 22px; height: 22px;
+  border-radius: 4px; color: var(--text-3); font-size: 12px;
+}
+.acct-tool:hover { background: var(--surface-3); color: var(--text); }
+.acct-add { display: flex; align-items: center; gap: 6px; }
+.acct-name-input {
+  flex: 1; min-width: 0; height: 26px; padding: 0 8px;
+  border: 1px solid var(--line); border-radius: var(--radius);
+  background: var(--surface-2); color: var(--text); font: inherit; font-size: 12px; outline: none;
+}
+.acct-name-input:focus { border-color: var(--accent); box-shadow: 0 0 0 3px var(--accent-soft); }
+.acct-btn {
+  flex: none; height: 26px; padding: 0 10px; border-radius: var(--radius);
+  border: 1px solid var(--line-strong); background: var(--surface); color: var(--text-2); font-size: 12px;
+}
+.acct-btn:hover { color: var(--text); background: var(--surface-2); }
+.acct-btn.is-primary { border-color: transparent; background: var(--accent); color: var(--on-accent); }
+.acct-btn.is-primary:hover { background: var(--accent-hover); color: var(--on-accent); }
+.acct-btn.is-danger { color: var(--danger); }
+
+/* ---- per-account rows in the usage popover ----------------------------------------------- */
+.um-acct {
+  flex: none; max-width: 72px; padding: 0 6px; border-radius: 4px;
+  background: var(--surface-3); color: var(--text-2); font-size: 11px; line-height: 18px;
+  overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+}
+.au-row {
+  display: flex; align-items: baseline; gap: 8px; min-height: 24px; padding: 2px 6px;
+  border-radius: var(--radius); font-size: 12px; font-variant-numeric: tabular-nums;
+}
+.au-row[aria-current='true'] { background: var(--surface-2); }
+.au-name { flex: 1; min-width: 0; color: var(--text); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.au-num { flex: none; color: var(--text-2); }
+.au-num.is-warm { color: var(--warn); }
+.au-num.is-hot { color: var(--danger); font-weight: 600; }
+.au-age { flex: none; min-width: 44px; text-align: right; font-size: 11px; color: var(--text-3); }
+.au-none { flex: none; font-size: 11px; color: var(--text-3); }
+.au-link { flex: none; padding: 1px 7px; border-radius: var(--radius); border: 1px solid var(--line-strong); color: var(--text-2); font-size: 11px; }
+.au-link:hover { color: var(--text); background: var(--surface-2); }
+
+@media (max-width: 1100px) {
+  .um-acct { display: none; }
+}

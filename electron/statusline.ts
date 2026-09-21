@@ -32,7 +32,7 @@ process.stdin.on('end', () => {
   try {
     const dir = path.join(os.homedir(), '.hamster-desk', 'status'); fs.mkdirSync(dir, { recursive: true });
     const id = String(j.session_id || 'unknown').replace(/[^a-zA-Z0-9_-]/g, '');
-    const tmp = path.join(dir, id + '.tmp'); fs.writeFileSync(tmp, JSON.stringify({ ts: Date.now(), ...j })); fs.renameSync(tmp, path.join(dir, id + '.json'));
+    const tmp = path.join(dir, id + '.tmp'); fs.writeFileSync(tmp, JSON.stringify({ ts: Date.now(), config_dir: process.env.CLAUDE_CONFIG_DIR || '', ...j })); fs.renameSync(tmp, path.join(dir, id + '.json'));
   } catch {}
   const pct = (w) => (w && typeof w.used_percentage === 'number') ? Math.round(w.used_percentage) + '%' : null;
   const at = (w) => { if (!w || w.resets_at == null) return ''; const t = typeof w.resets_at === 'number' ? (w.resets_at < 1e12 ? w.resets_at * 1000 : w.resets_at) : Date.parse(w.resets_at); if (!t) return ''; const d = new Date(t); const now = new Date(); const hh = String(d.getHours()).padStart(2,'0') + ':' + String(d.getMinutes()).padStart(2,'0'); return d.toDateString() === now.toDateString() ? hh : (d.getMonth()+1) + '/' + d.getDate() + ' ' + hh; };
@@ -59,6 +59,7 @@ if ($j) {
     New-Item -ItemType Directory -Force -Path $dir | Out-Null
     $id = ([string]$j.session_id) -replace '[^a-zA-Z0-9_-]', ''
     $j | Add-Member -NotePropertyName ts -NotePropertyValue ([DateTimeOffset]::UtcNow.ToUnixTimeMilliseconds()) -Force
+    $j | Add-Member -NotePropertyName config_dir -NotePropertyValue ([string]$env:CLAUDE_CONFIG_DIR) -Force
     $tmp = Join-Path $dir ($id + '.tmp')
     [IO.File]::WriteAllText($tmp, ($j | ConvertTo-Json -Depth 8 -Compress))
     Move-Item -Force $tmp (Join-Path $dir ($id + '.json'))
@@ -78,20 +79,43 @@ function nodeOnPath(): boolean {
   return (process.env.PATH ?? '').split(process.platform === 'win32' ? ';' : ':').some((d) => d && existsSync(join(d, exe)))
 }
 
-function settingsPath(): string {
-  return join(claudeDir(), 'settings.json')
+// `configDir` is another account's config folder (electron/profiles.ts): each account has its own
+// settings.json, so the status line is switched on per account. Without it, the CLI's own.
+
+function settingsPath(configDir?: string | null): string {
+  return join(configDir || claudeDir(), 'settings.json')
 }
 
-function readSettings(): Record<string, unknown> {
+function readSettings(configDir?: string | null): Record<string, unknown> {
   try {
-    return JSON.parse(readFileSync(settingsPath(), 'utf8')) as Record<string, unknown>
+    return JSON.parse(readFileSync(settingsPath(configDir), 'utf8')) as Record<string, unknown>
   } catch {
     return {}
   }
 }
 
-function writeSettings(s: Record<string, unknown>): void {
-  writeFileSync(settingsPath(), JSON.stringify(s, null, 2) + '\n', 'utf8')
+function writeSettings(s: Record<string, unknown>, configDir?: string | null): void {
+  writeFileSync(settingsPath(configDir), JSON.stringify(s, null, 2) + '\n', 'utf8')
+}
+
+function writeScripts(): void {
+  mkdirSync(STATUS_DIR, { recursive: true })
+  writeFileSync(SCRIPT_PATH, SCRIPT, 'utf8')
+  writeFileSync(SCRIPT_PS_PATH, SCRIPT_PS, 'utf8')
+}
+
+/**
+ * Bring an already-installed script up to date (it now also says which account it ran under).
+ * Only ever touches the app's own ~/.hamster-desk, and only when the user had installed it.
+ */
+export function refreshStatusScripts(): void {
+  try {
+    if (!existsSync(SCRIPT_PATH) && !existsSync(SCRIPT_PS_PATH)) return
+    if (existsSync(SCRIPT_PATH) && readFileSync(SCRIPT_PATH, 'utf8') === SCRIPT && existsSync(SCRIPT_PS_PATH) && readFileSync(SCRIPT_PS_PATH, 'utf8') === SCRIPT_PS) return
+    writeScripts()
+  } catch {
+    /* the old script still works; it just cannot tell accounts apart */
+  }
 }
 
 export function statusLineCommand(): string {
@@ -102,29 +126,28 @@ export function statusLineCommand(): string {
 export type StatusLineState = 'installed' | 'foreign' | 'none'
 
 /** 'installed' = ours, 'foreign' = the user has their own status line, 'none' = nothing configured. */
-export function statusLineState(): StatusLineState {
-  const s = readSettings()
+export function statusLineState(configDir?: string | null): StatusLineState {
+  const s = readSettings(configDir)
   const sl = s.statusLine as { command?: string } | undefined
   if (!sl || typeof sl.command !== 'string') return 'none'
   return /statusline\.(cjs|ps1)/.test(sl.command) && sl.command.includes('.hamster-desk') ? 'installed' : 'foreign'
 }
 
 /** Write the script and point Claude Code's statusLine at it. Keeps a backup of a foreign command. */
-export function installStatusLine(): void {
-  mkdirSync(STATUS_DIR, { recursive: true })
-  writeFileSync(SCRIPT_PATH, SCRIPT, 'utf8')
-  writeFileSync(SCRIPT_PS_PATH, SCRIPT_PS, 'utf8')
-  const s = readSettings()
+export function installStatusLine(configDir?: string | null): void {
+  writeScripts()
+  if (configDir) mkdirSync(configDir, { recursive: true }) // a brand-new account has no settings.json yet
+  const s = readSettings(configDir)
   const prev = s.statusLine as Record<string, unknown> | undefined
   if (prev && typeof prev.command === 'string' && !/statusline\.(cjs|ps1)/.test(String(prev.command))) {
     s.hamsterDeskPreviousStatusLine = prev
   }
   s.statusLine = { type: 'command', command: statusLineCommand(), padding: 0 }
-  writeSettings(s)
+  writeSettings(s, configDir)
 }
 
-export function uninstallStatusLine(): void {
-  const s = readSettings()
+export function uninstallStatusLine(configDir?: string | null): void {
+  const s = readSettings(configDir)
   const sl = s.statusLine as { command?: string } | undefined
   if (sl && typeof sl.command === 'string' && /statusline\.(cjs|ps1)/.test(sl.command)) {
     if (s.hamsterDeskPreviousStatusLine) {
@@ -133,7 +156,7 @@ export function uninstallStatusLine(): void {
     } else {
       delete s.statusLine
     }
-    writeSettings(s)
+    writeSettings(s, configDir)
   }
 }
 
@@ -183,6 +206,7 @@ export function parseSnapshot(j: Record<string, unknown>): StatusSnapshot | null
     fiveHour: window(rl.five_hour),
     sevenDay: window(rl.seven_day),
     otherWindows: other,
+    ...(typeof j.config_dir === 'string' ? { configDir: j.config_dir } : {}),
   }
 }
 

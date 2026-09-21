@@ -34,12 +34,16 @@ export function spawnPty(
   onData: (data: string) => void,
   onExit: (code: number) => void,
   cwd?: string,
+  /** another account's config folder (electron/profiles.ts); null leaves the env exactly as it is */
+  configDir?: string | null,
 ): PtyHandle {
   const shell = defaultShell()
   const env = cleanEnv()
   env.TERM = 'xterm-256color'
   env.COLORTERM = 'truecolor'
   env.HAMSTER_DESK = '1'
+  // the one thing that tells the CLI which account it is: where it keeps its login and settings
+  if (configDir) env.CLAUDE_CONFIG_DIR = configDir
   const dir = cwd && existsSync(cwd) ? cwd : homedir()
   const proc = pty.spawn(shell, [], {
     name: 'xterm-256color',

@@ -247,7 +247,7 @@ export function TerminalPane({ ws, visible }: { ws: Workspace; visible: boolean 
     const onInput = term.onData((d) => {
       if (id !== null) bridge.pty.input(id, d)
     })
-    void bridge.pty.create(term.cols, term.rows, ws.cwd).then((info) => {
+    void bridge.pty.create(term.cols, term.rows, ws.cwd, ws.profileId).then((info) => {
       if (disposed) {
         bridge.pty.kill(info.id)
         return

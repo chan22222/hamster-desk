@@ -191,11 +191,12 @@ async function readOne(path: string, sessionId: string, size: number, mtimeMs: n
  *
  * `live` = the session ids a claude is running right now (watcher.liveSessions); those rows are
  * shown but not resumable, because two claudes on one transcript would fight over the file.
+ * `baseDir` = another account's config folder: each account keeps its own conversations.
  */
-export async function listTranscripts(cwd: string, live: Set<string>): Promise<TranscriptEntry[]> {
+export async function listTranscripts(cwd: string, live: Set<string>, baseDir?: string): Promise<TranscriptEntry[]> {
   if (!cwd) return []
   const t0 = Date.now()
-  const dir = join(projectsDir(), projectSlug(cwd))
+  const dir = join(projectsDir(baseDir), projectSlug(cwd))
   let names: string[]
   try {
     names = (await fsp.readdir(dir, { withFileTypes: true })).filter((d) => d.isFile() && d.name.endsWith('.jsonl')).map((d) => d.name)

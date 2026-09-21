@@ -10,6 +10,7 @@ import type {
   GitInfo,
   NotifyRequest,
   NotifyResult,
+  ProfilesState,
   PtyInfo,
   SessionInfo,
   TranscriptEntry,
@@ -29,17 +30,29 @@ export interface DeskBridge {
   backlog(after: number): Promise<SeqEvent[]>
   sessions(): Promise<SessionInfo[]>
   pty: {
-    create(cols: number, rows: number, cwd?: string): Promise<PtyInfo>
+    /** `profileId` = the account the shell runs under (its `CLAUDE_CONFIG_DIR`); none = the default one */
+    create(cols: number, rows: number, cwd?: string, profileId?: string): Promise<PtyInfo>
     input(id: number, data: string): void
     resize(id: number, cols: number, rows: number): void
     kill(id: number): void
     onData(cb: (id: number, data: string) => void): () => void
     onExit(cb: (id: number, code: number) => void): () => void
   }
+  /** per account: each one has its own settings.json */
   statusline: {
-    state(): Promise<StatusLineState>
-    install(): Promise<StatusLineState>
-    uninstall(): Promise<StatusLineState>
+    state(profileId?: string): Promise<StatusLineState>
+    install(profileId?: string): Promise<StatusLineState>
+    uninstall(profileId?: string): Promise<StatusLineState>
+  }
+  /** several Claude Code accounts, one config folder each (electron/profiles.ts) */
+  profiles: {
+    list(): Promise<ProfilesState>
+    add(name: string): Promise<ProfilesState>
+    rename(id: string, name: string): Promise<ProfilesState>
+    /** forgets the account; its folder (login, conversations) stays on disk */
+    remove(id: string): Promise<ProfilesState>
+    setCurrent(id: string): Promise<ProfilesState>
+    openFolder(id: string): Promise<string>
   }
   version: { check(force?: boolean): Promise<VersionInfo> }
   dialog: { pickFolder(defaultPath?: string): Promise<string | null> }
@@ -85,7 +98,7 @@ export interface DeskBridge {
   }
   /** past conversations of one folder, from the transcript files (electron/transcripts.ts) */
   transcripts: {
-    list(cwd: string): Promise<TranscriptEntry[]>
+    list(cwd: string, profileId?: string): Promise<TranscriptEntry[]>
   }
   /** read-only git for one folder (electron/git.ts) */
   git: {
@@ -124,7 +137,7 @@ const bridge: DeskBridge = {
   backlog: (after) => ipcRenderer.invoke('desk:backlog', after),
   sessions: () => ipcRenderer.invoke('desk:sessions'),
   pty: {
-    create: (cols, rows, cwd) => ipcRenderer.invoke('pty:create', cols, rows, cwd),
+    create: (cols, rows, cwd, profileId) => ipcRenderer.invoke('pty:create', cols, rows, cwd, profileId),
     input: (id, data) => ipcRenderer.send('pty:input', id, data),
     resize: (id, cols, rows) => ipcRenderer.send('pty:resize', id, cols, rows),
     kill: (id) => ipcRenderer.send('pty:kill', id),
@@ -140,9 +153,17 @@ const bridge: DeskBridge = {
     },
   },
   statusline: {
-    state: () => ipcRenderer.invoke('statusline:state'),
-    install: () => ipcRenderer.invoke('statusline:install'),
-    uninstall: () => ipcRenderer.invoke('statusline:uninstall'),
+    state: (profileId) => ipcRenderer.invoke('statusline:state', profileId),
+    install: (profileId) => ipcRenderer.invoke('statusline:install', profileId),
+    uninstall: (profileId) => ipcRenderer.invoke('statusline:uninstall', profileId),
+  },
+  profiles: {
+    list: () => ipcRenderer.invoke('profiles:list'),
+    add: (name) => ipcRenderer.invoke('profiles:add', name),
+    rename: (id, name) => ipcRenderer.invoke('profiles:rename', id, name),
+    remove: (id) => ipcRenderer.invoke('profiles:remove', id),
+    setCurrent: (id) => ipcRenderer.invoke('profiles:setCurrent', id),
+    openFolder: (id) => ipcRenderer.invoke('profiles:openFolder', id),
   },
   version: { check: (force) => ipcRenderer.invoke('version:check', force) },
   dialog: { pickFolder: (d) => ipcRenderer.invoke('dialog:pickFolder', d) },
@@ -181,7 +202,7 @@ const bridge: DeskBridge = {
     },
   },
   transcripts: {
-    list: (cwd) => ipcRenderer.invoke('transcripts:list', cwd),
+    list: (cwd, profileId) => ipcRenderer.invoke('transcripts:list', cwd, profileId),
   },
   git: {
     info: (cwd) => ipcRenderer.invoke('git:info', cwd),

@@ -36,7 +36,8 @@ function sameText(subtitle: string, title: string): boolean {
   return t.length > 1 && t.endsWith('…') && s.startsWith(t.slice(0, -1).trimEnd())
 }
 
-export function TranscriptList({ cwd, onPick }: { cwd: string; onPick: () => void }) {
+/** `profileId`: each account keeps its own conversations, and a resumed one has to open under the same account. */
+export function TranscriptList({ cwd, profileId, onPick }: { cwd: string; profileId: string; onPick: () => void }) {
   const addWorkspace = useDesk((s) => s.addWorkspace)
   const [rows, setRows] = useState<TranscriptEntry[] | null>(null)
   const [filter, setFilter] = useState('')
@@ -48,7 +49,7 @@ export function TranscriptList({ cwd, onPick }: { cwd: string; onPick: () => voi
       return
     }
     void window.desk.transcripts
-      .list(cwd)
+      .list(cwd, profileId)
       .then((r) => {
         if (alive) setRows(r)
       })
@@ -58,7 +59,7 @@ export function TranscriptList({ cwd, onPick }: { cwd: string; onPick: () => voi
     return () => {
       alive = false
     }
-  }, [cwd])
+  }, [cwd, profileId])
 
   // `Popover` opens under its trigger and never flips upward, and this trigger sits in the middle of
   // the window with the studio above it. So the list takes exactly the height that is left, and the
@@ -86,12 +87,12 @@ export function TranscriptList({ cwd, onPick }: { cwd: string; onPick: () => voi
   const resume = (e: TranscriptEntry): void => {
     if (e.live) return
     termLog(`[history] resume ${e.sessionId}`)
-    addWorkspace(cwd, e.title, `claude --resume ${e.sessionId}`)
+    addWorkspace(cwd, e.title, `claude --resume ${e.sessionId}`, profileId)
     onPick()
   }
 
   const continueLast = (): void => {
-    addWorkspace(cwd, '이어서', 'claude --continue')
+    addWorkspace(cwd, '이어서', 'claude --continue', profileId)
     onPick()
   }
 

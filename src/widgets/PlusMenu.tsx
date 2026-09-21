@@ -1,3 +1,4 @@
+import { AccountPicker } from '../accounts/Accounts'
 import { RecentList } from './RecentList'
 import { Popover } from './Popover'
 import { IconPlus, IconSearch, IconSidebar } from './icons'
@@ -45,6 +46,7 @@ export function PlusMenu({ onOpen, onShowSidebar }: { onOpen: (dir: string) => v
       {(close) => (
         <div className="pop-body">
           <div className="pop-head">새 터미널</div>
+          <AccountPicker />
           <RecentList
             onOpen={(dir) => {
               onOpen(dir)
@@ -66,6 +68,7 @@ export function StartCard({ onOpen, onShowSidebar }: { onOpen: (dir: string) => 
       <div className="start-card">
         <div className="pop-body">
           <div className="pop-head">새 터미널</div>
+          <AccountPicker />
           <RecentList onOpen={onOpen} maxHeight={280} />
           <Actions onOpen={onOpen} onShowSidebar={onShowSidebar} close={() => undefined} />
         </div>

@@ -10,6 +10,9 @@ export type { DeskEvent, SessionInfo }
 export interface DeskWatcherOptions {
   /** shells this window spawned (empty → nothing is "mine", everything is shown) */
   ownedShells?: () => { ptyId: number; pid: number }[]
+  /** watch another account's config folder instead of the CLI's own (electron/profiles.ts) */
+  baseDir?: string
+  profileId?: string
 }
 
 /**
@@ -23,9 +26,12 @@ export class DeskWatcher extends EventEmitter {
   private locate: NodeJS.Timeout | null = null
   private pendingTranscript = new Map<string, SessionInfo>()
 
+  private readonly baseDir: string | undefined
+
   constructor(opts: DeskWatcherOptions = {}) {
     super()
-    this.sessions = new SessionWatcher({ ownedShells: opts.ownedShells ?? (() => []) })
+    this.baseDir = opts.baseDir
+    this.sessions = new SessionWatcher({ ownedShells: opts.ownedShells ?? (() => []), baseDir: opts.baseDir, profileId: opts.profileId })
     this.sessions.on('session', (s: SessionInfo) => void this.onSession(s))
     this.sessions.on('session_gone', (id: string) => this.onGone(id))
   }
@@ -78,7 +84,7 @@ export class DeskWatcher extends EventEmitter {
 
   private async retryPending(): Promise<void> {
     for (const [id, s] of this.pendingTranscript) {
-      const p = findTranscript(id, s.cwd)
+      const p = findTranscript(id, s.cwd, this.baseDir)
       if (!p) continue
       this.pendingTranscript.delete(id)
       const live = this.sessions.sessions.get(id)

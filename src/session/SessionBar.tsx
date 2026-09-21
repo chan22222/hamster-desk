@@ -140,7 +140,7 @@ export function SessionBar({ ws, session }: { ws: Workspace | null; session: Ses
       </Popover>
 
       <Popover className="pill sb-btn" label="지난 대화" title="이 폴더에서 나눈 지난 대화 열기" ariaLabel="지난 대화" width={320} debugClick="bar-history">
-        {(close) => <TranscriptList cwd={ws.cwd} onPick={close} />}
+        {(close) => <TranscriptList cwd={ws.cwd} profileId={ws.profileId} onPick={close} />}
       </Popover>
     </div>
   )

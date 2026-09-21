@@ -7,6 +7,7 @@
 // the user was working, and a claude session is resumed deliberately from the session bar (§3.4),
 // never by reopening the app.
 
+import { DEFAULT_PROFILE_ID } from '@shared/events'
 import { lastCwd } from './sidebar/recent'
 import { uiGet, uiSet, useDesk, type Workspace } from './store'
 
@@ -14,6 +15,8 @@ import { uiGet, uiSet, useDesk, type Workspace } from './store'
 export interface StoredTab {
   cwd: string
   title: string
+  /** the account the tab ran under; absent (older files, or the default account) = default */
+  profileId?: string
 }
 
 export interface StoredWorkspaces {
@@ -40,7 +43,7 @@ export function serializeWorkspaces(workspaces: Workspace[], activeTab: string |
   for (const w of workspaces) {
     if (w.initialCommand) continue
     if (`ws:${w.id}` === activeTab) active = tabs.length
-    tabs.push({ cwd: w.cwd, title: w.title })
+    tabs.push({ cwd: w.cwd, title: w.title, ...(w.profileId && w.profileId !== DEFAULT_PROFILE_ID ? { profileId: w.profileId } : {}) })
   }
   return { tabs, active }
 }
@@ -52,9 +55,9 @@ export function readStoredWorkspaces(raw: unknown): StoredWorkspaces {
   if (Array.isArray(src.tabs)) {
     for (const row of src.tabs) {
       if (!row || typeof row !== 'object') continue
-      const { cwd, title } = row as Partial<StoredTab>
+      const { cwd, title, profileId } = row as Partial<StoredTab>
       if (typeof cwd !== 'string' || !cwd) continue
-      tabs.push({ cwd, title: typeof title === 'string' && title ? title : '' })
+      tabs.push({ cwd, title: typeof title === 'string' && title ? title : '', ...(typeof profileId === 'string' && profileId ? { profileId } : {}) })
       if (tabs.length >= 12) break // a settings file is not a place for an unbounded list
     }
   }
@@ -156,7 +159,8 @@ export async function restoreWorkspaces(home: string): Promise<void> {
   for (let n = 0; n < kept.length; n++) {
     if (n > 0 && kept.length >= STAGGER_FROM) await sleep(STAGGER_MS)
     const { t } = kept[n]
-    ids.push(useDesk.getState().addWorkspace(t.cwd, t.title || undefined).id)
+    // a tab comes back under the account it had — not under whichever is current now
+    ids.push(useDesk.getState().addWorkspace(t.cwd, t.title || undefined, undefined, t.profileId ?? DEFAULT_PROFILE_ID).id)
   }
   const at = kept.findIndex(({ i }) => i === stored.active)
   useDesk.getState().setActiveTab(`ws:${ids[at >= 0 ? at : ids.length - 1]}`)

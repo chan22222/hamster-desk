@@ -27,6 +27,28 @@ export interface SessionInfo {
   /** which embedded terminal (pty id) the claude process runs in, when mine */
   ptyId: number | null
   transcriptPath: string | null
+  /** which account (config folder) this session was found under; absent = the default one */
+  profileId?: string
+}
+
+/**
+ * One Claude Code account = one config folder (`CLAUDE_CONFIG_DIR`). `dir: null` is the account the
+ * CLI uses when nobody tells it otherwise (~/.claude); the app never sets the variable for that one.
+ */
+export interface Profile {
+  id: string
+  name: string
+  dir: string | null
+  /** who is logged in there, as the CLI wrote it down (read-only; filled in by `profiles:list`) */
+  email?: string | null
+}
+
+export const DEFAULT_PROFILE_ID = 'default'
+
+export interface ProfilesState {
+  list: Profile[]
+  /** the account new terminals open under */
+  currentId: string
 }
 
 export interface RateWindow {
@@ -50,6 +72,10 @@ export interface StatusSnapshot {
   sevenDay: RateWindow | null
   /** any extra windows the CLI reports, keyed by name */
   otherWindows: Record<string, RateWindow>
+  /** `CLAUDE_CONFIG_DIR` the session ran with ('' = unset); undefined when an older script wrote the file */
+  configDir?: string
+  /** the account those rate limits belong to (main fills it in before the event goes out) */
+  profileId?: string
 }
 
 export type EffortLevel = 'low' | 'medium' | 'high' | 'xhigh' | 'max'
@@ -124,6 +150,8 @@ export interface PtyInfo {
   pid: number
   shell: string
   cwd: string
+  /** the account this shell was started under (absent = default) */
+  profileId?: string
 }
 
 

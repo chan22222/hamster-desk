@@ -1,5 +1,6 @@
 import { create } from 'zustand'
-import type { DeskEvent, EffortLevel, GitInfo, LogItem, SessionInfo, StatusSnapshot, ToolAction, TurnSummary, TurnToast, VersionInfo } from '@shared/events'
+import type { DeskEvent, EffortLevel, GitInfo, LogItem, Profile, ProfilesState, SessionInfo, StatusSnapshot, ToolAction, TurnSummary, TurnToast, VersionInfo } from '@shared/events'
+import { DEFAULT_PROFILE_ID } from '@shared/events'
 import { setLang, t, type PrefLang } from './i18n'
 import { cancelSummary, requestSummary } from './bubbles/summarize'
 import { summarizeTurn } from './log/turn'
@@ -132,6 +133,8 @@ export interface Workspace {
   title: string
   /** typed into the shell once it is up (e.g. `claude update`) */
   initialCommand?: string
+  /** the account (config folder) this terminal runs under; fixed for the life of the tab */
+  profileId: string
 }
 
 /** `system` keeps following the OS for as long as it is picked. */
@@ -200,6 +203,12 @@ interface DeskStore {
   ptyWaiting: Record<number, { reason: 'permission' | 'question'; ts: number }>
   /** newest status-line snapshot across sessions (rate limits are account-wide) */
   usage: StatusSnapshot | null
+  /** the same, per account: rate limits belong to whoever is logged in (see `usageOf`) */
+  usageByProfile: Record<string, StatusSnapshot>
+  /** the accounts this app knows; always starts with the default one */
+  profiles: Profile[]
+  /** the account new terminals open under */
+  currentProfileId: string
   version: VersionInfo | null
   prefs: Prefs
   /** the small always-on-top window; not remembered across restarts */
@@ -222,7 +231,10 @@ interface DeskStore {
   setGit(cwd: string, info: GitInfo): void
   apply(e: DeskEvent): void
   setActiveTab(id: string | null): void
-  addWorkspace(cwd: string, title?: string, initialCommand?: string): Workspace
+  /** `profileId` defaults to the current account */
+  addWorkspace(cwd: string, title?: string, initialCommand?: string, profileId?: string): Workspace
+  /** adopt what main says the accounts are (after list/add/rename/remove/setCurrent) */
+  setProfiles(state: ProfilesState): void
   bindWorkspacePty(id: number, ptyId: number, cwd: string): void
   removeWorkspace(id: number): void
   setPrefs(p: Partial<Prefs>): void
@@ -406,6 +418,12 @@ export async function hydrateUi(): Promise<void> {
   uiBag = bag
   const prefs = adoptPrefs(uiBag.prefs)
   useDesk.setState({ prefs })
+  // the accounts have to be known before the stored tabs come back: each tab names its own
+  try {
+    useDesk.getState().setProfiles(await bridge.profiles.list())
+  } catch {
+    /* only the default account, then */
+  }
   // write the migrated set back once, stamped, so the next boot has nothing left to fix up
   if (prefsVersionOf(uiBag.prefs) < PREFS_VERSION) uiSet('prefs', storedPrefs(prefs))
 }
@@ -689,6 +707,9 @@ export const useDesk = create<DeskStore>((set, get) => {
     activeTab: null,
     ptyWaiting: {},
     usage: null,
+    usageByProfile: {},
+    profiles: [{ id: DEFAULT_PROFILE_ID, name: '기본', dir: null }],
+    currentProfileId: DEFAULT_PROFILE_ID,
     version: null,
     prefs: loadPrefs(),
     mini: false,
@@ -712,10 +733,17 @@ export const useDesk = create<DeskStore>((set, get) => {
     setGit: (cwd, info) => set({ git: { ...get().git, [gitKey(cwd)]: info } }),
 
     setActiveTab: (id) => set({ activeTab: id }),
-    addWorkspace(cwd, title, initialCommand) {
-      const ws: Workspace = { id: nextWorkspaceId++, ptyId: null, cwd, title: title ?? (baseName(cwd) || cwd), initialCommand }
+    addWorkspace(cwd, title, initialCommand, profileId) {
+      const { profiles, currentProfileId } = get()
+      // an account that was forgotten since (a stored tab, a stale menu) opens under the current one
+      const pid = profileId && profiles.some((p) => p.id === profileId) ? profileId : currentProfileId
+      const ws: Workspace = { id: nextWorkspaceId++, ptyId: null, cwd, title: title ?? (baseName(cwd) || cwd), initialCommand, profileId: pid }
       set({ workspaces: [...get().workspaces, ws], activeTab: `ws:${ws.id}` })
       return ws
+    },
+    setProfiles(state) {
+      const list = state.list.length ? state.list : get().profiles
+      set({ profiles: list, currentProfileId: list.some((p) => p.id === state.currentId) ? state.currentId : DEFAULT_PROFILE_ID })
     },
     bindWorkspacePty(id, ptyId, cwd) {
       set({
@@ -953,7 +981,11 @@ export const useDesk = create<DeskStore>((set, get) => {
           // a fresh session reports no rate limits until its first API call; keep the newest snapshot that has them
           const hasWindows = !!(snap.fiveHour || snap.sevenDay)
           const usage = hasWindows && (!st.usage || snap.ts >= st.usage.ts) ? snap : st.usage
-          set({ usage })
+          // …and the newest one per account, which is what the gauges show once there are several
+          const pid = snap.profileId ?? DEFAULT_PROFILE_ID
+          const mine = st.usageByProfile[pid]
+          const usageByProfile = hasWindows && (!mine || snap.ts >= mine.ts) ? { ...st.usageByProfile, [pid]: snap } : st.usageByProfile
+          set({ usage, usageByProfile })
           if (!st.sessions[snap.sessionId]) pendingStatus.set(snap.sessionId, snap)
           updSession(snap.sessionId, (s) => ({
             ...s,

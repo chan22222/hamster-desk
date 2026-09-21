@@ -6,12 +6,14 @@ export function claudeDir(): string {
   return process.env.CLAUDE_CONFIG_DIR || join(homedir(), '.claude')
 }
 
-export function sessionsDir(): string {
-  return join(claudeDir(), 'sessions')
+// `base` is another account's config folder (electron/profiles.ts); without it, the CLI's own.
+
+export function sessionsDir(base?: string): string {
+  return join(base || claudeDir(), 'sessions')
 }
 
-export function projectsDir(): string {
-  return join(claudeDir(), 'projects')
+export function projectsDir(base?: string): string {
+  return join(base || claudeDir(), 'projects')
 }
 
 /** Claude Code names the per-project folder by replacing every non-alphanumeric char of the cwd with '-'. */
@@ -20,8 +22,8 @@ export function projectSlug(cwd: string): string {
 }
 
 /** Locate `<projects>/<slug>/<sessionId>.jsonl`; falls back to scanning every project folder. */
-export function findTranscript(sessionId: string, cwd?: string): string | null {
-  const root = projectsDir()
+export function findTranscript(sessionId: string, cwd?: string, base?: string): string | null {
+  const root = projectsDir(base)
   if (cwd) {
     const direct = join(root, projectSlug(cwd), `${sessionId}.jsonl`)
     if (existsSync(direct)) return direct

@@ -65,6 +65,7 @@ const ws = (id: number, cwd: string, title: string, initialCommand?: string): Wo
   cwd,
   title,
   initialCommand,
+  profileId: 'default',
 })
 
 test('serializeWorkspaces keeps the shells and the active index', () => {
