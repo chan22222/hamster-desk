@@ -15,7 +15,7 @@ const HOME = mkdtempSync(join(tmpdir(), 'hd-update-home-'))
 process.env.HAMSTER_HOME = HOME
 
 import { UPDATE_SCRIPT, buildCommit, checkAppUpdate, parseCompare, parseGitLog, repoDirOf } from '../../electron/app-update'
-import { isInstalled, pickAutoUpdater, releaseInfo, uninstallerOf } from '../../electron/app-release'
+import { RELEASE_FEEDS, checkOverFeeds, isInstalled, pickAutoUpdater, releaseInfo, uninstallerOf, type FeedChecker } from '../../electron/app-release'
 
 const commit = (n: number, message: string): unknown => ({ sha: String(n).repeat(40).slice(0, 40), commit: { message } })
 
@@ -145,4 +145,39 @@ test('the real electron-updater, imported the way the main bundle imports it, ha
   const named = Object.prototype.hasOwnProperty.call(ns, 'autoUpdater')
   const underDefault = !!ns.default && !!Object.getOwnPropertyDescriptor(ns.default, 'autoUpdater')
   assert.ok(named || underDefault, 'electron-updater changed shape: autoUpdater is neither a named export nor under default')
+})
+
+/** an updater whose feeds fail as told: `bad` = the providers that reject */
+function fakeUpdater(bad: string[]): { u: FeedChecker; asked: string[] } {
+  const asked: string[] = []
+  let feed = ''
+  const u: FeedChecker = {
+    setFeedURL: (f) => void (feed = f.provider),
+    checkForUpdates: async () => {
+      asked.push(feed)
+      if (bad.includes(feed)) throw new Error(`HttpError: 504 (${feed})` + String.fromCharCode(10) + 'headers…')
+    },
+  }
+  return { u, asked }
+}
+
+test('the update check asks the releases feed, and the latest release itself only when the feed is down', async () => {
+  assert.deepEqual(RELEASE_FEEDS.map((f) => f.provider), ['github', 'generic'])
+  assert.equal(RELEASE_FEEDS[1].url, 'https://github.com/chan22222/hamster-desk/releases/latest/download')
+
+  const fine = fakeUpdater([])
+  const said: string[] = []
+  await checkOverFeeds(fine.u, (w) => said.push(w))
+  assert.deepEqual([fine.asked, said], [['github'], []]) // the normal case: one question, nothing to report
+
+  const feedDown = fakeUpdater(['github']) // the night 0.1.10 came out: releases.atom answered 504
+  await checkOverFeeds(feedDown.u, (w) => said.push(w))
+  assert.deepEqual(feedDown.asked, ['github', 'generic'])
+  assert.equal(said[0], 'the releases feed failed (HttpError: 504 (github)): asking releases/latest/download instead') // first line of the error only
+
+  const allDown = fakeUpdater(['github', 'generic'])
+  await assert.rejects(checkOverFeeds(allDown.u, () => undefined), (e: Error) => e.message.includes('504 (generic)')) // what is reported is the last answer
+
+  await checkOverFeeds(feedDown.u, () => undefined)
+  assert.deepEqual(feedDown.asked.slice(2), ['github', 'generic']) // every check starts over at the feed: only it allows a partial download
 })

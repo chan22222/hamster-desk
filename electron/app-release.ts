@@ -1,6 +1,7 @@
 import { existsSync } from 'node:fs'
 import { basename, dirname, join } from 'node:path'
 import type { AppUpdateInfo } from '../shared/events'
+import { REPO } from './app-update'
 import { logUpdate } from './update-log'
 
 /**
@@ -117,6 +118,41 @@ export function releaseInfo(version: string, commit: string | null): AppUpdateIn
   return { commit, behind: 0, commits: [], canSelfUpdate: false, checkedAt, error: lastError, version, release }
 }
 
+/** where the latest version is asked for: the releases feed first, the latest release's own file second */
+export const RELEASE_FEEDS = [
+  { provider: 'github', owner: REPO.split('/')[0], repo: REPO.split('/')[1] },
+  { provider: 'generic', url: `https://github.com/${REPO}/releases/latest/download` },
+] as const
+
+/** as much of electron-updater as the check needs — so the fallback below can be tested without it */
+export interface FeedChecker {
+  setFeedURL(feed: (typeof RELEASE_FEEDS)[number]): void
+  checkForUpdates(): Promise<unknown>
+}
+
+/**
+ * One check, over whichever feed answers.
+ *
+ * electron-updater's GitHub provider learns the latest tag from `releases.atom`, and only from
+ * there. That feed has bad minutes of its own — on the night 0.1.10 came out it answered 504 for
+ * this repository *and* for electron/electron while githubstatus said all was well — and with it
+ * down, an installed app could not see a release whose files were all being served fine. So when
+ * the feed fails, the same question goes to `releases/latest/download/latest.yml`, which GitHub
+ * redirects to the newest release's own file. The feed stays first because only it lets the
+ * updater find the *previous* release's blockmap: through the second one an update is downloaded
+ * whole (120 MB) instead of the changed blocks.
+ */
+export async function checkOverFeeds(u: FeedChecker, log: (what: string) => void): Promise<void> {
+  u.setFeedURL(RELEASE_FEEDS[0])
+  try {
+    await u.checkForUpdates()
+  } catch (e) {
+    log(`the releases feed failed (${reason(e)}): asking releases/latest/download instead`)
+    u.setFeedURL(RELEASE_FEEDS[1])
+    await u.checkForUpdates()
+  }
+}
+
 /**
  * Ask GitHub once; state changes reach the UI through `onChange` as the download moves along.
  * `manual`: the user pressed "check again" — start the retry ladder over.
@@ -132,10 +168,15 @@ export function checkRelease(onChange: () => void, version: string, manual = fal
       const u = await load(onChange)
       lastError = null
       logUpdate(who, 'check')
-      await u.checkForUpdates()
+      await checkOverFeeds(u as unknown as FeedChecker, (what) => {
+        lastError = null // the first feed's failure is not the answer; the second one's would be
+        logUpdate(who, what)
+      })
+      lastError = null
     } catch (e) {
+      // the 'error' event has usually logged this one already
+      if (reason(e) !== lastError) logUpdate(who, `error ${reason(e)}`)
       lastError = reason(e)
-      logUpdate(who, `error ${lastError}`)
     } finally {
       checkedAt = Date.now()
       inflight = null
