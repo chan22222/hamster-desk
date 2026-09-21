@@ -32,7 +32,7 @@ npx electron .          # 또는 npm run dev (HMR)
 npm run release            # 검사만: npm run release -- --check
 ```
 
-`scripts/release.ts` 가 작업 폴더가 깨끗하고 `HEAD` 가 `origin/main` 과 같은지, 그 버전이 이미 나가지 않았는지 확인한 뒤, 설치 파일을 빌드해 **초안** 릴리스에 올리고(`Hamster-Desk-Setup-<버전>.exe` · `.blockmap` · `latest.yml`) 다 올라간 다음 한 번에 공개한다 — 반만 올라간 릴리스를 설치된 앱이 보는 일이 없다. 공개가 `v<버전>` 태그를 만든다. 릴리스 노트는 이전 태그 이후의 커밋 제목이다. GitHub CLI 로그인(`gh auth login`)이 필요하다: 업로드에 그 토큰을 쓴다. 버전을 올리지 않으면 설치된 앱은 새 릴리스로 보지 않는다(semver 비교).
+`scripts/release.ts` 가 작업 폴더가 깨끗하고 `HEAD` 가 `origin/main` 과 같은지, 그 버전이 이미 나가지 않았는지 확인한 뒤, 설치 파일을 빌드하고(`--publish never`) 세 파일(`Hamster-Desk-Setup-<버전>.exe` · `.blockmap` · `latest.yml`)이 다 있는지 본 다음 `gh release create` 로 올린다 — gh 는 초안에 전부 올린 뒤에야 공개하므로 반만 올라간 릴리스를 설치된 앱이 보는 일이 없다. 태그 `v<버전>` 은 빌드한 그 커밋에 찍힌다. 릴리스 노트는 `CHANGELOG.md` 의 그 버전 절이다(없으면 이전 태그 이후의 커밋 제목). GitHub CLI 로그인(`gh auth login`)이 필요하다. electron-builder 의 자체 게시 기능은 쓰지 않는다: 파일마다 업로드를 동시에 시작하고 각자 "릴리스가 없으면 만든다"를 해서, 0.1.1 때 같은 태그의 초안이 둘 생기고 `.blockmap` 만 든 쪽이 공개됐었다(그 자리에서 나머지 두 파일을 올려 바로잡음). 버전을 올리지 않으면 설치된 앱은 새 릴리스로 보지 않는다(semver 비교).
 
 패키지 빌드: `npm run build` → `release/win-unpacked/Hamster Desk.exe`. 압축하지 않은 폴더 그대로다 — 단일 포터블 exe 는 켤 때마다 앱 전체(약 410MB)를 `%TEMP%` 에 풀고 끌 때 지워서 시작이 느렸다. 옮길 때는 `win-unpacked` 폴더째로 옮긴다.
 
