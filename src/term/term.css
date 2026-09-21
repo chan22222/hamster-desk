@@ -1,0 +1,70 @@
+/* Terminal chrome: the wrapper that lets something float over a pane, and the find box that does.
+   Owner: B (plan §3.9).
+
+   Loads before styles.css, so nothing here relies on source order to beat a shared rule. */
+
+/* `.term-host` is where xterm mounts and React must leave its children alone, so the overlay hangs
+   off this wrapper instead. The wrapper takes over the show/hide the host used to do itself. */
+.term-wrap {
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  flex: 1;
+  min-height: 0;
+  min-width: 0;
+}
+
+.term-search {
+  position: absolute;
+  top: 8px;
+  right: 14px;
+  z-index: 5;
+  display: flex;
+  align-items: center;
+  gap: 2px;
+  padding: 3px 4px 3px 7px;
+  border: 1px solid var(--line-strong);
+  border-radius: var(--radius-lg);
+  background: var(--surface);
+  box-shadow: var(--shadow-pop);
+}
+
+.ts-ico { display: inline-flex; color: var(--text-3); margin-right: 2px; }
+
+.ts-input {
+  width: 168px;
+  height: 22px;
+  border: 0;
+  background: transparent;
+  color: var(--text);
+  font: inherit;
+  font-size: 12px;
+  outline: none;
+}
+.ts-input::placeholder { color: var(--text-3); }
+
+.ts-count {
+  min-width: 34px;
+  padding: 0 4px;
+  text-align: right;
+  font-size: 11px;
+  font-variant-numeric: tabular-nums;
+  color: var(--text-3);
+}
+.ts-count.is-none { color: var(--danger); }
+
+.ts-btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 22px;
+  height: 22px;
+  flex: none;
+  border-radius: var(--radius);
+  color: var(--text-2);
+  font-size: 11px;
+}
+.ts-btn:hover:not(:disabled) { background: var(--surface-2); color: var(--text); }
+.ts-btn:disabled { opacity: 0.4; cursor: default; }
+.ts-case { width: 24px; font-weight: 500; }
+.ts-case.is-on { background: var(--accent-soft); color: var(--accent); }

@@ -1,0 +1,80 @@
+/* Session controls: the bar above the terminal, the context meter, the past-conversation list.
+   Owner: B (plan §3.2, §3.4, §3.5).
+
+   These rules load *before* styles.css (a component import, not the entry's), so anything that
+   restyles a shared class does it with a compound selector (`.pill.sb-btn`) rather than by relying
+   on source order. */
+
+/* ---- the bar ---------------------------------------------------------------------------- */
+
+.session-bar {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  flex: none;
+  height: 32px;
+  padding: 0 8px;
+  background: var(--surface);
+  border-bottom: 1px solid var(--line);
+  overflow-x: auto;
+  scrollbar-width: none;
+}
+.session-bar::-webkit-scrollbar { height: 0; }
+/* While Claude Code is asking something, every control that types into the terminal is disabled and
+   dims itself (below); the bar says why in words rather than fading as a whole, because the meter
+   and `지난 대화` — which never touch this terminal — stay live. */
+.sb-note { flex: none; font-size: 11px; color: var(--text-3); white-space: nowrap; }
+
+.sb-sep { width: 1px; height: 16px; flex: none; background: var(--line); }
+.sb-gap { flex: 1; min-width: 4px; }
+
+.pill.sb-btn { height: 24px; padding: 0 8px; font-size: 12px; flex: none; }
+.pill.sb-btn:disabled { opacity: 0.45; cursor: default; background: var(--surface); color: var(--text-3); }
+.pill.sb-btn.alert:disabled { background: var(--surface-2); border-color: var(--line); }
+.pill.sb-model { font-weight: 500; color: var(--text); }
+
+.seg.sb-effort { flex: none; padding: 1px; }
+.seg.sb-effort .seg-btn { padding: 2px 6px; font-size: 11px; }
+.seg.sb-effort .seg-btn:disabled { opacity: 0.45; cursor: default; }
+
+.sb-hint { flex: none; font-size: 11px; color: var(--danger); }
+
+/* ---- context ---------------------------------------------------------------------------- */
+
+/* the percentage that rides along in a tab label */
+.tab-ctx { flex: none; font-size: 11px; font-variant-numeric: tabular-nums; color: var(--text-3); }
+.tab-ctx.is-warm { color: var(--warn); }
+.tab-ctx.is-hot { color: var(--danger); font-weight: 600; }
+
+/* the wider meter on the bar */
+.sb-ctx { display: inline-flex; align-items: center; gap: 6px; flex: none; padding: 0 2px; }
+.sb-ctx-pct { font-size: 12px; font-variant-numeric: tabular-nums; color: var(--text-2); }
+.sb-ctx-pct.is-warm { color: var(--warn); }
+.sb-ctx-pct.is-hot { color: var(--danger); font-weight: 600; }
+.sb-ctx-size { font-size: 11px; color: var(--text-3); font-variant-numeric: tabular-nums; }
+.sb-ctx-busy { padding: 0 6px; border-radius: 999px; background: var(--accent-soft); color: var(--accent); font-size: 11px; line-height: 17px; }
+
+/* ---- past conversations ----------------------------------------------------------------- */
+
+.pop-body.tl { gap: 6px; }
+.side-search.tl-search { margin: 0 0 2px; }
+.tl-list { display: flex; flex-direction: column; gap: 2px; max-height: 320px; overflow-y: auto; margin: 0 -4px; padding: 0 4px; }
+
+.tl-row {
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
+  width: 100%;
+  padding: 6px 8px;
+  border-radius: var(--radius);
+  text-align: left;
+  color: var(--text-2);
+}
+.tl-row:hover:not(:disabled) { background: var(--surface-2); }
+.tl-row:disabled { cursor: default; opacity: 0.6; }
+
+.tl-title { font-size: 13px; font-weight: 500; color: var(--text); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.tl-sub { font-size: 12px; color: var(--text-3); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.tl-meta { display: flex; align-items: center; gap: 8px; font-size: 11px; color: var(--text-3); }
+.tl-branch { display: inline-flex; align-items: center; gap: 3px; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.tl-live { padding: 0 6px; border-radius: 999px; background: var(--accent-soft); color: var(--accent); line-height: 16px; }

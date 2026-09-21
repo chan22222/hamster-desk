@@ -37,14 +37,18 @@ function countdown(ms: number | null): string {
   return h ? `${h}시간 ${m}분` : `${m}분`
 }
 
-/** three steps, and the same class goes on the percentage — colour is never the only cue */
-const step = (pct: number): string => (pct >= 90 ? 'is-hot' : pct >= 70 ? 'is-warm' : 'is-ok')
+/**
+ * Three steps, and the same class goes on the percentage — colour is never the only cue.
+ * Exported because the context meter (src/session/ContextMeter.tsx) has to land on exactly the
+ * same thresholds and the same three words the usage chips already use.
+ */
+export const step = (pct: number): string => (pct >= 90 ? 'is-hot' : pct >= 70 ? 'is-warm' : 'is-ok')
 const clamp = (w: RateWindow): number => Math.max(0, Math.min(100, w.usedPercentage))
 
 const SEGMENTS = [0, 1, 2, 3, 4]
 
 /** Five blocks, one per 20 %. Redundant with the number next to it — that is the point. */
-function Meter({ pct }: { pct: number }) {
+export function Meter({ pct }: { pct: number }) {
   const filled = pct <= 0 ? 0 : Math.min(5, Math.ceil(pct / 20))
   return (
     <span className={`meter ${step(pct)}`} aria-hidden="true">
