@@ -1,4 +1,4 @@
-import { app, BrowserWindow, clipboard, dialog, ipcMain, shell } from 'electron'
+import { app, BrowserWindow, clipboard, dialog, ipcMain, nativeTheme, shell } from 'electron'
 import { appendFileSync, readdirSync, readFileSync, rmSync } from 'node:fs'
 import { join } from 'node:path'
 import { DeskWatcher } from './watcher'
@@ -226,8 +226,12 @@ function createWindow(): void {
     height: saved?.height ?? 880,
     minWidth: 760,
     minHeight: 480,
-    backgroundColor: '#0e0f13',
+    // what the window is until the page paints: the loading screen's own background (index.html),
+    // which is `--bg` of the palette the OS asks for
+    backgroundColor: nativeTheme.shouldUseDarkColors ? '#0f1311' : '#f4f6f4',
     title: 'Hamster Desk',
+    // the packaged exe carries the icon itself (build.win.icon); a dev run is plain electron.exe
+    ...(app.isPackaged ? {} : { icon: join(__dirname, '../../build/icon.png') }),
     autoHideMenuBar: true,
     show: false,
     webPreferences: {
@@ -252,12 +256,13 @@ function createWindow(): void {
       /* the window went away between the event and here */
     }
   })
-  win.once('ready-to-show', () => {
-    // debug/e2e: HAMSTER_UNFOCUSED=1 brings the window up *without* focus, which is the only
-    // state the notification path fires in — otherwise a blind run can never reach it.
-    if (unfocusedStart()) win?.showInactive()
-    else win?.show()
-  })
+  // Up at once rather than on 'ready-to-show': that waits for the first paint, and a window that
+  // is not there yet looks like a click that did nothing. Until the page paints the window is
+  // `backgroundColor`; the first thing painted is the loading screen index.html carries as markup.
+  // debug/e2e: HAMSTER_UNFOCUSED=1 brings the window up *without* focus, which is the only
+  // state the notification path fires in — otherwise a blind run can never reach it.
+  if (unfocusedStart()) win.showInactive()
+  else win.show()
   if (process.env.HAMSTER_CAPTURE) {
     // Smoke tests run blind: surface renderer errors on stdout, and let the renderer's own
     // tagged lines ([debug] click …, [git] …) through verbatim — a capture that shows nothing

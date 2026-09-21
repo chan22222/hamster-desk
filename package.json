@@ -21,6 +21,7 @@
     "test:office:ui": "electron scripts/office-smoke.cjs",
     "shot:studio": "electron scripts/office-shot.cjs",
     "rebuild": "electron-rebuild -f -w node-pty",
+    "icon": "tsx scripts/make-icon.ts",
     "dist": "npm run build"
   },
   "build": {
@@ -36,7 +37,8 @@
     "win": {
       "target": [
         "dir"
-      ]
+      ],
+      "icon": "build/icon.ico"
     },
     "npmRebuild": false,
     "nodeGypRebuild": false,

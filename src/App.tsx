@@ -122,6 +122,17 @@ export default function App() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [addWorkspace])
 
+  // the loading screen is markup in index.html, up since before this bundle ran; it goes once the
+  // app behind it is no longer the hidden first frame
+  useEffect(() => {
+    if (booting) return
+    const el = document.getElementById('splash')
+    if (!el) return
+    el.dataset.done = ''
+    const t = setTimeout(() => el.remove(), 260) // a little past the 0.22s fade in index.html
+    return () => clearTimeout(t)
+  }, [booting])
+
   // the one place the palette is chosen; styles.css keys the dark token set off this attribute
   useEffect(() => {
     document.documentElement.dataset.theme = painted
