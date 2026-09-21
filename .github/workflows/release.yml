@@ -1,0 +1,42 @@
+# Every push to main is built and released here, whoever pushed and from whichever PC — a release
+# does not depend on one machine running `npm run release`. The work is scripts/release.ts, the same
+# script as the local command: it builds the setup and publishes v<package.json version> with the
+# three files an installed app updates itself from. A push that did not raise the version finds
+# its tag already there and does nothing.
+name: release
+
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: write # creates the release and its tag
+
+# one at a time: two pushes in a row must not both try to create the same tag
+concurrency:
+  group: release
+  cancel-in-progress: false
+
+jobs:
+  release:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0 # the tags say what the previous release was
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+          cache: npm
+
+      - run: npm ci --legacy-peer-deps
+
+      - run: npm run typecheck
+
+      - run: npm run test:unit
+
+      - run: npm run release -- --ci
+        env:
+          GH_TOKEN: ${{ github.token }}

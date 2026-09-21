@@ -24,11 +24,9 @@ npx electron .          # 또는 npm run dev (HMR)
 
 **설치한 앱은 스스로 새 버전이 된다**(`electron/app-release.ts`, electron-updater). 설치판은 커밋이 아니라 **GitHub Releases** 를 본다: 시작할 때와 한 시간마다 확인하고, 자기 버전보다 높은 릴리스가 있으면 백그라운드로 받는다(설치 파일 옆에 올리는 `.blockmap` 덕에 바뀐 블록만). 다 받으면 상단에 **앱 업데이트** 버튼이 뜨고 **다시 시작해서 업데이트** 를 누르면 설치 프로그램이 조용히 돌고 앱이 다시 열린다 — 누르지 않아도 앱을 끌 때 설치된다. 다시 설치할 일은 없다. 어떤 빌드인지는 exe 옆을 보고 가른다: `Uninstall Hamster Desk.exe` 가 있으면 설치판(릴리스), 저장소 안의 `release/win-unpacked` 면 커밋 비교 + 닫고 업데이트, 둘 다 아니면 링크만. electron-updater 는 설치판에서만, 시작 경로 밖에서 늦게 불러온다.
 
-릴리스 올리기:
+릴리스 올리기: **`package.json` 의 `"version"` 을 올려서 `main` 에 푸시하면 끝이다.** 누가 어느 PC 에서 푸시하든 GitHub Actions(`.github/workflows/release.yml`)가 Windows 러너에서 타입 검사 → 단위 테스트 → `npm run release -- --ci` 를 돌려 그 버전을 빌드·게시한다. 버전을 올리지 않은 푸시는 태그가 이미 있으므로 아무것도 하지 않고 성공으로 끝난다. 검사나 테스트가 깨진 커밋은 릴리스되지 않는다. 같은 스크립트를 손으로도 돌릴 수 있다(Actions 가 막혔을 때):
 
 ```bash
-# 1. package.json 의 "version" 을 올리고 평소처럼 커밋·푸시
-# 2.
 npm run release            # 검사만: npm run release -- --check
 ```
 

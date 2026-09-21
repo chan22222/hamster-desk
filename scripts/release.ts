@@ -43,15 +43,28 @@ function fail(message: string): never {
 const { version } = JSON.parse(readFileSync(join(ROOT, 'package.json'), 'utf8')) as { version: string }
 const tag = `v${version}`
 
-if (!tryOut('gh', ['auth', 'token'])) fail('GitHub CLI 가 없거나 로그인되어 있지 않습니다: gh auth login')
+// `--ci`: run by .github/workflows/release.yml on every push to main, whoever pushed. Two things
+// differ there. The commit being built is the one that was pushed, which by now need not be the
+// tip of main any more — so it is not compared with origin/main (the tag goes on the built commit
+// either way). And a push that did not raise the version is not an error, just nothing to release.
+const ci = process.argv.includes('--ci')
+
+// gh reads GH_TOKEN by itself (that is how the workflow logs in); locally it is `gh auth login`
+if (!process.env.GH_TOKEN && !tryOut('gh', ['auth', 'token'])) fail('GitHub CLI 가 없거나 로그인되어 있지 않습니다: gh auth login')
 
 if (git('status', '--porcelain')) fail('커밋하지 않은 변경이 있습니다. 릴리스는 main 에 올라간 그대로여야 합니다.')
 git('fetch', 'origin', 'main', '--tags')
-if (git('rev-parse', 'HEAD') !== git('rev-parse', 'origin/main')) fail('HEAD 가 origin/main 과 다릅니다. 먼저 푸시(또는 pull) 하세요.')
+if (!ci && git('rev-parse', 'HEAD') !== git('rev-parse', 'origin/main')) fail('HEAD 가 origin/main 과 다릅니다. 먼저 푸시(또는 pull) 하세요.')
 
 // a published release with this tag (a draft left by a run that died is fine: it is removed below)
 const existing = tryOut('gh', ['release', 'view', tag, '--repo', REPO, '--json', 'isDraft', '--jq', '.isDraft'])
-if (existing === 'false' || git('tag', '--list', tag)) fail(`${tag} 은 이미 릴리스되었습니다. package.json 의 version 을 올리고 커밋·푸시한 뒤 다시 실행하세요.`)
+if (existing === 'false' || git('tag', '--list', tag)) {
+  if (ci) {
+    console.log(`${tag} 은 이미 릴리스되어 있습니다. 이 푸시는 버전을 올리지 않았으므로 할 일이 없습니다.`)
+    process.exit(0)
+  }
+  fail(`${tag} 은 이미 릴리스되었습니다. package.json 의 version 을 올리고 커밋·푸시한 뒤 다시 실행하세요.`)
+}
 
 // The release notes: this version's section of CHANGELOG.md, which is written whenever the version
 // is raised. The commit subjects since the last release only when there is no such section.
