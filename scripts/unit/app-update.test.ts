@@ -15,7 +15,7 @@ const HOME = mkdtempSync(join(tmpdir(), 'hd-update-home-'))
 process.env.HAMSTER_HOME = HOME
 
 import { UPDATE_SCRIPT, buildCommit, checkAppUpdate, parseCompare, parseGitLog, repoDirOf } from '../../electron/app-update'
-import { isInstalled, releaseInfo, uninstallerOf } from '../../electron/app-release'
+import { isInstalled, pickAutoUpdater, releaseInfo, uninstallerOf } from '../../electron/app-release'
 
 const commit = (n: number, message: string): unknown => ({ sha: String(n).repeat(40).slice(0, 40), commit: { message } })
 
@@ -128,4 +128,21 @@ test('every update check leaves a line in update.log', async () => {
   assert.equal(updateLogPath(), join(home, 'update.log'))
   const last = readFileSync(updateLogPath(), 'utf8').trim().split(String.fromCharCode(10)).pop() as string
   assert.match(last, /^d{4}-dd-ddT[d:.]+Z installed 0.1.3 | error net::ERR_INTERNET_DISCONNECTED at stack$/)
+})
+
+test('pickAutoUpdater finds it as a named export, under default, and says so when it is nowhere', () => {
+  const it = { autoDownload: false } as unknown as ReturnType<typeof pickAutoUpdater>
+  assert.equal(pickAutoUpdater({ autoUpdater: it }), it)
+  assert.equal(pickAutoUpdater({ default: { autoUpdater: it } }), it) // what node really hands over, see below
+  assert.equal(pickAutoUpdater({ default: { get autoUpdater() { return it } } }), it) // …and there it is a getter
+  for (const nothing of [null, undefined, {}, { default: {} }]) assert.throws(() => pickAutoUpdater(nothing), /autoUpdater/)
+})
+
+test('the real electron-updater, imported the way the main bundle imports it, has autoUpdater where pickAutoUpdater looks', async () => {
+  // Every installed build from 0.1.1 to 0.1.8 failed its update check on this. The getter itself is
+  // not called here (it builds an updater, which needs a running Electron app) — only where it is.
+  const ns = (await import('electron-updater')) as unknown as Record<string, unknown> & { default?: object }
+  const named = Object.prototype.hasOwnProperty.call(ns, 'autoUpdater')
+  const underDefault = !!ns.default && !!Object.getOwnPropertyDescriptor(ns.default, 'autoUpdater')
+  assert.ok(named || underDefault, 'electron-updater changed shape: autoUpdater is neither a named export nor under default')
 })

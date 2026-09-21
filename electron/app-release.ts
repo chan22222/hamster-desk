@@ -52,9 +52,29 @@ let retryTimer: ReturnType<typeof setTimeout> | null = null
 /** the first line is the message; the rest of an electron-updater error is a stack and headers */
 const reason = (e: unknown): string => String((e as Error)?.message ?? e).split('\n')[0].slice(0, 200)
 
-async function load(onChange: () => void): Promise<typeof import('electron-updater').autoUpdater> {
+type AutoUpdater = typeof import('electron-updater').autoUpdater
+
+/**
+ * `autoUpdater`, out of whatever shape the module arrived in.
+ *
+ * electron-updater is CommonJS and defines `autoUpdater` with a getter (Object.defineProperty). The
+ * main bundle keeps `await import('electron-updater')` as a real dynamic import, and node only lifts
+ * the exports it can see statically out of a CommonJS module — a getter-defined one is not among
+ * them. So the name is `undefined` on the namespace and lives under `default` (= module.exports).
+ * Reading it as a named export is what made every check of every installed build from 0.1.1 to
+ * 0.1.8 fail with "Cannot set properties of undefined (setting 'autoDownload')" — the types say
+ * the named export exists, so nothing but running it could tell.
+ */
+export function pickAutoUpdater(mod: unknown): AutoUpdater {
+  const m = mod as { autoUpdater?: AutoUpdater; default?: { autoUpdater?: AutoUpdater } } | null
+  const found = m?.autoUpdater ?? m?.default?.autoUpdater
+  if (!found) throw new Error('electron-updater 를 불러왔지만 autoUpdater 가 없습니다')
+  return found
+}
+
+async function load(onChange: () => void): Promise<AutoUpdater> {
   if (updater) return updater
-  const { autoUpdater } = await import('electron-updater')
+  const autoUpdater = pickAutoUpdater(await import('electron-updater'))
   autoUpdater.autoDownload = true
   autoUpdater.autoInstallOnAppQuit = false // see the header: an install nobody can see
   autoUpdater.logger = null // its default writes every step to the console
