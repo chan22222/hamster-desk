@@ -144,10 +144,10 @@ function Body({ onUpdate }: { onUpdate: () => void }) {
 
       <div className="pop-sep" />
       <div className="pop-head">알림</div>
-      <CheckRow on={notify.permission} label="권한 요청" onClick={() => setPrefs({ notify: { ...notify, permission: !notify.permission } })} />
-      <CheckRow on={notify.question} label="질문" onClick={() => setPrefs({ notify: { ...notify, question: !notify.question } })} />
-      <CheckRow on={notify.turnEnd} label="턴 완료" onClick={() => setPrefs({ notify: { ...notify, turnEnd: !notify.turnEnd } })} />
-      <CheckRow on={notify.sound} label="소리" onClick={() => setPrefs({ notify: { ...notify, sound: !notify.sound } })} />
+      <CheckRow on={notify.permission} label="권한 요청" debugClick="notify-permission" onClick={() => setPrefs({ notify: { ...notify, permission: !notify.permission } })} />
+      <CheckRow on={notify.question} label="질문" debugClick="notify-question" onClick={() => setPrefs({ notify: { ...notify, question: !notify.question } })} />
+      <CheckRow on={notify.turnEnd} label="턴 완료" debugClick="notify-turn" onClick={() => setPrefs({ notify: { ...notify, turnEnd: !notify.turnEnd } })} />
+      <CheckRow on={notify.sound} label="소리" debugClick="notify-sound" onClick={() => setPrefs({ notify: { ...notify, sound: !notify.sound } })} />
 
       <div className="pop-sep" />
       <div className="pop-head">말풍선</div>

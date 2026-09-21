@@ -21,6 +21,21 @@ const LIST_MIN = 80
 /** what sits under the list inside the panel: the gap, the `--continue` row, the panel's padding and border, and a margin to the window edge */
 const BELOW_LIST = 6 + 32 + 8 + 1 + 12
 
+/**
+ * The subtitle says nothing the title has not: a conversation that is one prompt long has that
+ * prompt as both. A long prompt is cut twice (60 characters for the title, ending in `…`, and 120
+ * for the subtitle), so a clipped title that the subtitle merely continues counts as the same —
+ * in a row this narrow the two lines would read identically. A short title of its own ("fix")
+ * above a subtitle that happens to start with it does not.
+ */
+function sameText(subtitle: string, title: string): boolean {
+  const norm = (s: string): string => s.replace(/\s+/g, ' ').trim().toLowerCase()
+  const t = norm(title)
+  const s = norm(subtitle)
+  if (s === t) return true
+  return t.length > 1 && t.endsWith('…') && s.startsWith(t.slice(0, -1).trimEnd())
+}
+
 export function TranscriptList({ cwd, onPick }: { cwd: string; onPick: () => void }) {
   const addWorkspace = useDesk((s) => s.addWorkspace)
   const [rows, setRows] = useState<TranscriptEntry[] | null>(null)
@@ -102,7 +117,8 @@ export function TranscriptList({ cwd, onPick }: { cwd: string; onPick: () => voi
             onClick={() => resume(e)}
           >
             <span className="tl-title">{e.title}</span>
-            {e.subtitle && <span className="tl-sub">{e.subtitle}</span>}
+            {/* a conversation that is one prompt long has that prompt as both; saying it twice is noise */}
+            {e.subtitle && !sameText(e.subtitle, e.title) && <span className="tl-sub">{e.subtitle}</span>}
             <span className="tl-meta">
               <span>{relTime(e.lastAt)}</span>
               {e.branch && (

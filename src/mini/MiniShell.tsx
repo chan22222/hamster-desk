@@ -11,8 +11,7 @@
 import { useEffect, useRef, useState } from 'react'
 import './mini.css'
 import { DeskStudio } from '../desk/DeskStudio'
-import { durationText } from '../notify/notifier'
-import { t } from '../i18n'
+import { formatDuration, t } from '../i18n'
 import { shortName, useDesk, type SessionState } from '../store'
 import type { TurnSummary } from '@shared/events'
 
@@ -70,7 +69,7 @@ export function MiniShell({ session }: { session: SessionState | null }) {
       </div>
       <div className="mini-bar">
         <span className={`mb-title ${turn ? 'is-turn' : ''}`} title={ws?.cwd || title}>
-          {turn ? t().turnSummary(turn.files, turn.added, turn.removed, durationText(turn.durationMs)) : title}
+          {turn ? t().turnSummary(turn.files, turn.added, turn.removed, formatDuration(turn.durationMs)) : title}
         </span>
         <span className="mb-chips">
           <span className="mb-chip" title="일하는 중인 햄스터">

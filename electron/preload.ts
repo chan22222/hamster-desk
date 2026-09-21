@@ -102,6 +102,10 @@ export interface DeskBridge {
     debugEvents: DeskEvent[] | null
     /** debug/e2e: buttons to press by themselves, `at` ms after boot (HAMSTER_CLICK) */
     debugClicks: { name: string; at: number }[]
+    /** debug/e2e: every shell is pinned to this folder (HAMSTER_CWD), so the stored tabs are not restored */
+    debugCwd: string | null
+    /** debug/e2e: a blind screenshot run (HAMSTER_CAPTURE) — restores what is stored, writes nothing back */
+    debugCapture: boolean
     /** debug/e2e: the window was shown without focus (HAMSTER_UNFOCUSED) */
     unfocused: boolean
     claudeLanguage: string | null

@@ -11,6 +11,11 @@
 .tab-git svg { flex: none; }
 .tg-branch { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .tg-n { flex: none; }
+/* Under 1180px the tabs have no room for a branch name: at 1000px the chip squeezed the tab's own
+   label down to "h…". The icon and the number of changed paths stay; the name is in the tooltip. */
+@media (max-width: 1179px) {
+  .tg-branch, .tg-dot { display: none; }
+}
 
 .diff-view { margin: 0 0 6px; }
 /* two classes on purpose: styles.css has `.file-preview pre { white-space: pre-wrap; word-break: break-all }`

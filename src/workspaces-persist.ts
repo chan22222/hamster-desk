@@ -71,19 +71,13 @@ export function readStoredWorkspaces(raw: unknown): StoredWorkspaces {
  *  - `capture`: a blind screenshot run (`HAMSTER_CAPTURE`). It *does* restore — that is the only
  *    way to photograph a restore — but it never writes the tabs back, the same rule
  *    electron/window-state.ts keeps for the window bounds (plan §1.3).
- *
- * `debugCwd` / `debugCapture` are not in the `info()` type yet (electron/preload.ts is frozen);
- * main fills them and the cast below reads them. See the integrator note in the hand-off.
  */
 async function debugRun(): Promise<{ pinned: boolean; capture: boolean }> {
   const bridge = window.desk
   if (!bridge) return { pinned: false, capture: false }
   try {
-    const info = (await bridge.info()) as Awaited<ReturnType<typeof bridge.info>> & {
-      debugCwd?: string | null
-      debugCapture?: boolean
-    }
-    return { pinned: !!info.debugPrefs || !!info.debugCwd, capture: info.debugCapture === true }
+    const info = await bridge.info()
+    return { pinned: !!info.debugPrefs || !!info.debugCwd, capture: info.debugCapture }
   } catch {
     return { pinned: false, capture: false }
   }

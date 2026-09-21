@@ -1,5 +1,5 @@
 import { app, BrowserWindow, clipboard, dialog, ipcMain, shell } from 'electron'
-import { readFileSync } from 'node:fs'
+import { appendFileSync, readdirSync, readFileSync, rmSync } from 'node:fs'
 import { join } from 'node:path'
 import { DeskWatcher } from './watcher'
 import type { BubbleRequest, DeskEvent, FileEntry, NotifyRequest, StatusSnapshot, UiState } from '../shared/events'
@@ -22,13 +22,67 @@ import { gitDiff, gitInfo } from './git'
 // existing users keep their settings. sessionData is set explicitly because Electron 28+ lets it
 // sit apart from userData — caches and Local Storage follow sessionData, not userData.
 // Must run before anything touches app.getPath/session, and before app.whenReady().
+//
+// A capture run gets a profile of its own, named after the process: two captures started side by
+// side used to land on the one `hamster-desk-smoke` folder, and the second spent its first seconds
+// failing to lock the cache — late enough to miss its own HAMSTER_CLICK / capture timers. The
+// folder is thrown away on exit; whatever Chromium still held open then is swept by the next run.
+const SMOKE_PREFIX = 'hamster-desk-smoke-'
 if (!app.isPackaged) {
-  const profile = process.env.HAMSTER_CAPTURE
-    ? join(app.getPath('temp'), 'hamster-desk-smoke')
+  const capture = !!process.env.HAMSTER_CAPTURE
+  const profile = capture
+    ? join(app.getPath('temp'), SMOKE_PREFIX + process.pid)
     : join(app.getPath('appData'), 'hamster-desk-dev')
   app.setPath('userData', profile)
   app.setPath('sessionData', profile)
+  if (capture) {
+    sweepSmokeProfiles(app.getPath('temp'))
+    process.on('exit', () => removeDir(profile))
+  }
 }
+
+/** Best effort, always: a cache file Chromium has not let go of yet is not worth failing over. */
+function removeDir(dir: string): void {
+  try {
+    rmSync(dir, { recursive: true, force: true, maxRetries: 2, retryDelay: 50 })
+  } catch {
+    /* still locked — the next capture run sweeps it */
+  }
+}
+
+/** Throw away the profiles of capture runs that are no longer running. */
+function sweepSmokeProfiles(temp: string): void {
+  try {
+    for (const name of readdirSync(temp)) {
+      if (!name.startsWith(SMOKE_PREFIX)) continue
+      const pid = Number(name.slice(SMOKE_PREFIX.length))
+      if (!Number.isInteger(pid) || pid <= 0 || pid === process.pid) continue
+      try {
+        process.kill(pid, 0) // throws when there is no such process; signal 0 sends nothing
+        continue // that run is still going — leave its profile alone
+      } catch {
+        removeDir(join(temp, name))
+      }
+    }
+  } catch {
+    /* no temp folder to read — nothing to sweep */
+  }
+}
+
+// A blind run is judged by a screenshot taken while nobody looks at the window, and Chromium
+// stops painting — and throttles timers in — a window it thinks is covered or in the background.
+// That is the right call for a user's app and the wrong one for a capture, so only these runs
+// turn it off (the matching `backgroundThrottling` is in createWindow).
+const blindRun =
+  !app.isPackaged &&
+  !!(
+    process.env.HAMSTER_CAPTURE ||
+    process.env.HAMSTER_EVENTS ||
+    process.env.HAMSTER_CLICK ||
+    process.env.HAMSTER_KEYS ||
+    process.env.HAMSTER_UNFOCUSED
+  )
+if (blindRun) app.commandLine.appendSwitch('disable-features', 'CalculateNativeWinOcclusion')
 
 // A second copy of the packaged app would fight over that one profile, so it hands off to the
 // running window instead of starting. dev/smoke runs have their own profiles and may overlap.
@@ -177,6 +231,9 @@ function createWindow(): void {
       contextIsolation: true,
       nodeIntegration: false,
       sandbox: true,
+      // a blind run is photographed in the background, where a throttled renderer would still be
+      // on the frame before last — and its HAMSTER_CLICK timers a second behind
+      ...(blindRun ? { backgroundThrottling: false } : {}),
     },
   })
   // a window that was left maximized comes back maximized; the bounds above are what it
@@ -254,14 +311,52 @@ function autoType(handle: PtyHandle): void {
     setTimeout(() => {
       // HAMSTER_TYPE_VIA=renderer feeds the keystrokes through xterm (so the effort interceptor sees them)
       if (process.env.HAMSTER_TYPE_VIA === 'renderer') send('debug:type', handle.id, text)
-      else handle.write(text)
+      else {
+        handle.write(text)
+        ptyLogInput(text) // the renderer path logs on its way back in through `pty:input`
+      }
     }, delay * (i + 1))
   })
 }
 
 // ---- IPC: terminals
 
-ipcMain.handle('pty:create', (_e, cols: number, rows: number, cwd?: string) => {
+/**
+ * debug/e2e: `HAMSTER_PTY_LOG=<file>` keeps everything the shells print, verbatim, and everything
+ * written *into* them as a line of its own — `>> \x15/compact`, then `>> \r` — with the control
+ * characters spelled out. The output alone cannot prove that a button sent Ctrl+U, the command and
+ * Enter as the chunks it claims to: the shell echoes none of that back in a readable form.
+ * Synchronous on purpose, so the file keeps the order things happened in. It holds whatever was
+ * typed, passwords included, which is one more reason it does not exist in a packaged build.
+ */
+function ptyLog(text: string): void {
+  const file = process.env.HAMSTER_PTY_LOG
+  if (!file || debugOff()) return
+  try {
+    appendFileSync(file, text)
+  } catch {
+    /* a log that cannot be written must not take the terminal down with it */
+  }
+}
+
+/** `\x15/compact` for Ctrl+U + "/compact", `\r` for Enter: every control character made visible. */
+function visible(data: string): string {
+  let out = ''
+  for (const ch of data) {
+    const code = ch.codePointAt(0) ?? 0
+    if (ch === '\\') out += '\\\\'
+    else if (code === 13) out += '\\r'
+    else if (code === 10) out += '\\n'
+    else if (code === 9) out += '\\t'
+    else if (code < 32 || code === 127) out += '\\x' + code.toString(16).padStart(2, '0')
+    else out += ch
+  }
+  return out
+}
+
+const ptyLogInput = (data: string): void => ptyLog(`\n>> ${visible(data)}\n`)
+
+ipcMain.handle('pty:create',(_e, cols: number, rows: number, cwd?: string) => {
   const detector = new PromptDetector((reason) => emitDesk({ kind: 'waiting', ptyId: handle.id, reason, ts: Date.now() }))
   const handle = spawnPty(
     cols,
@@ -269,7 +364,7 @@ ipcMain.handle('pty:create', (_e, cols: number, rows: number, cwd?: string) => {
     (data) => {
       send('pty:data', handle.id, data)
       detector.feed(data)
-      if (process.env.HAMSTER_PTY_LOG) void import('node:fs').then((fs) => fs.appendFileSync(process.env.HAMSTER_PTY_LOG!, data))
+      ptyLog(data)
     },
     (code) => {
       ptys.delete(handle.id)
@@ -289,6 +384,7 @@ ipcMain.handle('pty:create', (_e, cols: number, rows: number, cwd?: string) => {
 
 ipcMain.on('pty:input', (_e, id: number, data: string) => {
   ptys.get(id)?.write(data)
+  ptyLogInput(data)
   if (data.includes(String.fromCharCode(13)) || data.includes(String.fromCharCode(27))) {
     emitDesk({ kind: 'waiting_clear', ptyId: id, ts: Date.now() })
   }

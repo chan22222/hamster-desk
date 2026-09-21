@@ -28,7 +28,13 @@ export function TabGit({ cwd }: { cwd: string }) {
     <span className="tab-git" title={tip}>
       <IconBranch size={11} />
       <span className="tg-branch">{info.branch}</span>
-      {info.changed > 0 && <span className="tg-n">· {info.changed}</span>}
+      {info.changed > 0 && (
+        <span className="tg-n">
+          {/* its own span so a narrow window can drop it along with the branch name (git.css) */}
+          <span className="tg-dot">· </span>
+          {info.changed}
+        </span>
+      )}
     </span>
   )
 }

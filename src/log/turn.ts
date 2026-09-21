@@ -24,24 +24,7 @@ export interface TurnEnd {
 /** how much of the last sentence the card carries */
 const SAID_MAX = 60
 
-/**
- * `130000 → '2분 10초'`, `45000 → '45초'`, `3780000 → '1시간 3분'`.
- *
- * One unit below an hour, two above nothing: "1시간 3분 20초" is a stopwatch reading, and what the
- * card is for is "about how long did that take".
- */
-export function formatDuration(ms: number): string {
-  const total = Math.max(0, Math.round(ms / 1000))
-  if (total < 60) return `${total}초`
-  const minutes = Math.floor(total / 60)
-  if (minutes < 60) {
-    const rest = total % 60
-    return rest ? `${minutes}분 ${rest}초` : `${minutes}분`
-  }
-  const hours = Math.floor(minutes / 60)
-  const rest = minutes % 60
-  return rest ? `${hours}시간 ${rest}분` : `${hours}시간`
-}
+// How long a turn took is worded by `formatDuration` in src/i18n.ts, next to the other phrases.
 
 /** Collapse whitespace and cut to `max`, the way the feed trims a sentence. */
 function trim(text: string, max: number): string {

@@ -4,7 +4,7 @@
 
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
-import { formatDuration, summarizeTurn, type TurnSource } from '../../src/log/turn'
+import { summarizeTurn, type TurnSource } from '../../src/log/turn'
 import { parseStatus } from '../../electron/git'
 import { classifyDiffLine } from '../../src/git/diff'
 
@@ -39,15 +39,6 @@ test('summarizeTurn measures the turn itself when the event carries no duration'
 test('summarizeTurn claims nothing for a turn that started before we were watching', () => {
   const s = summarizeTurn({ ...session, turnStartedAt: null }, { ts: TURN_AT })
   assert.deepEqual([s.files, s.added, s.removed, s.durationMs], [0, 0, 0, 0])
-})
-
-test('formatDuration reads like a person saying it', () => {
-  assert.equal(formatDuration(130_000), '2분 10초')
-  assert.equal(formatDuration(45_000), '45초')
-  assert.equal(formatDuration(3_780_000), '1시간 3분')
-  assert.equal(formatDuration(120_000), '2분')
-  assert.equal(formatDuration(3_600_000), '1시간')
-  assert.equal(formatDuration(0), '0초')
 })
 
 test('parseStatus separates the branch header from the changed paths', () => {

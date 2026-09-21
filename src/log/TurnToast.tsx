@@ -4,8 +4,7 @@
 // this component unmounted).
 
 import { useDesk } from '../store'
-import { t } from '../i18n'
-import { formatDuration } from './turn'
+import { formatDuration, t } from '../i18n'
 import { IconClose } from '../widgets/icons'
 import './log.css'
 

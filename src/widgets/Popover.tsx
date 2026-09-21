@@ -17,7 +17,8 @@ interface PopoverProps {
 
 /**
  * The one popover in the app: opens under its trigger, closes on Esc or an outside click,
- * and flips to right-aligned when it would run off the window.
+ * and flips to right-aligned when it would run off the window. It never flips upward, so what does
+ * not fit under the trigger scrolls inside the panel instead of being cut off by the window edge.
  */
 export function Popover({ label, className = '', title, ariaLabel, disabled, width, debugClick, children }: PopoverProps) {
   const [open, setOpen] = useState(false)
@@ -87,7 +88,15 @@ export function Popover({ label, className = '', title, ariaLabel, disabled, wid
           className="pop"
           role="dialog"
           aria-label={ariaLabel ?? title}
-          style={{ left: pos?.left ?? 0, top: pos?.top ?? 0, width, visibility: pos ? 'visible' : 'hidden' }}
+          style={{
+            left: pos?.left ?? 0,
+            top: pos?.top ?? 0,
+            width,
+            visibility: pos ? 'visible' : 'hidden',
+            maxHeight: `calc(100vh - ${pos?.top ?? 0}px - 8px)`,
+            overflowX: 'hidden',
+            overflowY: 'auto',
+          }}
         >
           {typeof children === 'function' ? children(close) : children}
         </div>

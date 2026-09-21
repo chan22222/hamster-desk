@@ -11,7 +11,7 @@
 // renderer reload replays the whole backlog, R7) and a 5 s de-duplication per tag+terminal.
 
 import soundUrl from '../assets/notify.wav?url'
-import { t } from '../i18n'
+import { formatDuration, t } from '../i18n'
 import { shortName, useDesk, type SessionState } from '../store'
 import type { NotifyResult } from '@shared/events'
 
@@ -104,20 +104,6 @@ export function openNotifyTarget(tab: string, ptyId?: number | null): void {
 
 // ---- wording -------------------------------------------------------------------------------
 
-/** '2분 10초' / '45초' / '1시간 3분' — the shape `turnSummary` expects for its last field. */
-export function durationText(ms: number): string {
-  const total = Math.max(0, Math.round(ms / 1000))
-  if (total < 60) return `${total}초`
-  const mins = Math.floor(total / 60)
-  if (mins < 60) {
-    const s = total % 60
-    return s ? `${mins}분 ${s}초` : `${mins}분`
-  }
-  const h = Math.floor(mins / 60)
-  const m = mins % 60
-  return m ? `${h}시간 ${m}분` : `${h}시간`
-}
-
 /** The name on the tab the notification points at. */
 function tabLabel(sess: SessionState | null, tab: string): string {
   const st = useDesk.getState()
@@ -128,13 +114,13 @@ function tabLabel(sess: SessionState | null, tab: string): string {
 /** What a waiting terminal is waiting about: the last thing said, else the prompt that started it. */
 function waitingBody(sess: SessionState | null): string {
   const said = sess?.lastSaid?.trim() || sess?.lastPrompt?.trim() || ''
-  return said ? shortName(said, 90) : '터미널에서 답을 기다리고 있어요.'
+  return said ? shortName(said, 90) : t().notifyWaitingBody
 }
 
 function turnBody(sess: SessionState): string {
   const turn = sess.lastTurn
-  if (!turn) return '작업이 끝났어요.'
-  return t().turnSummary(turn.files, turn.added, turn.removed, durationText(turn.durationMs))
+  if (!turn) return t().notifyTurnBody
+  return t().turnSummary(turn.files, turn.added, turn.removed, formatDuration(turn.durationMs))
 }
 
 // ---- the gates -------------------------------------------------------------------------------

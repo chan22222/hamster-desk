@@ -49,11 +49,9 @@ export function probeTermVerbose(): void {
   void window.desk
     ?.info()
     .then((i) => {
-      // `debugCapture` is sent by main but is not in the frozen `info()` type yet, hence the cast.
-      // It is the flag that matters most: main only forwards `[`-tagged lines during a capture run,
-      // and a run driven by HAMSTER_KEYS alone sets none of the others.
-      const capture = (i as { debugCapture?: boolean }).debugCapture === true
-      verbose = capture || i.debugEvents !== null || i.debugClicks.length > 0 || i.debugPrefs !== null || i.unfocused
+      // `debugCapture` is the flag that matters most: main only forwards `[`-tagged lines during a
+      // capture run, and a run driven by HAMSTER_KEYS alone sets none of the others.
+      verbose = i.debugCapture || i.debugEvents !== null || i.debugClicks.length > 0 || i.debugPrefs !== null || i.unfocused
     })
     .catch(() => undefined)
 }
