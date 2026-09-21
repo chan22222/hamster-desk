@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState } from 'react'
 import * as THREE from 'three'
-import { debugClick, feedLife, runInTerminal, setFeedLife, useDesk, type Hamster, type HamsterState, type SessionState } from '../store'
+import { feedLife, runInTerminal, setFeedLife, useDesk, type Hamster, type HamsterState, type SessionState } from '../store'
 import { animFor, screenColor, statusDot, tintFor, type IsoAnim } from './anim'
 import { modelSkin } from './skins'
 import { IconHome, IconMap, IconMinus, IconPlus, IconTarget } from '../widgets/icons'
@@ -441,16 +441,8 @@ export function DeskStudio({ session, height }: { session: SessionState | null; 
   const runInShell = (cmd: string): void => {
     if (welcomePty !== null) runInTerminal(welcomePty, cmd)
   }
-  // debug/e2e: `HAMSTER_CLICK=welcome-run` presses `claude 실행` by itself once the tab has a pty
-  // and the shell has had time to print a prompt, so a blind capture run can prove it really
-  // starts Claude Code. Never armed in a packaged build (main.ts drops the env var there).
-  const autoClicked = useRef(false)
-  useEffect(() => {
-    if (autoClicked.current || welcomePty === null || debugClick() !== 'welcome-run') return
-    autoClicked.current = true
-    const t = setTimeout(() => wrapRef.current?.querySelector<HTMLButtonElement>('.owa-run')?.click(), 3000)
-    return () => clearTimeout(t)
-  }, [welcomePty])
+  // `claude 실행` carries data-debug-click="welcome-run"; src/dev/debug.ts presses it, like every
+  // other button a blind capture run drives. (This used to be a special case right here.)
   const size = useRef({ w: 800, h: height })
   const sessionRef = useRef(session)
   sessionRef.current = session
@@ -1001,7 +993,7 @@ export function DeskStudio({ session, height }: { session: SessionState | null; 
           </p>
           {welcomePty !== null && (
             <div className="office-welcome-actions">
-              <button className="owa-run" onClick={() => runInShell('claude')} title="이 터미널에서 claude 시작">
+              <button className="owa-run" data-debug-click="welcome-run" onClick={() => runInShell('claude')} title="이 터미널에서 claude 시작">
                 claude 실행
               </button>
               <button onClick={() => runInShell('claude --continue')} title="이 폴더의 마지막 대화를 이어서 시작">

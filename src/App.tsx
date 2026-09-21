@@ -4,7 +4,7 @@ import { setLang } from './i18n'
 import { DeskStudio } from './desk/DeskStudio'
 import { TerminalPane } from './Terminal'
 import { Sidebar } from './sidebar/Sidebar'
-import { lastCwd, rememberRecent, setLastCwd } from './sidebar/recent'
+import { rememberRecent, setLastCwd } from './sidebar/recent'
 import { UsageMeters } from './widgets/Usage'
 import { UpdatePill } from './widgets/Version'
 import { MoreMenu } from './widgets/MoreMenu'
@@ -13,6 +13,15 @@ import { Popover } from './widgets/Popover'
 import { usePainted } from './widgets/theme'
 import { IconClose, IconSidebar } from './widgets/icons'
 import { startReplay } from './dev/replay-driver'
+import { installDebugHooks } from './dev/debug'
+import { useGlobalShortcuts } from './shortcuts'
+import { restoreWorkspaces } from './workspaces-persist'
+import { SessionBar } from './session/SessionBar'
+import { TabContext } from './session/ContextMeter'
+import { TabGit } from './git/GitChip'
+import { TurnToast } from './log/TurnToast'
+import { Banner } from './notify/Banner'
+import { MiniShell } from './mini/MiniShell'
 
 /** studio size limits, shared by the splitters and their double-click reset */
 const DESK_H = { min: 220, max: 700, def: 420 }
@@ -57,6 +66,7 @@ export default function App() {
   const ptyWaiting = useDesk((s) => s.ptyWaiting)
   const prefs = useDesk((s) => s.prefs)
   const setPrefs = useDesk((s) => s.setPrefs)
+  const mini = useDesk((s) => s.mini)
   const painted = usePainted()
   const booted = useRef(false)
   // the settings file is read over IPC, so the first frame would be the defaults; hide it instead
@@ -92,7 +102,7 @@ export default function App() {
     booted.current = true
     void hydrateUi()
       .then(() => window.desk?.info())
-      .then((info) => {
+      .then(async (info) => {
         if (!info) return
         setLang(useDesk.getState().prefs.lang, info.claudeLanguage)
         setDebugClick(info.debugClick)
@@ -104,7 +114,8 @@ export default function App() {
           const n = Number(demoAgents ?? 0)
           if (n > 0) void import('./dev/demo').then((m) => m.startDemo(apply, n))
         }
-        if (useDesk.getState().workspaces.length === 0) addWorkspace(lastCwd() || info.home)
+        await restoreWorkspaces(info.home)
+        installDebugHooks(info)
       })
       .finally(() => setBooting(false))
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -115,9 +126,10 @@ export default function App() {
     document.documentElement.dataset.theme = painted
   }, [painted])
 
+  // mini mode is always on top, whatever the preference says; leaving it puts the preference back
   useEffect(() => {
-    window.desk?.win.alwaysOnTop(prefs.onTop)
-  }, [prefs.onTop])
+    window.desk?.win.alwaysOnTop(mini || prefs.onTop)
+  }, [mini, prefs.onTop])
 
   // the studio beside the terminal fills the column, which only the DOM knows the height of
   useEffect(() => {
@@ -130,17 +142,7 @@ export default function App() {
     return () => ro.disconnect()
   }, [])
 
-  // Ctrl+B: the sidebar, wherever the focus is (the terminal lets this one through)
-  useEffect(() => {
-    const onKey = (e: KeyboardEvent): void => {
-      if (!e.ctrlKey || e.altKey || e.shiftKey || e.key.toLowerCase() !== 'b') return
-      e.preventDefault()
-      const s = useDesk.getState()
-      s.setPrefs({ showSidebar: !s.prefs.showSidebar })
-    }
-    window.addEventListener('keydown', onKey)
-    return () => window.removeEventListener('keydown', onKey)
-  }, [])
+  useGlobalShortcuts()
 
   const st = { sessions, workspaces }
   const externals = externalSessions(sessions)
@@ -202,6 +204,9 @@ export default function App() {
   )
   const studio = <DeskStudio session={active} height={beside ? Math.max(1, colH) : prefs.deskH} />
 
+  // mini mode takes the whole window: just the studio and a thin status line, always on top
+  if (mini) return <MiniShell session={active} />
+
   return (
     <div className="app" data-booting={booting ? '' : undefined}>
       <header className="topbar">
@@ -221,6 +226,8 @@ export default function App() {
                 <button className="tab-main" onClick={() => setActiveTab(id)} title={w.cwd}>
                   <span className={`dot ${s ? (busy ? 'busy' : 'idle') : ''} ${waiting ? 'wait' : ''}`} />
                   <span className="tab-label">{s?.title || w.title}</span>
+                  <TabContext session={s ?? null} />
+                  <TabGit cwd={w.cwd} />
                   {n > 1 && <span className="count">🐹×{n}</span>}
                 </button>
                 <TabClose busy={!!s} onClose={() => removeWorkspace(w.id)} />
@@ -236,6 +243,7 @@ export default function App() {
                 <button className="tab-main" onClick={() => setActiveTab(id)} title={`${s.info.cwd} (다른 터미널에서 실행 중)`}>
                   <span className={`dot ${s.info.status === 'busy' ? 'busy' : 'idle'}`} />
                   <span className="tab-label">{s.title || s.info.name || s.info.sessionId.slice(0, 8)}</span>
+                  <TabContext session={s} />
                   {s.order.length > 1 && <span className="count">🐹×{s.order.length}</span>}
                 </button>
               </div>
@@ -260,6 +268,7 @@ export default function App() {
       <div className="body">
         {prefs.showSidebar && <Sidebar start={activeWs?.cwd ?? workspaces[0]?.cwd ?? ''} session={active} onOpen={openTerminal} />}
         <div ref={colRef} className={`column ${beside ? 'is-beside' : ''}`} style={{ ['--desk-w' as string]: `${prefs.deskW}px` }}>
+          <Banner />
           {!prefs.folded && !beside && (
             <>
               {studio}
@@ -267,6 +276,7 @@ export default function App() {
             </>
           )}
           <div className="panes">
+            <SessionBar ws={activeWs} session={active} />
             {workspaces.map((w) => (
               <TerminalPane key={w.id} ws={w} visible={activeTab === `ws:${w.id}`} />
             ))}
@@ -286,6 +296,7 @@ export default function App() {
               {studio}
             </>
           )}
+          <TurnToast />
         </div>
       </div>
     </div>

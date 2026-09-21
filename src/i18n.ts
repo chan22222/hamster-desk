@@ -47,6 +47,12 @@ export interface Strings {
   browsing(label: string): string
   newlyWritten: string
   overwritten: string
+  /** OS notification titles; `tab` is the terminal tab the notification points at */
+  notifyPermission(tab: string): string
+  notifyQuestion(tab: string): string
+  notifyTurnEnd(tab: string): string
+  /** the one line a finished turn comes to: '파일 3 · +120 −40 · 2분 10초' */
+  turnSummary(files: number, added: number, removed: number, dur: string): string
 }
 
 const ko: Strings = {
@@ -62,6 +68,10 @@ const ko: Strings = {
   browsing: (l) => `브라우저: ${l}`,
   newlyWritten: '새로 씀',
   overwritten: '덮어씀',
+  notifyPermission: (tab) => `허락해 주세요 · ${tab}`,
+  notifyQuestion: (tab) => `질문 있어요 · ${tab}`,
+  notifyTurnEnd: (tab) => `턴 완료 · ${tab}`,
+  turnSummary: (files, added, removed, dur) => `파일 ${files} · +${added} −${removed} · ${dur}`,
 }
 
 const en: Strings = {
@@ -77,6 +87,10 @@ const en: Strings = {
   browsing: (l) => `Browsing: ${l}`,
   newlyWritten: 'new file',
   overwritten: 'overwritten',
+  notifyPermission: (tab) => `Need your OK · ${tab}`,
+  notifyQuestion: (tab) => `I have a question · ${tab}`,
+  notifyTurnEnd: (tab) => `Turn done · ${tab}`,
+  turnSummary: (files, added, removed, dur) => `${files} file${files === 1 ? '' : 's'} · +${added} −${removed} · ${dur}`,
 }
 
 let pref: PrefLang = 'auto'

@@ -9,6 +9,8 @@ interface PopoverProps {
   ariaLabel?: string
   disabled?: boolean
   width?: number
+  /** debug/e2e: the name `HAMSTER_CLICK` presses this trigger by (src/dev/debug.ts) */
+  debugClick?: string
   /** the panel body; a function gets a `close` callback */
   children: ReactNode | ((close: () => void) => ReactNode)
 }
@@ -17,7 +19,7 @@ interface PopoverProps {
  * The one popover in the app: opens under its trigger, closes on Esc or an outside click,
  * and flips to right-aligned when it would run off the window.
  */
-export function Popover({ label, className = '', title, ariaLabel, disabled, width, children }: PopoverProps) {
+export function Popover({ label, className = '', title, ariaLabel, disabled, width, debugClick, children }: PopoverProps) {
   const [open, setOpen] = useState(false)
   const [pos, setPos] = useState<{ left: number; top: number } | null>(null)
   const btnRef = useRef<HTMLButtonElement>(null)
@@ -73,6 +75,7 @@ export function Popover({ label, className = '', title, ariaLabel, disabled, wid
         aria-label={ariaLabel}
         aria-haspopup="dialog"
         aria-expanded={open}
+        data-debug-click={debugClick}
         disabled={disabled}
         onClick={() => setOpen((v) => !v)}
       >

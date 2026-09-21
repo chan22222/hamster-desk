@@ -6,9 +6,31 @@ import { Popover } from './Popover'
 import { IconCheck, IconMore } from './icons'
 import { VersionSection } from './Version'
 
-function CheckRow({ on, label, hint, disabled, onClick }: { on: boolean; label: string; hint?: string; disabled?: boolean; onClick: () => void }) {
+function CheckRow({
+  on,
+  label,
+  hint,
+  disabled,
+  debugClick,
+  onClick,
+}: {
+  on: boolean
+  label: string
+  hint?: string
+  disabled?: boolean
+  /** debug/e2e: the name `HAMSTER_CLICK` presses this row by (src/dev/debug.ts) */
+  debugClick?: string
+  onClick: () => void
+}) {
   return (
-    <button className={`pop-check ${on ? 'is-on' : ''}`} role="menuitemcheckbox" aria-checked={on} disabled={disabled} onClick={onClick}>
+    <button
+      className={`pop-check ${on ? 'is-on' : ''}`}
+      role="menuitemcheckbox"
+      aria-checked={on}
+      data-debug-click={debugClick}
+      disabled={disabled}
+      onClick={onClick}
+    >
       <span className="pop-tick">{on && <IconCheck size={14} />}</span>
       <span className="pop-label">{label}</span>
       {hint && <span className="dim">{hint}</span>}
@@ -41,6 +63,8 @@ const SIDES: { value: DeskSide; label: string }[] = [
   { value: 'top', label: '위' },
   { value: 'right', label: '오른쪽' },
 ]
+/** the sizes worth one click; anything else is still reachable with Ctrl+= / Ctrl+− */
+const TERM_FONTS = ['12', '13', '14', '16'].map((v) => ({ value: v, label: v }))
 
 /** 1234 → '1.2k'; small numbers stay exact so a first summary reads as '550', not '0.6k'. */
 function compact(n: number): string {
@@ -93,6 +117,9 @@ function SettingsFile() {
 function Body({ onUpdate }: { onUpdate: () => void }) {
   const prefs = useDesk((s) => s.prefs)
   const setPrefs = useDesk((s) => s.setPrefs)
+  const mini = useDesk((s) => s.mini)
+  const toggleMini = useDesk((s) => s.toggleMini)
+  const notify = prefs.notify
   const [bubble, setBubble] = useState<BubbleAvailability | null>(null)
 
   useEffect(() => {
@@ -110,8 +137,17 @@ function Body({ onUpdate }: { onUpdate: () => void }) {
         onClick={() => (prefs.showSidebar && prefs.showLog ? setPrefs({ showLog: false }) : setPrefs({ showSidebar: true, showLog: true }))}
       />
       <CheckRow on={prefs.onTop} label="항상 위" onClick={() => setPrefs({ onTop: !prefs.onTop })} />
+      <CheckRow on={mini} label="미니 모드" hint="Ctrl+Shift+M" debugClick="mini-toggle" onClick={toggleMini} />
       <Segmented label="책상 위치" value={prefs.deskSide} options={SIDES} onChange={(v) => setPrefs({ deskSide: v })} />
       <Segmented label="테마" value={prefs.theme} options={THEMES} onChange={(v) => setPrefs({ theme: v })} />
+      <Segmented label="터미널 글꼴" value={String(prefs.termFont)} options={TERM_FONTS} onChange={(v) => setPrefs({ termFont: Number(v) })} />
+
+      <div className="pop-sep" />
+      <div className="pop-head">알림</div>
+      <CheckRow on={notify.permission} label="권한 요청" onClick={() => setPrefs({ notify: { ...notify, permission: !notify.permission } })} />
+      <CheckRow on={notify.question} label="질문" onClick={() => setPrefs({ notify: { ...notify, question: !notify.question } })} />
+      <CheckRow on={notify.turnEnd} label="턴 완료" onClick={() => setPrefs({ notify: { ...notify, turnEnd: !notify.turnEnd } })} />
+      <CheckRow on={notify.sound} label="소리" onClick={() => setPrefs({ notify: { ...notify, sound: !notify.sound } })} />
 
       <div className="pop-sep" />
       <div className="pop-head">말풍선</div>
@@ -147,7 +183,7 @@ function Body({ onUpdate }: { onUpdate: () => void }) {
 /** The quiet corner of the top bar: view toggles, theme, bubble settings and the CLI version. */
 export function MoreMenu({ onUpdate }: { onUpdate: () => void }) {
   return (
-    <Popover className="icon-btn" label={<IconMore />} ariaLabel="설정" title="설정" width={268}>
+    <Popover className="icon-btn" label={<IconMore />} ariaLabel="설정" title="설정" width={268} debugClick="more">
       {() => <Body onUpdate={onUpdate} />}
     </Popover>
   )

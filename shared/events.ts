@@ -189,3 +189,101 @@ export interface BubbleState {
 
 /** Whatever the renderer wants remembered (language, open panels, …); shallow-merged, JSON only. */
 export type UiState = Record<string, unknown>
+
+// ---- OS notifications (electron/notify.ts)
+
+export interface NotifyRequest {
+  title: string
+  body: string
+  /** what the notification is about; also the key the renderer de-duplicates on */
+  tag: 'permission' | 'question' | 'turn'
+  /** the tab id to open when the notification is clicked (`ws:<id>` / `session:<id>`) */
+  tab: string
+}
+
+/** `unsupported` = this OS/build cannot show toasts at all; `failed` = it tried and the OS refused. */
+export type NotifyResult = 'shown' | 'failed' | 'unsupported'
+
+// ---- past conversations (electron/transcripts.ts)
+
+/** One `~/.claude/projects/<slug>/<id>.jsonl`, summarized without parsing the whole file. */
+export interface TranscriptEntry {
+  sessionId: string
+  path: string
+  title: string
+  subtitle: string
+  /** unix ms of the first user record */
+  startedAt: number
+  /** unix ms of the last record seen in the tail */
+  lastAt: number
+  branch: string | null
+  /** bytes */
+  size: number
+  /** a claude is running this session right now */
+  live: boolean
+}
+
+// ---- git (electron/git.ts — read-only commands only)
+
+export interface GitInfo {
+  repo: boolean
+  branch: string | null
+  /** number of changed paths in `git status --porcelain` */
+  changed: number
+  ahead: number
+  behind: number
+  /** unix ms this snapshot was taken */
+  at: number
+  error: string | null
+}
+
+export interface GitDiff {
+  text: string
+  /** the diff was longer than the cap and the text is cut */
+  truncated: boolean
+  /** the file is not in git yet, so there is nothing to diff */
+  untracked: boolean
+  error: string | null
+}
+
+// ---- turn summaries (src/log/turn.ts)
+
+export interface TurnSummary {
+  /** distinct files touched during the turn */
+  files: number
+  added: number
+  removed: number
+  durationMs: number
+  /** the last thing the main hamster said, trimmed */
+  said: string
+  /** unix ms the turn ended */
+  at: number
+}
+
+/** A `TurnSummary` on screen: it knows which session and tab it belongs to. */
+export type TurnToast = TurnSummary & { sessionId: string; tab: string }
+
+// ---- speech bubble log (src/log/FeedLog.tsx)
+
+/** A permanent copy of one feed row, kept per session after the bubble itself expires. */
+export interface LogItem {
+  id: string
+  hid: string
+  hidName: string
+  kind: 'say' | 'act'
+  tone: string
+  text: string
+  raw: string
+  ts: number
+  count: number
+}
+
+// ---- window placement (electron/window-state.ts)
+
+export interface WindowState {
+  x: number
+  y: number
+  width: number
+  height: number
+  maximized: boolean
+}

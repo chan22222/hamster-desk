@@ -1,5 +1,5 @@
 import { create } from 'zustand'
-import type { DeskEvent, EffortLevel, SessionInfo, StatusSnapshot, ToolAction, VersionInfo } from '@shared/events'
+import type { DeskEvent, EffortLevel, GitInfo, LogItem, SessionInfo, StatusSnapshot, ToolAction, TurnSummary, TurnToast, VersionInfo } from '@shared/events'
 import { setLang, t, type PrefLang } from './i18n'
 import { cancelSummary, requestSummary } from './bubbles/summarize'
 
@@ -105,7 +105,18 @@ export interface SessionState {
   effort: string | null
   model: string | null
   status: StatusSnapshot | null
+  /** when the current turn's prompt arrived, so a `turn_end` can measure the turn */
+  turnStartedAt: number | null
+  /** the last thing the main hamster said, raw (RAW_MAX chars) */
+  lastSaid: string
+  /** what the last finished turn came to */
+  lastTurn: TurnSummary | null
+  /** a permanent copy of the feed rows; bubbles expire, this does not (LOG_MAX rows) */
+  log: LogItem[]
 }
+
+/** how many feed rows one session keeps in `log` */
+export const LOG_MAX = 500
 
 /** An embedded terminal tab. Its claude session (if any) is matched through process ancestry. */
 export interface Workspace {
@@ -142,6 +153,17 @@ export interface Prefs {
   theme: ThemeMode
   /** the studio's automatic camera (the `자동` button) */
   autoCam: boolean
+  /** which OS notifications to raise while the window is in the background, and whether they beep */
+  notify: {
+    permission: boolean
+    question: boolean
+    turnEnd: boolean
+    sound: boolean
+  }
+  /** terminal font size in px (10–24) */
+  termFont: number
+  /** the sidebar's "말풍선 로그" section is expanded */
+  showFeedLog: boolean
 }
 
 export const DEFAULT_PREFS: Prefs = {
@@ -158,6 +180,9 @@ export const DEFAULT_PREFS: Prefs = {
   lang: 'auto',
   theme: 'light',
   autoCam: true,
+  notify: { permission: true, question: true, turnEnd: true, sound: false },
+  termFont: 14,
+  showFeedLog: true,
 }
 
 interface DeskStore {
@@ -165,16 +190,30 @@ interface DeskStore {
   workspaces: Workspace[]
   /** active tab: a workspace (`ws:<id>`) or an external session (`session:<id>`) */
   activeTab: string | null
-  ptyWaiting: Record<number, 'permission' | 'question'>
+  /** which terminals are sitting on a prompt, and since when (the age gates the notification) */
+  ptyWaiting: Record<number, { reason: 'permission' | 'question'; ts: number }>
   /** newest status-line snapshot across sessions (rate limits are account-wide) */
   usage: StatusSnapshot | null
   version: VersionInfo | null
   prefs: Prefs
-  toast: { text: string; ts: number } | null
+  /** the small always-on-top window; not remembered across restarts */
+  mini: boolean
+  /** what the last finished turn came to, while the card is still up */
+  toast: TurnToast | null
   /** the last request to put the caret back in a terminal, so `TerminalPane` can act on it */
   focusTerminal: { ptyId: number; at: number } | null
-  setToast(text: string): void
+  /** the last request to point the studio camera at one hamster */
+  focusHamster: { sessionId: string; hid: string; at: number } | null
+  /** the last request to open the terminal search box */
+  searchRequest: { wsId: number; q?: string; at: number } | null
+  /** read-only git snapshots, keyed by `gitKey(cwd)` */
+  git: Record<string, GitInfo>
+  toggleMini(): void
+  setToast(t: TurnToast | null): void
   requestTerminalFocus(ptyId: number): void
+  requestHamsterFocus(sessionId: string, hid: string): void
+  requestTermSearch(wsId: number, q?: string): void
+  setGit(cwd: string, info: GitInfo): void
   apply(e: DeskEvent): void
   setActiveTab(id: string | null): void
   addWorkspace(cwd: string, title?: string, initialCommand?: string): Workspace
@@ -273,11 +312,19 @@ const prefsVersionOf = (raw: unknown): number => {
 /** what goes in the file: the prefs plus the stamp the migrations above key off */
 const storedPrefs = (p: Prefs): UiBag => ({ ...p, v: PREFS_VERSION })
 
-/** `showFolders` was this pref's name before the sidebar replaced the folder panel. */
-function adoptPrefs(raw: unknown): Prefs {
+/**
+ * Turn whatever is in the settings file into a complete `Prefs`. Exported for the contract test:
+ * the migrations here are the only thing standing between an old ui.json and a broken UI.
+ *
+ * `showFolders` was this pref's name before the sidebar replaced the folder panel.
+ */
+export function adoptPrefs(raw: unknown): Prefs {
   const { showFolders, v: _v, ...rest } = (raw && typeof raw === 'object' ? raw : {}) as Partial<Prefs> & { showFolders?: boolean; v?: number }
   if (prefsVersionOf(raw) < 2) delete rest.showLog // meaning changed: take the new default instead
   const prefs: Prefs = { ...DEFAULT_PREFS, ...rest }
+  // `notify` is the one nested group: a spread would replace it wholesale, so a file written
+  // before a toggle existed would come back missing that key instead of taking its default.
+  prefs.notify = { ...DEFAULT_PREFS.notify, ...(rest.notify && typeof rest.notify === 'object' ? rest.notify : undefined) }
   if (rest.showSidebar === undefined && typeof showFolders === 'boolean') prefs.showSidebar = showFolders
   setLang(prefs.lang)
   return prefs
@@ -412,12 +459,25 @@ function newSession(info: SessionInfo): SessionState {
     effort: null,
     model: null,
     status: null,
+    turnStartedAt: null,
+    lastSaid: '',
+    lastTurn: null,
+    log: [],
   }
 }
 
 function baseName(p: string): string {
   const i = Math.max(p.lastIndexOf('/'), p.lastIndexOf('\\'))
   return i >= 0 ? p.slice(i + 1) : p
+}
+
+/**
+ * The key one folder's git snapshot is stored under. Windows hands the same folder back with a
+ * different case and sometimes a trailing separator (`C:\p\` from a drag, `c:\p` from a tab), and
+ * those must not become two entries.
+ */
+export function gitKey(cwd: string): string {
+  return cwd.replace(/[\\/]+$/, '').toLowerCase()
 }
 
 export function shortName(text: string, max = 22): string {
@@ -588,10 +648,25 @@ export const useDesk = create<DeskStore>((set, get) => {
     usage: null,
     version: null,
     prefs: loadPrefs(),
+    mini: false,
     toast: null,
     focusTerminal: null,
-    setToast: (text) => set({ toast: { text, ts: Date.now() } }),
+    focusHamster: null,
+    searchRequest: null,
+    git: {},
+    toggleMini() {
+      const on = !get().mini
+      // paint the new shape right away, then take main's word for it: the window may refuse
+      // (nothing to resize in the browser preview, or the resize did not stick)
+      set({ mini: on })
+      const p = window.desk?.win.mini(on)
+      if (p) void p.then((real) => set({ mini: real }))
+    },
+    setToast: (t) => set({ toast: t }),
     requestTerminalFocus: (ptyId) => set({ focusTerminal: { ptyId, at: Date.now() } }),
+    requestHamsterFocus: (sessionId, hid) => set({ focusHamster: { sessionId, hid, at: Date.now() } }),
+    requestTermSearch: (wsId, q) => set({ searchRequest: { wsId, q, at: Date.now() } }),
+    setGit: (cwd, info) => set({ git: { ...get().git, [gitKey(cwd)]: info } }),
 
     setActiveTab: (id) => set({ activeTab: id }),
     addWorkspace(cwd, title, initialCommand) {
@@ -841,7 +916,7 @@ export const useDesk = create<DeskStore>((set, get) => {
           return
         }
         case 'waiting': {
-          set({ ptyWaiting: { ...st.ptyWaiting, [e.ptyId]: e.reason } })
+          set({ ptyWaiting: { ...st.ptyWaiting, [e.ptyId]: { reason: e.reason, ts: e.ts } } })
           const s = sessionOfPty(e.ptyId)
           if (!s) return
           updSession(s.info.sessionId, (ss) => ({ ...ss, waiting: true }))

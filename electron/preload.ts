@@ -1,5 +1,21 @@
 import { contextBridge, ipcRenderer } from 'electron'
-import type { BubbleRequest, BubbleResult, BubbleState, DeskEvent, DirEntry, FileEntry, PtyInfo, SessionInfo, UiState, VersionInfo } from '../shared/events'
+import type {
+  BubbleRequest,
+  BubbleResult,
+  BubbleState,
+  DeskEvent,
+  DirEntry,
+  FileEntry,
+  GitDiff,
+  GitInfo,
+  NotifyRequest,
+  NotifyResult,
+  PtyInfo,
+  SessionInfo,
+  TranscriptEntry,
+  UiState,
+  VersionInfo,
+} from '../shared/events'
 
 export interface SeqEvent {
   seq: number
@@ -58,8 +74,39 @@ export interface DeskBridge {
   win: {
     alwaysOnTop(on: boolean): void
     opacity(v: number): void
+    /** enter/leave mini mode; resolves to the state the window actually ended up in */
+    mini(on: boolean): Promise<boolean>
   }
-  info(): Promise<{ version: string; platform: string; home: string; debugPrefs: Record<string, unknown> | null; debugClick: string | null; claudeLanguage: string | null; uiPath: string }>
+  /** OS notifications when the window is in the background (electron/notify.ts) */
+  notify: {
+    show(req: NotifyRequest): Promise<NotifyResult>
+    /** the user clicked a notification: its `tab` is the one to open */
+    onClick(cb: (tab: string) => void): () => void
+  }
+  /** past conversations of one folder, from the transcript files (electron/transcripts.ts) */
+  transcripts: {
+    list(cwd: string): Promise<TranscriptEntry[]>
+  }
+  /** read-only git for one folder (electron/git.ts) */
+  git: {
+    info(cwd: string): Promise<GitInfo>
+    diff(cwd: string, file: string): Promise<GitDiff>
+  }
+  info(): Promise<{
+    version: string
+    platform: string
+    home: string
+    debugPrefs: Record<string, unknown> | null
+    debugClick: string | null
+    /** debug/e2e: events to replay into the store once the app is up (HAMSTER_EVENTS) */
+    debugEvents: DeskEvent[] | null
+    /** debug/e2e: buttons to press by themselves, `at` ms after boot (HAMSTER_CLICK) */
+    debugClicks: { name: string; at: number }[]
+    /** debug/e2e: the window was shown without focus (HAMSTER_UNFOCUSED) */
+    unfocused: boolean
+    claudeLanguage: string | null
+    uiPath: string
+  }>
   /** smoke tests only: text to feed through xterm as if typed */
   onDebugType(cb: (ptyId: number, text: string) => void): () => void
 }
@@ -119,6 +166,22 @@ const bridge: DeskBridge = {
   win: {
     alwaysOnTop: (on) => ipcRenderer.send('win:alwaysOnTop', on),
     opacity: (v) => ipcRenderer.send('win:opacity', v),
+    mini: (on) => ipcRenderer.invoke('win:mini', on),
+  },
+  notify: {
+    show: (req) => ipcRenderer.invoke('notify:show', req),
+    onClick(cb) {
+      const h = (_e: unknown, tab: string): void => cb(tab)
+      ipcRenderer.on('notify:click', h)
+      return () => ipcRenderer.off('notify:click', h)
+    },
+  },
+  transcripts: {
+    list: (cwd) => ipcRenderer.invoke('transcripts:list', cwd),
+  },
+  git: {
+    info: (cwd) => ipcRenderer.invoke('git:info', cwd),
+    diff: (cwd, file) => ipcRenderer.invoke('git:diff', cwd, file),
   },
   info: () => ipcRenderer.invoke('app:info'),
   onDebugType(cb) {

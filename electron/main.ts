@@ -2,7 +2,7 @@ import { app, BrowserWindow, clipboard, dialog, ipcMain, shell } from 'electron'
 import { readFileSync } from 'node:fs'
 import { join } from 'node:path'
 import { DeskWatcher } from './watcher'
-import type { BubbleRequest, DeskEvent, FileEntry, StatusSnapshot, UiState } from '../shared/events'
+import type { BubbleRequest, DeskEvent, FileEntry, NotifyRequest, StatusSnapshot, UiState } from '../shared/events'
 import { spawnPty, PromptDetector, type PtyHandle } from './pty'
 import { StatusWatcher, installStatusLine, uninstallStatusLine, statusLineState } from './statusline'
 import { flushUi, loadUi, saveUi, uiPath } from './ui-store'
@@ -10,6 +10,10 @@ import { checkVersion } from './version'
 import { BubbleSummarizer } from './summarize'
 import { cleanupLegacyHarness } from './legacy'
 import { claudeDir } from './watcher/paths'
+import { showNotification } from './notify'
+import { attachWindowStateSaver, readWindowState, setMini } from './window-state'
+import { listTranscripts } from './transcripts'
+import { gitDiff, gitInfo } from './git'
 
 // The portable exe, `npm run dev` and the smoke runs all landed on the same %APPDATA%\hamster-desk
 // profile: whichever started second could not lock the caches ("Unable to move the cache",
@@ -53,10 +57,100 @@ function emitDesk(ev: DeskEvent): void {
   send('desk:event', item)
 }
 
+// ---- debug/e2e knobs ----------------------------------------------------------------------
+// None of these exist in a packaged build: `app.isPackaged` gates every one of them, so the env
+// vars are inert for a user who happens to have them set. They let a blind capture run prove a
+// claim (a button really does that, a shortcut really goes through) without a claude session.
+
+/** Nothing here is available once the app is packaged. */
+const debugOff = (): boolean => app.isPackaged
+
+/** `HAMSTER_EVENTS='[…]'` — desk events the renderer replays into the store (src/dev/debug.ts). */
+function debugEvents(): DeskEvent[] | null {
+  if (debugOff() || !process.env.HAMSTER_EVENTS) return null
+  try {
+    const v: unknown = JSON.parse(process.env.HAMSTER_EVENTS)
+    return Array.isArray(v) ? (v as DeskEvent[]) : null
+  } catch {
+    return null
+  }
+}
+
+/** `HAMSTER_CLICK='more@3000|mini-toggle@4000'`; a bare name keeps the old meaning (`@3000`). */
+function debugClicks(): { name: string; at: number }[] {
+  if (debugOff() || !process.env.HAMSTER_CLICK) return []
+  return process.env.HAMSTER_CLICK.split('|')
+    .map((s) => s.trim())
+    .filter(Boolean)
+    .map((step) => {
+      const i = step.lastIndexOf('@')
+      if (i < 0) return { name: step, at: 3000 }
+      const at = Number(step.slice(i + 1))
+      return { name: step.slice(0, i), at: Number.isFinite(at) ? at : 3000 }
+    })
+    .filter((c) => c.name.length > 0)
+}
+
+const unfocusedStart = (): boolean => !debugOff() && process.env.HAMSTER_UNFOCUSED === '1'
+
+/** `ctrl`/`cmd` spelled the way `sendInputEvent` wants them. */
+const KEY_MODS: Record<string, 'shift' | 'control' | 'alt' | 'meta'> = {
+  ctrl: 'control',
+  control: 'control',
+  shift: 'shift',
+  alt: 'alt',
+  meta: 'meta',
+  cmd: 'meta',
+  command: 'meta',
+}
+
+/**
+ * `HAMSTER_KEYS='ctrl+f@6000|ctrl+shift+m@9000'` — real key events pushed into the window, so a
+ * shortcut is proven on the path it actually takes (a window `keydown`) rather than by calling
+ * its handler directly.
+ */
+function scheduleKeys(): void {
+  if (debugOff() || !process.env.HAMSTER_KEYS) return
+  for (const step of process.env.HAMSTER_KEYS.split('|')) {
+    const s = step.trim()
+    if (!s) continue
+    const i = s.lastIndexOf('@')
+    const parsed = i < 0 ? NaN : Number(s.slice(i + 1))
+    const at = Number.isFinite(parsed) ? parsed : 5000
+    const parts = (i < 0 ? s : s.slice(0, i)).toLowerCase().split('+').map((p) => p.trim()).filter(Boolean)
+    const keyCode = parts.pop() ?? ''
+    if (!keyCode) continue
+    const modifiers = parts.map((m) => KEY_MODS[m]).filter(Boolean)
+    setTimeout(() => {
+      const wc = win?.webContents
+      if (!wc) return
+      // sendInputEvent only reaches the page while the window is focused, and a capture run has
+      // usually lost it to whatever terminal started it. HAMSTER_UNFOCUSED runs are the one case
+      // that must keep its hands off — being in the background is the whole point there.
+      if (!unfocusedStart()) win?.focus()
+      wc.sendInputEvent({ type: 'keyDown', keyCode, modifiers })
+      wc.sendInputEvent({ type: 'char', keyCode, modifiers })
+      wc.sendInputEvent({ type: 'keyUp', keyCode, modifiers })
+      console.log(`[keys] ${modifiers.join('+')}${modifiers.length ? '+' : ''}${keyCode}`)
+    }, at)
+  }
+}
+
+/** `HAMSTER_NOTIFY_PROBE=1` — one notification 5 s in, to find out what this PC does with it. */
+function scheduleNotifyProbe(): void {
+  if (debugOff() || process.env.HAMSTER_NOTIFY_PROBE !== '1') return
+  setTimeout(() => {
+    void showNotification({ title: 'probe', body: 'probe', tag: 'turn', tab: '' }, win).then((r) => console.log(`[notify] probe=${r}`))
+  }, 5000)
+}
+
 function createWindow(): void {
+  // where the window sat last time, once it has been checked against the screens that exist now
+  const saved = readWindowState()
   win = new BrowserWindow({
-    width: 1280,
-    height: 880,
+    ...(saved ? { x: saved.x, y: saved.y } : {}),
+    width: saved?.width ?? 1280,
+    height: saved?.height ?? 880,
     minWidth: 760,
     minHeight: 480,
     backgroundColor: '#0e0f13',
@@ -70,11 +164,20 @@ function createWindow(): void {
       sandbox: true,
     },
   })
-  win.once('ready-to-show', () => win?.show())
+  attachWindowStateSaver(win)
+  win.once('ready-to-show', () => {
+    // debug/e2e: HAMSTER_UNFOCUSED=1 brings the window up *without* focus, which is the only
+    // state the notification path fires in — otherwise a blind run can never reach it.
+    if (unfocusedStart()) win?.showInactive()
+    else win?.show()
+  })
   if (process.env.HAMSTER_CAPTURE) {
-    // smoke tests run blind: surface renderer errors on stdout
+    // Smoke tests run blind: surface renderer errors on stdout, and let the renderer's own
+    // tagged lines ([debug] click …, [git] …) through verbatim — a capture that shows nothing
+    // is only useful if it also says why. Untagged chatter stays out of the way.
     win.webContents.on('console-message', (ev) => {
       if (ev.level === 'error' || ev.level === 'warning') console.log(`[renderer:${ev.level}] ${ev.message}`)
+      else if (ev.message.startsWith('[')) console.log(ev.message)
     })
   }
   win.webContents.setWindowOpenHandler(({ url }) => {
@@ -327,6 +430,23 @@ ipcMain.on('win:opacity', (_e, v: number) => {
   win?.setOpacity(Math.min(1, Math.max(0.3, v)))
 })
 
+// ---- IPC: notifications and mini mode (electron/notify.ts, electron/window-state.ts)
+
+ipcMain.handle('notify:show', (_e, req: NotifyRequest) => showNotification(req, win))
+ipcMain.handle('win:mini', (_e, on: boolean) => setMini(win, on === true))
+
+// ---- IPC: past conversations of a folder (electron/transcripts.ts)
+// `live` is the set the watcher already knows is running, so the list can grey those rows out.
+
+ipcMain.handle('transcripts:list', (_e, cwd: string) =>
+  listTranscripts(String(cwd ?? ''), new Set((watcher?.liveSessions ?? []).map((s) => s.sessionId))),
+)
+
+// ---- IPC: git, read-only (electron/git.ts)
+
+ipcMain.handle('git:info', (_e, cwd: string) => gitInfo(String(cwd ?? '')))
+ipcMain.handle('git:diff', (_e, cwd: string, file: string) => gitDiff(String(cwd ?? ''), String(file ?? '')))
+
 /** `language` from ~/.claude/settings.json, verbatim (e.g. "한국어"); the renderer decides what to do with it. */
 function claudeLanguage(): string | null {
   try {
@@ -354,35 +474,56 @@ ipcMain.handle('app:info', () => {
     // debug/e2e only: names one button the UI should press by itself once it exists, so a blind
     // capture run can prove a click really does what it claims (see scheduleCapture below)
     debugClick: app.isPackaged ? null : process.env.HAMSTER_CLICK ?? null,
+    debugEvents: debugEvents(),
+    debugClicks: debugClicks(),
+    unfocused: unfocusedStart(),
     claudeLanguage: claudeLanguage(),
     uiPath: uiPath(),
   }
 })
 
-// ---- debug: HAMSTER_CAPTURE=<png path> [HAMSTER_CAPTURE_DELAY=ms] [HAMSTER_CAPTURE_QUIT=1]
+// ---- debug: HAMSTER_CAPTURE=<png path> [HAMSTER_CAPTURE_DELAY=ms[,ms…]] [HAMSTER_CAPTURE_QUIT=1]
 // Saves a screenshot of the window without anyone looking at the screen (used by the smoke test).
+// A comma-separated delay list takes several shots in one run — `shot.png` then becomes
+// `shot-1.png`, `shot-2.png`, … so before/after can be compared. A single delay keeps the plain
+// file name, which is what every existing script and README command expects.
 function scheduleCapture(): void {
   const target = process.env.HAMSTER_CAPTURE
   if (!target || app.isPackaged) return
-  const delay = Number(process.env.HAMSTER_CAPTURE_DELAY ?? 4000)
-  setTimeout(async () => {
-    try {
-      const img = await win?.webContents.capturePage()
-      if (img) {
-        const { writeFileSync } = await import('node:fs')
-        writeFileSync(target, img.toPNG())
-        console.log(`[capture] ${target}`)
+  const delays = (process.env.HAMSTER_CAPTURE_DELAY ?? '4000')
+    .split(',')
+    .map((s) => Number(s.trim()))
+    .filter((n) => Number.isFinite(n) && n >= 0)
+    .sort((a, b) => a - b)
+  if (delays.length === 0) delays.push(4000)
+  const many = delays.length > 1
+  const dot = target.lastIndexOf('.')
+  const slash = Math.max(target.lastIndexOf('/'), target.lastIndexOf('\\'))
+  const nameFor = (i: number): string => {
+    if (!many) return target
+    return dot > slash ? `${target.slice(0, dot)}-${i + 1}${target.slice(dot)}` : `${target}-${i + 1}`
+  }
+  delays.forEach((delay, i) => {
+    setTimeout(async () => {
+      try {
+        const img = await win?.webContents.capturePage()
+        if (img) {
+          const { writeFileSync } = await import('node:fs')
+          const file = nameFor(i)
+          writeFileSync(file, img.toPNG())
+          console.log(`[capture] ${file}`)
+        }
+      } catch (e) {
+        console.error('[capture] failed', e)
       }
-    } catch (e) {
-      console.error('[capture] failed', e)
-    }
-    if (process.env.HAMSTER_CAPTURE_QUIT === '1') {
-      app.quit()
-      // Safety net for the blind smoke test: if anything still holds the process 5 s after the
-      // quit sequence, take it down rather than leaving an invisible electron.exe behind.
-      setTimeout(() => app.exit(0), 5000).unref()
-    }
-  }, delay)
+      if (i === delays.length - 1 && process.env.HAMSTER_CAPTURE_QUIT === '1') {
+        app.quit()
+        // Safety net for the blind smoke test: if anything still holds the process 5 s after the
+        // quit sequence, take it down rather than leaving an invisible electron.exe behind.
+        setTimeout(() => app.exit(0), 5000).unref()
+      }
+    }, delay)
+  })
 }
 
 /**
@@ -426,6 +567,8 @@ if (gotLock) {
     createWindow()
     startWatchers()
     scheduleCapture()
+    scheduleKeys()
+    scheduleNotifyProbe()
     app.on('activate', () => {
       if (BrowserWindow.getAllWindows().length === 0) createWindow()
     })
