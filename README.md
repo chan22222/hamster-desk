@@ -16,11 +16,11 @@ Claude Code CLI 를 그대로 쓰면서, 지금 누가(메인·서브에이전�
 
 ```bash
 npm install --legacy-peer-deps
-npm run build
+npm run build:vite      # out/ 만 만든다(포터블 패키징 없음)
 npx electron .          # 또는 npm run dev (HMR)
 ```
 
-포터블 exe: `npm run dist` → `release/Hamster Desk 0.1.0.exe`.
+포터블 exe: `npm run build` → `release/Hamster Desk 0.1.0.exe`(`npm run dist` 도 같은 명령).
 
 프로필은 실행 모드별로 나뉜다: 포터블 `%APPDATA%\hamster-desk`, 개발 실행 `%APPDATA%\hamster-desk-dev`, 캡처 실행(`HAMSTER_CAPTURE`) `%TEMP%\hamster-desk-smoke-<pid>`. 캡처 실행의 프로필은 **실행마다 따로**다 — 예전에는 `hamster-desk-smoke` 하나를 같이 써서, 캡처 둘을 나란히 돌리면 뒤에 뜬 쪽이 `Unable to move the cache` 로 부팅이 늦어지고 자기 `HAMSTER_CLICK` 타이머를 놓쳤다. 폴더는 종료할 때 지우고(best-effort), Chromium 이 아직 쥐고 있어 못 지운 것은 다음 캡처 실행이 시작하면서 치운다(그 pid 의 프로세스가 더는 없을 때만). `test:office:ui`·`shot:studio` 는 따로 `%TEMP%\hamster-desk-smoke` 를 쓴다. 그래서 포터블을 켜 둔 채 `npm run dev` 를 띄워도 캐시(`Unable to move the cache`)가 충돌하지 않는다. 포터블은 단일 인스턴스라 두 번째로 실행하면 이미 떠 있는 창을 앞으로 가져온다.
 
@@ -308,7 +308,7 @@ scripts/unit/           단위 테스트(i18n · transcripts · turn-git · wind
 ```bash
 npm run typecheck
 npm run test:office       # 좌석·경로·카메라·자동 프레이밍·햄스터 리그·섬 생성 회귀 테스트 17개
-npm run build
+npm run build:vite
 npm run preview:studio   # http://127.0.0.1:5186/?studio-demo=8
 # 미리보기 서버가 실행 중인 별도 터미널에서:
 npm run test:office:ui   # 숨겨진 Electron 창에서 실제 렌더러 검사

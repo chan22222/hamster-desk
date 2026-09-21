@@ -6,7 +6,8 @@
   "private": true,
   "scripts": {
     "dev": "electron-vite dev",
-    "build": "electron-vite build",
+    "build": "electron-vite build && electron-builder --win portable",
+    "build:vite": "electron-vite build",
     "preview": "electron-vite preview",
     "start": "electron-vite preview",
     "watch:cli": "tsx scripts/watch-cli.ts",
@@ -20,7 +21,7 @@
     "test:office:ui": "electron scripts/office-smoke.cjs",
     "shot:studio": "electron scripts/office-shot.cjs",
     "rebuild": "electron-rebuild -f -w node-pty",
-    "dist": "electron-vite build && electron-builder --win portable"
+    "dist": "npm run build"
   },
   "build": {
     "appId": "kr.amag.hamsterdesk",
