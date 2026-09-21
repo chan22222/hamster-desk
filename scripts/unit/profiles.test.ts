@@ -31,6 +31,7 @@ import {
   renameProfile,
   sanitizeProfiles,
   setCurrentProfile,
+  showDefaultProfile,
   withEmails,
 } from '../../electron/profiles'
 import { claudeDir, projectsDir, sessionsDir } from '../../electron/watcher/paths'
@@ -220,4 +221,31 @@ test('on screen the CLI account is one account among the others: named after its
     delete process.env.CLAUDE_CONFIG_DIR
     flushUi()
   }
+})
+
+test('the CLI account can be taken off the list — never deleted — and brought back', () => {
+  // alone it stays: a list with nothing in it has nowhere to open a terminal
+  for (const p of loadProfiles().list) if (p.id !== 'default') deleteProfileDir(removeProfile(p.id).removed)
+  assert.deepEqual(loadProfiles().list.map((p) => p.id), ['default'])
+  assert.equal(removeProfile('default').removed, null)
+  assert.deepEqual(sanitizeProfiles({ hideDefault: true }).list.map((p) => p.id), ['default']) // a hand-edited flag cannot empty the list either
+
+  const { added } = addProfile('회사')
+  setCurrentProfile('default')
+  const { state, removed } = removeProfile('default')
+  assert.deepEqual(state.list.map((p) => p.id), [added.id])
+  assert.equal(state.currentId, added.id) // the active account moved to one that is still there
+  assert.equal(state.hiddenDefault, true)
+  assert.equal(removed?.dir, null) // nothing of ours to delete…
+  assert.equal(deleteProfileDir(removed), false) // …and nothing is
+  flushUi()
+  assert.deepEqual(loadProfiles().list.map((p) => p.id), [added.id]) // it stays off across a restart
+  assert.equal(configDirOf(undefined), null) // a tab that names no account still gets no CLAUDE_CONFIG_DIR forced on it
+
+  const back = showDefaultProfile()
+  assert.deepEqual(back.list.map((p) => p.id), ['default', added.id])
+  assert.ok(!back.hiddenDefault)
+  assert.equal(back.currentId, added.id) // bringing it back does not change which account is active
+  deleteProfileDir(removeProfile(added.id).removed)
+  flushUi()
 })

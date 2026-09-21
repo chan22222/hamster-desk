@@ -72,7 +72,7 @@ function Section({
   className,
   onToggle,
   heightKey,
-  emptyHint,
+  empty = false,
   children,
 }: {
   title: string
@@ -83,15 +83,14 @@ function Section({
   /** set on the sections that can be dragged taller or shorter; the file browser takes the rest */
   heightKey?: SectionHeightKey
   /**
-   * Set while the section has nothing to show: it stays in the sidebar as one quiet line saying so,
-   * instead of only coming into existence with the first edit — nobody looks for a section they
-   * have never seen. It cannot be opened (there is nothing in it) and keeps the user's open/closed
-   * choice for when it fills.
+   * Set while the section has nothing to show: it stays in the sidebar as one quiet line — its
+   * name and a 0 — instead of only coming into existence with the first edit; nobody looks for a
+   * section they have never seen. It cannot be opened (there is nothing in it) and keeps the
+   * user's open/closed choice for when it fills.
    */
-  emptyHint?: string
+  empty?: boolean
   children: React.ReactNode
 }) {
-  const empty = emptyHint !== undefined
   if (empty) open = false
   const height = useDesk((s) => (heightKey ? s.prefs[heightKey] : null))
   const setPrefs = useDesk((s) => s.setPrefs)
@@ -131,13 +130,12 @@ function Section({
       className={`side-section ${className} ${open ? 'is-open' : ''} ${sized ? 'is-sized' : ''} ${empty ? 'is-empty' : ''}`}
       style={sized ? { flexBasis: height } : undefined}
     >
-      <button className="side-title" onClick={empty ? undefined : onToggle} aria-expanded={open} aria-disabled={empty} title={empty ? emptyHint : undefined}>
+      <button className="side-title" onClick={empty ? undefined : onToggle} aria-expanded={open} aria-disabled={empty}>
         <span className="side-caret">
           <IconChevron dir={open ? 'down' : 'right'} size={14} />
         </span>
         {title}
         {count !== undefined && <span className="side-count">{count}</span>}
-        {empty && <span className="side-hint">{emptyHint}</span>}
       </button>
       {open && <div className="side-rows">{children}</div>}
       {open && heightKey && (
@@ -257,7 +255,7 @@ export function Sidebar({ start, session, onOpen }: { start: string; session: Se
         heightKey="sideChangedH"
         open={prefs.showLog}
         onToggle={() => setPrefs({ showLog: !prefs.showLog })}
-        emptyHint={changed > 0 ? undefined : 'Claude 가 파일을 고치면 여기에'}
+        empty={changed === 0}
       >
         <FileLog session={session} />
       </Section>
@@ -269,7 +267,7 @@ export function Sidebar({ start, session, onOpen }: { start: string; session: Se
         heightKey="sideFeedH"
         open={prefs.showFeedLog}
         onToggle={() => setPrefs({ showFeedLog: !prefs.showFeedLog })}
-        emptyHint={logged > 0 ? undefined : '햄스터가 한 말과 일이 여기에'}
+        empty={logged === 0}
       >
         <FeedLog session={session} />
       </Section>

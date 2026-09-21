@@ -49,6 +49,11 @@ export interface ProfilesState {
   list: Profile[]
   /** the account new terminals open under */
   currentId: string
+  /**
+   * The CLI's own account (~/.claude) was taken off the list. It cannot be *deleted* — that folder
+   * is not this app's — so "remove" on it only hides it, and this is what lets the UI offer it back.
+   */
+  hiddenDefault?: boolean
 }
 
 export interface RateWindow {

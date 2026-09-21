@@ -1,6 +1,6 @@
 {
   "name": "hamster-desk",
-  "version": "0.1.6",
+  "version": "0.1.7",
   "description": "Pixel hamsters that show what Claude Code is doing — embedded terminal + live desk",
   "main": "./out/main/main.js",
   "private": true,

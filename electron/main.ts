@@ -5,7 +5,7 @@ import { DeskWatcher } from './watcher'
 import { DEFAULT_PROFILE_ID, type BubbleRequest, type DeskEvent, type FileEntry, type NotifyRequest, type Profile, type SessionInfo, type StatusSnapshot, type UiState, type AppUpdateInfo } from '../shared/events'
 import { spawnPty, PromptDetector, type PtyHandle } from './pty'
 import { HAMSTER_HOME, StatusWatcher, installStatusLine, uninstallStatusLine, statusLineState, refreshStatusScripts } from './statusline'
-import { addProfile, adoptOrphanProfiles, baseDirOf, configDirOf, deleteProfileDir, loadProfiles, profileOfConfigDir, removeProfile, renameProfile, setCurrentProfile, withEmails } from './profiles'
+import { addProfile, adoptOrphanProfiles, baseDirOf, configDirOf, deleteProfileDir, loadProfiles, profileOfConfigDir, removeProfile, renameProfile, setCurrentProfile, showDefaultProfile, withEmails } from './profiles'
 import { flushUi, loadUi, saveUi, uiPath } from './ui-store'
 import { checkVersion } from './version'
 import { BubbleSummarizer } from './summarize'
@@ -520,6 +520,13 @@ ipcMain.handle('profiles:remove', (_e, id: string) => {
   return withEmails(state)
 })
 ipcMain.handle('profiles:setCurrent', (_e, id: string) => withEmails(setCurrentProfile(String(id ?? ''))))
+/** the CLI's own account, taken off the list earlier, comes back — and is watched again */
+ipcMain.handle('profiles:showDefault', () => {
+  const state = showDefaultProfile()
+  const cli = state.list.find((p) => p.id === DEFAULT_PROFILE_ID)
+  if (cli) watchProfile(cli)
+  return withEmails(state)
+})
 ipcMain.handle('profiles:openFolder', (_e, id: string) => shell.openPath(baseDirOf(String(id ?? ''))))
 
 // ---- IPC: status line (usage), version, dialogs

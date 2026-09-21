@@ -46,7 +46,7 @@ function sameDir(a: string, b: string): boolean {
  * ids or folders, and a `currentId` that exists. Pure, so the unit test can feed it rubbish.
  */
 export function sanitizeProfiles(raw: unknown): ProfilesState {
-  const bag = (raw && typeof raw === 'object' ? raw : {}) as { list?: unknown; currentId?: unknown }
+  const bag = (raw && typeof raw === 'object' ? raw : {}) as { list?: unknown; currentId?: unknown; hideDefault?: unknown }
   const items = Array.isArray(bag.list) ? bag.list : []
   let defaultName = DEFAULT_NAME
   const extra: Profile[] = []
@@ -62,9 +62,12 @@ export function sanitizeProfiles(raw: unknown): ProfilesState {
     if (extra.some((e) => e.id === p.id || sameDir(e.dir as string, p.dir as string))) continue
     extra.push({ id: p.id, name: cleanName(p.name, p.id), dir: p.dir })
   }
-  const list: Profile[] = [{ id: DEFAULT_PROFILE_ID, name: defaultName, dir: null }, ...extra]
-  const currentId = typeof bag.currentId === 'string' && list.some((p) => p.id === bag.currentId) ? bag.currentId : DEFAULT_PROFILE_ID
-  return { list, currentId }
+  // hidden only while there is another account to use: a list must never come out empty
+  const hiddenDefault = bag.hideDefault === true && extra.length > 0
+  const list: Profile[] = hiddenDefault ? extra : [{ id: DEFAULT_PROFILE_ID, name: defaultName, dir: null }, ...extra]
+  const currentId = typeof bag.currentId === 'string' && list.some((p) => p.id === bag.currentId) ? bag.currentId : list[0].id
+  // only said when true: a file of someone who never hid it keeps exactly the shape it always had
+  return hiddenDefault ? { list, currentId, hiddenDefault } : { list, currentId }
 }
 
 export function loadProfiles(): ProfilesState {
@@ -73,7 +76,7 @@ export function loadProfiles(): ProfilesState {
 
 function store(state: ProfilesState): ProfilesState {
   // `email` is looked up, never stored
-  saveUi({ profiles: { list: state.list.map(({ id, name, dir }) => ({ id, name, dir })), currentId: state.currentId } })
+  saveUi({ profiles: { list: state.list.map(({ id, name, dir }) => ({ id, name, dir })), currentId: state.currentId, ...(state.hiddenDefault ? { hideDefault: true } : {}) } })
   return state
 }
 
@@ -104,13 +107,27 @@ export function renameProfile(id: string, name: string): ProfilesState {
   return store({ ...state, list: state.list.map((p) => (p.id === id ? { ...p, name: cleanName(name, p.name) } : p)) })
 }
 
-/** Take an account off the list. `removed` is what the caller then hands to `deleteProfileDir`. */
+/**
+ * Take an account off the list. `removed` is what the caller then hands to `deleteProfileDir` —
+ * which does nothing for the CLI's own account (it has no folder of ours: `dir` is null). That one
+ * is only *hidden*, and only while another account is left to use; `showDefaultProfile` brings it back.
+ */
 export function removeProfile(id: string): { state: ProfilesState; removed: Profile | null } {
   const state = loadProfiles()
-  const removed = id === DEFAULT_PROFILE_ID ? null : (state.list.find((p) => p.id === id) ?? null)
+  const removed = state.list.find((p) => p.id === id) ?? null
   if (!removed) return { state, removed: null }
   const list = state.list.filter((p) => p.id !== id)
-  return { state: store({ list, currentId: state.currentId === id ? DEFAULT_PROFILE_ID : state.currentId }), removed }
+  if (list.length === 0) return { state, removed: null } // the last account stays
+  const hiddenDefault = state.hiddenDefault === true || id === DEFAULT_PROFILE_ID
+  return { state: store({ list, currentId: state.currentId === id ? list[0].id : state.currentId, hiddenDefault }), removed }
+}
+
+/** Put the CLI's own account back on the list (its folder and login were never touched). */
+export function showDefaultProfile(): ProfilesState {
+  const state = loadProfiles()
+  if (!state.hiddenDefault) return state
+  store({ ...state, hiddenDefault: false })
+  return loadProfiles()
 }
 
 /**

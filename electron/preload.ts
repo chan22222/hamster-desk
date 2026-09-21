@@ -53,6 +53,8 @@ export interface DeskBridge {
     /** deletes the account: its shells are closed and its folder (login, settings, conversations) goes with it */
     remove(id: string): Promise<ProfilesState>
     setCurrent(id: string): Promise<ProfilesState>
+    /** put the CLI's own account (~/.claude) back on the list after it was taken off */
+    showDefault(): Promise<ProfilesState>
     openFolder(id: string): Promise<string>
   }
   version: { check(force?: boolean): Promise<VersionInfo> }
@@ -172,6 +174,7 @@ const bridge: DeskBridge = {
     rename: (id, name) => ipcRenderer.invoke('profiles:rename', id, name),
     remove: (id) => ipcRenderer.invoke('profiles:remove', id),
     setCurrent: (id) => ipcRenderer.invoke('profiles:setCurrent', id),
+    showDefault: () => ipcRenderer.invoke('profiles:showDefault'),
     openFolder: (id) => ipcRenderer.invoke('profiles:openFolder', id),
   },
   version: { check: (force) => ipcRenderer.invoke('version:check', force) },

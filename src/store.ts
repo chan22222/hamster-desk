@@ -255,6 +255,8 @@ interface DeskStore {
   /** `profileId` defaults to the current account; `runOnce` is typed once without making the tab a throwaway */
   addWorkspace(cwd: string, title?: string, initialCommand?: string, profileId?: string, runOnce?: string): Workspace
   /** adopt what main says the accounts are (after list/add/rename/remove/setCurrent) */
+  /** the CLI's own account (~/.claude) was taken off the list; the accounts menu offers it back */
+  cliAccountHidden: boolean
   setProfiles(state: ProfilesState): void
   bindWorkspacePty(id: number, ptyId: number, cwd: string): void
   removeWorkspace(id: number): void
@@ -731,6 +733,7 @@ export const useDesk = create<DeskStore>((set, get) => {
     usageByProfile: {},
     profiles: [{ id: DEFAULT_PROFILE_ID, name: '기본', dir: null }],
     currentProfileId: DEFAULT_PROFILE_ID,
+    cliAccountHidden: false,
     version: null,
     appUpdate: null,
     prefs: loadPrefs(),
@@ -772,7 +775,8 @@ export const useDesk = create<DeskStore>((set, get) => {
     },
     setProfiles(state) {
       const list = state.list.length ? state.list : get().profiles
-      set({ profiles: list, currentProfileId: list.some((p) => p.id === state.currentId) ? state.currentId : DEFAULT_PROFILE_ID })
+      // the CLI's own account can be off the list, so "whatever comes first" is the fallback, not 'default'
+      set({ profiles: list, currentProfileId: list.some((p) => p.id === state.currentId) ? state.currentId : list[0].id, cliAccountHidden: state.hiddenDefault === true })
     },
     bindWorkspacePty(id, ptyId, cwd) {
       set({

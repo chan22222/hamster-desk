@@ -1,8 +1,10 @@
 // Several Claude Code accounts, one config folder each (electron/profiles.ts).
 //
 // Every account is registered the same way and one of them is *active*: the one new terminals open
-// under. The CLI's own folder (~/.claude) is simply the first of them — it has no "default" label,
-// it logs in with the same button, and only differs in that it cannot be deleted (it is not ours).
+// under. The CLI's own folder (~/.claude) is simply the first of them — it has no "default" label
+// and logs in with the same button. The one difference: its × takes it *off the list* instead of
+// deleting it. That folder is not this app's, and every other terminal's claude logs in from it;
+// the accounts menu offers it back.
 //
 // Three small pieces, all invisible until there is a second account:
 //   AccountPicker   — "which account is active", at the top of the `+` menu
@@ -119,7 +121,7 @@ export function AccountBadge({ profileId }: { profileId: string | undefined }) {
   )
 }
 
-function Row({ p, current, onDone }: { p: Profile; current: boolean; onDone: () => void }) {
+function Row({ p, current, only, onDone }: { p: Profile; current: boolean; only: boolean; onDone: () => void }) {
   const [editing, setEditing] = useState(false)
   const [name, setName] = useState(p.name)
   const [asking, setAsking] = useState(false)
@@ -138,10 +140,13 @@ function Row({ p, current, onDone }: { p: Profile; current: boolean; onDone: () 
     else setName(p.name)
   }
 
-  /** The account, its login and its terminals all go: main closes the shells, the tabs follow. */
+  /** the CLI's own account: nothing of it is deleted, it only leaves the list */
+  const cli = p.id === DEFAULT_PROFILE_ID
+
+  /** The account and its terminals go — and, unless it is the CLI's own, its folder and login: main closes the shells, the tabs follow. */
   const remove = (): void => {
     const s = useDesk.getState()
-    for (const w of s.workspaces.filter((x) => x.profileId === p.id)) s.removeWorkspace(w.id)
+    for (const w of s.workspaces.filter((x) => (x.profileId ?? DEFAULT_PROFILE_ID) === p.id)) s.removeWorkspace(w.id)
     void change((b) => b.remove(p.id))
   }
 
@@ -149,10 +154,18 @@ function Row({ p, current, onDone }: { p: Profile; current: boolean; onDone: () 
     return (
       <div className="acct-row is-asking">
         <span className="acct-ask">
-          <b>{p.name}</b> 계정을 지울까요?
+          {cli ? (
+            <>
+              <b>{p.name}</b> 을(를) 목록에서 뺄까요? 로그인과 <code>~/.claude</code> 폴더는 그대로 두고, 이 계정으로 열린 탭만 닫습니다.
+            </>
+          ) : (
+            <>
+              <b>{p.name}</b> 계정을 지울까요?
+            </>
+          )}
         </span>
         <button className="acct-btn is-danger" onClick={remove}>
-          지우기
+          {cli ? '빼기' : '지우기'}
         </button>
         <button className="acct-btn" onClick={() => setAsking(false)}>
           취소
@@ -235,9 +248,14 @@ function Row({ p, current, onDone }: { p: Profile; current: boolean; onDone: () 
           <button className="acct-tool" title="계정 폴더 열기" aria-label={`${p.name} 폴더 열기`} onClick={() => void window.desk?.profiles.openFolder(p.id)}>
             <IconFolder size={13} />
           </button>
-          {/* ~/.claude is the CLI's own folder, not one this app made: it is never deleted from here */}
-          {p.id !== DEFAULT_PROFILE_ID && (
-            <button className="acct-tool" title="계정 지우기" aria-label={`${p.name} 계정 지우기`} onClick={() => setAsking(true)}>
+          {/* the last account stays: a list with nothing in it has nowhere to open a terminal */}
+          {!only && (
+            <button
+              className="acct-tool"
+              title={cli ? '목록에서 빼기 (로그인과 폴더는 그대로)' : '계정 지우기'}
+              aria-label={cli ? `${p.name} 목록에서 빼기` : `${p.name} 계정 지우기`}
+              onClick={() => setAsking(true)}
+            >
               <IconClose size={13} />
             </button>
           )}
@@ -251,6 +269,7 @@ function Row({ p, current, onDone }: { p: Profile; current: boolean; onDone: () 
 export function AccountsSection({ onDone }: { onDone: () => void }) {
   const profiles = useDesk((s) => s.profiles)
   const current = useDesk((s) => s.currentProfileId)
+  const cliHidden = useDesk((s) => s.cliAccountHidden)
   const [adding, setAdding] = useState(false)
   const [name, setName] = useState('')
   // a login that finished since the list was last read shows up as soon as the menu opens
@@ -286,7 +305,7 @@ export function AccountsSection({ onDone }: { onDone: () => void }) {
       <div className="pop-head">계정</div>
       <p className="pop-note">새 터미널은 활성 계정으로 열려요. 이미 열린 탭은 열 때의 계정 그대로예요.</p>
       {profiles.map((p) => (
-        <Row key={p.id} p={p} current={p.id === current} onDone={onDone} />
+        <Row key={p.id} p={p} current={p.id === current} only={profiles.length === 1} onDone={onDone} />
       ))}
       {adding ? (
         <div className="acct-add">
@@ -317,6 +336,14 @@ export function AccountsSection({ onDone }: { onDone: () => void }) {
             <IconPlus size={14} />
           </span>
           <span className="pop-item-text">계정 추가</span>
+        </button>
+      )}
+      {cliHidden && !adding && (
+        <button className="pop-item" title="목록에서 뺐던 ~/.claude 계정을 다시 보이게 합니다" onClick={() => void change((b) => b.showDefault())}>
+          <span className="pop-item-ico">
+            <IconFolder size={14} />
+          </span>
+          <span className="pop-item-text">CLI 계정(~/.claude) 다시 표시</span>
         </button>
       )}
     </>
