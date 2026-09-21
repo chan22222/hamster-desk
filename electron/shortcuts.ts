@@ -1,5 +1,5 @@
 import { existsSync, readdirSync } from 'node:fs'
-import { dirname, join, resolve } from 'node:path'
+import { dirname, join, resolve, sep } from 'node:path'
 
 /**
  * Keeps the app's Windows shortcuts pointing at — and filed under the same id as — the window.
@@ -16,8 +16,10 @@ import { dirname, join, resolve } from 'node:path'
  *    shortcut, dead target included: the pin lights up with the window, and does nothing when clicked.
  *
  * So on every packaged start a shortcut is rewritten when it is clearly ours and clearly wrong:
- * it starts this exe but lacks the id, or it carries the id but its exe is gone. One that starts
- * another copy of the app that still exists is left alone (two checkouts must not fight over it).
+ * it starts this exe but lacks the id, or it carries the id but its exe is gone — or sits in the
+ * temp folder, which is where the old portable build unpacked itself and sometimes never cleaned
+ * up: the file is still there, and it is still nobody's install. One that starts another copy of
+ * the app that still exists anywhere else is left alone (two checkouts must not fight over it).
  * Only target/cwd/id are written — 'update' leaves the toast activator CLSID Electron put there.
  *
  * The `electron` calls come in through `io`, so the decisions below can be tested with tsx.
@@ -45,14 +47,17 @@ export const startMenuShortcut = (appData: string, name: string): string =>
 export const taskbarPinDir = (appData: string): string =>
   join(appData, 'Microsoft', 'Internet Explorer', 'Quick Launch', 'User Pinned', 'TaskBar')
 
-/** ours and wrong: starts this exe without the id, or has the id and an exe that no longer exists */
-function needsRepair(s: ShortcutInfo, exe: string, aumid: string, io: ShortcutIo): boolean {
+const inside = (file: string, dir: string): boolean => resolve(file).toLowerCase().startsWith(resolve(dir).toLowerCase() + sep)
+
+/** ours and wrong: starts this exe without the id, or has the id and an exe that is gone or a temp leftover */
+function needsRepair(s: ShortcutInfo, exe: string, aumid: string, io: ShortcutIo, tempDir?: string): boolean {
   if (s.target && samePath(s.target, exe)) return s.appUserModelId !== aumid
-  return s.appUserModelId === aumid && (!s.target || !io.exists(s.target))
+  if (s.appUserModelId !== aumid) return false
+  return !s.target || !io.exists(s.target) || (!!tempDir && inside(s.target, tempDir))
 }
 
 /** What was changed, for the log: 'start-menu:create' | 'start-menu:update' | 'pin:<file>' */
-export function repairShortcuts(opts: { appData: string; name: string; exe: string; aumid: string }, io: ShortcutIo): string[] {
+export function repairShortcuts(opts: { appData: string; name: string; exe: string; aumid: string; tempDir?: string }, io: ShortcutIo): string[] {
   const done: string[] = []
   const details = { target: opts.exe, cwd: dirname(opts.exe), appUserModelId: opts.aumid }
 
@@ -67,7 +72,7 @@ export function repairShortcuts(opts: { appData: string; name: string; exe: stri
     // none yet: make it, so that pinning the running window has something right to copy
     if (!current) {
       if (io.write(menu, 'create', details)) done.push('start-menu:create')
-    } else if (needsRepair(current, opts.exe, opts.aumid, io)) {
+    } else if (needsRepair(current, opts.exe, opts.aumid, io, opts.tempDir)) {
       if (io.write(menu, 'update', details)) done.push('start-menu:update')
     }
   } catch {
@@ -84,7 +89,7 @@ export function repairShortcuts(opts: { appData: string; name: string; exe: stri
   for (const file of pins) {
     try {
       const path = join(pinDir, file)
-      if (needsRepair(io.read(path), opts.exe, opts.aumid, io) && io.write(path, 'update', details)) done.push(`pin:${file}`)
+      if (needsRepair(io.read(path), opts.exe, opts.aumid, io, opts.tempDir) && io.write(path, 'update', details)) done.push(`pin:${file}`)
     } catch {
       /* unreadable shortcut: leave it */
     }

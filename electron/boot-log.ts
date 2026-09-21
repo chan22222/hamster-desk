@@ -1,6 +1,6 @@
 import { mkdirSync, readFileSync, writeFileSync } from 'node:fs'
+import { homedir } from 'node:os'
 import { dirname, join } from 'node:path'
-import { HAMSTER_HOME } from './statusline'
 
 /**
  * Where a slow start went: one line per launch in ~/.hamster-desk/boot.log, the last 50 kept.
@@ -19,7 +19,8 @@ const KEEP = 50
 const marks: [string, number][] = []
 let written = false
 
-export const bootLogPath = (): string => join(HAMSTER_HOME, 'boot.log')
+/** Read from the env on every call, like ui-store.ts — a constant would be fixed before a test can point it at a temp folder. */
+export const bootLogPath = (): string => join(process.env.HAMSTER_HOME || join(homedir(), '.hamster-desk'), 'boot.log')
 
 export function bootMark(name: string): void {
   if (!written) marks.push([name, Date.now()])

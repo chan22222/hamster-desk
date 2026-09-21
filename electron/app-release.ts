@@ -1,15 +1,22 @@
 import { existsSync } from 'node:fs'
 import { basename, dirname, join } from 'node:path'
 import type { AppUpdateInfo } from '../shared/events'
+import { logUpdate } from './update-log'
 
 /**
- * Updates for the *installed* app (the NSIS setup from `npm run dist` / `npm run release`).
+ * Updates for the *installed* app (the NSIS setup from `npm run build` / a release).
  *
  * Someone who installed it has no repository to pull, and cannot be asked to run a new setup for
  * every change. So an installed build follows GitHub Releases through electron-updater: a release
  * newer than this version is downloaded in the background (only the changed blocks, thanks to the
- * .blockmap published next to the setup), and then installed either when the user presses
- * "restart and update" or, failing that, silently the next time the app quits.
+ * .blockmap published next to the setup), and installed when the user says so.
+ *
+ * Installing is never invisible. Replacing the app means its exe is gone for half a minute, and an
+ * install nobody can see invites exactly one thing: clicking the taskbar icon again, which then
+ * answers "the path does not exist" — or starts the old exe under the installer's feet and breaks
+ * the install. So there is no silent install when the app quits (`autoInstallOnAppQuit` is off),
+ * and the one way in — "restart and update" — runs the setup with its progress window and lets it
+ * reopen the app by itself.
  *
  * Which build is which:
  *   installed          an "Uninstall <exe name>" sits next to the exe      → this file
@@ -33,21 +40,31 @@ let release: Release | null = null
 let lastError: string | null = null
 let checkedAt = 0
 let inflight: Promise<void> | null = null
+let who = 'installed'
 
 /** Progress arrives many times a second; the UI only shows whole steps of this size. */
 const PERCENT_STEP = 5
+/** a check that failed is tried again by itself — a laptop that just woke up has no network yet */
+const RETRY_MS = [20_000, 60_000, 180_000]
+let retries = 0
+let retryTimer: ReturnType<typeof setTimeout> | null = null
+
+/** the first line is the message; the rest of an electron-updater error is a stack and headers */
+const reason = (e: unknown): string => String((e as Error)?.message ?? e).split('\n')[0].slice(0, 200)
 
 async function load(onChange: () => void): Promise<typeof import('electron-updater').autoUpdater> {
   if (updater) return updater
   const { autoUpdater } = await import('electron-updater')
   autoUpdater.autoDownload = true
-  autoUpdater.autoInstallOnAppQuit = true
+  autoUpdater.autoInstallOnAppQuit = false // see the header: an install nobody can see
   autoUpdater.logger = null // its default writes every step to the console
   autoUpdater.on('update-available', (info) => {
+    logUpdate(who, `available ${info.version}`)
     release = { version: info.version, state: 'downloading', percent: 0 }
     onChange()
   })
-  autoUpdater.on('update-not-available', () => {
+  autoUpdater.on('update-not-available', (info) => {
+    logUpdate(who, `up to date (latest ${info.version})`)
     release = null
     onChange()
   })
@@ -59,11 +76,14 @@ async function load(onChange: () => void): Promise<typeof import('electron-updat
     onChange()
   })
   autoUpdater.on('update-downloaded', (info) => {
+    logUpdate(who, `downloaded ${info.version}`)
+    lastError = null
     release = { version: info.version, state: 'ready', percent: 100 }
     onChange()
   })
   autoUpdater.on('error', (e) => {
-    lastError = e?.message ?? String(e)
+    lastError = reason(e)
+    logUpdate(who, `error ${lastError}`)
     // a download that died is not "ready", and not worth a stuck progress line either
     if (release?.state === 'downloading') release = null
     onChange()
@@ -77,28 +97,44 @@ export function releaseInfo(version: string, commit: string | null): AppUpdateIn
   return { commit, behind: 0, commits: [], canSelfUpdate: false, checkedAt, error: lastError, version, release }
 }
 
-/** Ask GitHub once; state changes reach the UI through `onChange` as the download moves along. */
-export function checkRelease(onChange: () => void): Promise<void> {
+/**
+ * Ask GitHub once; state changes reach the UI through `onChange` as the download moves along.
+ * `manual`: the user pressed "check again" — start the retry ladder over.
+ */
+export function checkRelease(onChange: () => void, version: string, manual = false): Promise<void> {
+  who = `installed ${version}`
+  if (manual) retries = 0
   if (inflight) return inflight
+  if (retryTimer) clearTimeout(retryTimer)
+  retryTimer = null
   inflight = (async () => {
     try {
       const u = await load(onChange)
       lastError = null
+      logUpdate(who, 'check')
       await u.checkForUpdates()
     } catch (e) {
-      lastError = (e as Error).message
+      lastError = reason(e)
+      logUpdate(who, `error ${lastError}`)
     } finally {
       checkedAt = Date.now()
       inflight = null
       onChange()
+      if (lastError && retries < RETRY_MS.length) {
+        retryTimer = setTimeout(() => void checkRelease(onChange, version), RETRY_MS[retries++])
+      }
     }
   })()
   return inflight
 }
 
-/** true when a downloaded release is being installed: the app quits, the setup runs silently and reopens it */
+/**
+ * true when a downloaded release is being installed: the app quits, the setup runs *with its
+ * progress window* and reopens the app when it is done.
+ */
 export function installRelease(): boolean {
   if (!updater || release?.state !== 'ready') return false
-  updater.quitAndInstall(true, true)
+  logUpdate(who, `install ${release.version}`)
+  updater.quitAndInstall(false, true)
   return true
 }

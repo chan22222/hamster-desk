@@ -7,7 +7,7 @@ import { Sidebar } from './sidebar/Sidebar'
 import { rememberRecent, setLastCwd } from './sidebar/recent'
 import { UsageMeters } from './widgets/Usage'
 import { UpdatePill } from './widgets/Version'
-import { AppUpdatePill } from './widgets/AppUpdate'
+import { AppUpdatePill, AppUpdatePrompt } from './widgets/AppUpdate'
 import { MoreMenu } from './widgets/MoreMenu'
 import { PlusMenu, StartCard } from './widgets/PlusMenu'
 import { Popover } from './widgets/Popover'
@@ -324,6 +324,8 @@ export default function App() {
           <TurnToast />
         </div>
       </div>
+      {/* asks once per start as soon as the check finds a newer version; the mini window has no room for it */}
+      {!mini && !booting && <AppUpdatePrompt />}
     </div>
   )
 }

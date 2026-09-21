@@ -90,3 +90,11 @@ test('a shell that throws on every call never takes the start down', () => {
   }
   assert.deepEqual(repairShortcuts(OPTS, { read: boom, write: boom, list: boom, exists: boom }), [])
 })
+
+test('a shortcut into the temp folder is a leftover of the portable build even while its exe still exists', () => {
+  const TEMP = resolve('C:/Users/me/AppData/Local/Temp')
+  const { io, writes } = fakeShell({ [MENU]: { target: DEAD, appUserModelId: AUMID } }, [EXE, DEAD]) // DEAD was never cleaned up
+  assert.deepEqual(repairShortcuts(OPTS, io), []) // without knowing the temp folder it looks like another living copy
+  assert.deepEqual(repairShortcuts({ ...OPTS, tempDir: TEMP }, io), ['start-menu:update'])
+  assert.deepEqual(writes, [[MENU, 'update', FIXED]])
+})

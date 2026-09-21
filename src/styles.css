@@ -180,6 +180,14 @@ button:focus-visible, select:focus-visible, input:focus-visible { outline: 2px s
 .pop-usage button { flex: none; padding: 3px 7px; border-radius: var(--radius); border: 1px solid var(--line-strong); color: var(--text-2); font-size: 11px; }
 .pop-usage button:hover { color: var(--text); background: var(--surface-2); }
 .pop-line { font-size: 13px; color: var(--text); }
+/* the update dialog: once per start, over everything, because a pill in a corner is easy to never see */
+.upd-veil { position: fixed; inset: 0; z-index: 900; display: flex; align-items: flex-start; justify-content: center; padding-top: 12vh; background: rgba(0, 0, 0, 0.32); }
+.upd-dialog { width: 340px; max-width: calc(100vw - 32px); padding: 14px; display: flex; flex-direction: column; gap: 10px; background: var(--surface); border: 1px solid var(--line-strong); border-radius: var(--radius-lg); box-shadow: 0 18px 48px rgba(0, 0, 0, 0.28); }
+.upd-title { font-size: 15px; font-weight: 700; color: var(--text); }
+.upd-later { align-self: stretch; }
+.upd-bar { height: 6px; border-radius: 999px; background: var(--surface-3); overflow: hidden; }
+.upd-bar i { display: block; height: 100%; background: var(--accent); transition: width 0.3s ease; }
+.upd-why { overflow-wrap: anywhere; }
 .pop-commits { margin: 0; padding: 0 0 0 16px; max-height: 168px; overflow-y: auto; font-size: 12px; line-height: 1.7; color: var(--text); }
 .pop-commits li { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .pop-row { display: flex; gap: 6px; }

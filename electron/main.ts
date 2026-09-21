@@ -550,13 +550,31 @@ const selfUpdateRepo = (): string | null => (app.isPackaged ? repoDirOf(process.
 const installedBuild = (): boolean => isInstalled(process.execPath, app.isPackaged)
 const emitRelease = (): void => emitDesk({ kind: 'app_update', ...releaseInfo(app.getVersion(), buildCommit()) })
 
-async function appUpdate(force = false): Promise<AppUpdateInfo> {
+/** a check that failed is tried again by itself: a PC that just woke up has no network for a while */
+const UPDATE_RETRY_MS = [20_000, 60_000, 180_000]
+let updateRetries = 0
+let updateRetryTimer: ReturnType<typeof setTimeout> | null = null
+/** not failures: there is simply nothing to compare this build with */
+const BENIGN_UPDATE_ERRORS = new Set(['no build commit', 'unknown commit'])
+
+/**
+ * `force`: skip the hour-long cache. `manual`: the user pressed "check again", so the retry ladder
+ * starts over — a retry itself forces but is not manual, or it would reset its own count for ever.
+ */
+async function appUpdate(force = false, manual = force): Promise<AppUpdateInfo> {
   if (installedBuild()) {
-    await checkRelease(emitRelease) // emits by itself, now and as the download moves along
+    await checkRelease(emitRelease, app.getVersion(), manual) // emits and retries by itself, now and as the download moves along
     return releaseInfo(app.getVersion(), buildCommit())
   }
-  const u = { ...(await checkAppUpdate(force, selfUpdateRepo() !== null)), version: app.getVersion() }
+  if (manual) updateRetries = 0
+  if (updateRetryTimer) clearTimeout(updateRetryTimer)
+  updateRetryTimer = null
+  const repo = selfUpdateRepo()
+  const u = { ...(await checkAppUpdate(force, repo !== null, repo)), version: app.getVersion() }
   emitDesk({ kind: 'app_update', ...u })
+  if (u.error && !BENIGN_UPDATE_ERRORS.has(u.error) && updateRetries < UPDATE_RETRY_MS.length) {
+    updateRetryTimer = setTimeout(() => void appUpdate(true, false), UPDATE_RETRY_MS[updateRetries++])
+  }
   return u
 }
 
@@ -854,7 +872,7 @@ function scheduleShortcutRepair(): void {
   setTimeout(() => {
     const fixed = repairShortcuts(
       // named after the exe, as Electron names the one it makes (a dev run's is "Electron.lnk", not the package name)
-      { appData: app.getPath('appData'), name: basename(process.execPath, '.exe'), exe: process.execPath, aumid: appUserModelId(true) },
+      { appData: app.getPath('appData'), name: basename(process.execPath, '.exe'), exe: process.execPath, aumid: appUserModelId(true), tempDir: app.getPath('temp') },
       {
         read: (p) => shell.readShortcutLink(p),
         write: (p, operation, details) => shell.writeShortcutLink(p, operation, details),

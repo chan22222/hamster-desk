@@ -1,14 +1,20 @@
 // The pure parts of the app's own update check (electron/app-update.ts) and of the boot log
 // (electron/boot-log.ts). Nothing here touches the network: what GitHub answers is fed in as data.
 //
-// HAMSTER_HOME is read once, when electron/statusline.ts is first evaluated — so it is set before
-// the dynamic import below, and the boot log lands in a temp folder instead of the real one.
+// HAMSTER_HOME is read once, when electron/statusline.ts is first evaluated — and app-update.ts pulls
+// that in through update-log.ts. So it is pointed at a temp folder *before* any of those imports
+// (tsx keeps statements and imports in source order), or the logs of this test would land in the
+// real ~/.hamster-desk.
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
 import { mkdirSync, mkdtempSync, readFileSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
-import { buildCommit, checkAppUpdate, parseCompare, repoDirOf } from '../../electron/app-update'
+
+const HOME = mkdtempSync(join(tmpdir(), 'hd-update-home-'))
+process.env.HAMSTER_HOME = HOME
+
+import { UPDATE_SCRIPT, buildCommit, checkAppUpdate, parseCompare, parseGitLog, repoDirOf } from '../../electron/app-update'
 import { isInstalled, releaseInfo, uninstallerOf } from '../../electron/app-release'
 
 const commit = (n: number, message: string): unknown => ({ sha: String(n).repeat(40).slice(0, 40), commit: { message } })
@@ -68,8 +74,7 @@ test('a build without a commit stamp never asks GitHub', async () => {
 })
 
 test('the boot log writes one line per launch with the gaps between marks', async () => {
-  const home = mkdtempSync(join(tmpdir(), 'hd-boot-'))
-  process.env.HAMSTER_HOME = home
+  const home = HOME
   const { bootLogPath, bootMark, writeBootLog } = await import('../../electron/boot-log')
   bootMark('main')
   bootMark('ready')
@@ -97,4 +102,30 @@ test('an installed build is told apart by the uninstaller the setup leaves next 
 test('an installed build reports its version and no commits to be behind', () => {
   const u = releaseInfo('0.1.0', null)
   assert.deepEqual([u.version, u.behind, u.commits, u.canSelfUpdate, u.release], ['0.1.0', 0, [], false, null])
+})
+
+test('parseGitLog reads what `git log --format=%h%x09%s` prints, tabs in a subject included', () => {
+  const TAB = String.fromCharCode(9)
+  const text = ['932264e' + TAB + '0.1.5: 활성 계정', 'e2409ab' + TAB + 'a' + TAB + 'b', '', 'not a log line'].join(String.fromCharCode(10))
+  assert.deepEqual(parseGitLog(text), [
+    { sha: '932264e', title: '0.1.5: 활성 계정' },
+    { sha: 'e2409ab', title: 'a' + TAB + 'b' },
+  ])
+  assert.deepEqual(parseGitLog(''), [])
+})
+
+test('the self-update script starts with a BOM, rebuilds the folder only, and says not to click the icon', () => {
+  assert.equal(UPDATE_SCRIPT.charCodeAt(0), 0xfeff) // PowerShell 5.1 reads a .ps1 without one as ANSI: garbled Korean
+  assert.ok(UPDATE_SCRIPT.includes("'git pull --ff-only', 'npm install --legacy-peer-deps', 'npm run build:dir'"))
+  assert.ok(UPDATE_SCRIPT.includes('git checkout -- package-lock.json'))
+  assert.ok(UPDATE_SCRIPT.includes('작업 표시줄 아이콘은 누르지 마세요'))
+})
+
+test('every update check leaves a line in update.log', async () => {
+  const home = HOME
+  const { logUpdate, updateLogPath } = await import('../../electron/update-log')
+  logUpdate('installed 0.1.3', 'error net::ERR_INTERNET_DISCONNECTED' + String.fromCharCode(10) + '    at stack')
+  assert.equal(updateLogPath(), join(home, 'update.log'))
+  const last = readFileSync(updateLogPath(), 'utf8').trim().split(String.fromCharCode(10)).pop() as string
+  assert.match(last, /^d{4}-dd-ddT[d:.]+Z installed 0.1.3 | error net::ERR_INTERNET_DISCONNECTED at stack$/)
 })
