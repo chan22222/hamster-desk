@@ -82,6 +82,7 @@ export class SessionWatcher extends EventEmitter {
     const seen = new Set<string>()
     const owned = this.opts.ownedShells()
     let pmap: Map<number, number> | null = null
+    let refreshed = false
 
     for (const n of names) {
       let raw: string
@@ -106,6 +107,14 @@ export class SessionWatcher extends EventEmitter {
       let ptyId = prev?.ptyId ?? null
       if ((!prev || (ptyId === null && !prev.mine)) && owned.length) {
         pmap ??= await parentMap()
+        // A claude that started a second ago is not in a map taken four seconds ago — and "not in
+        // the map" used to read as "not ours", so a session started in one of this window's own
+        // terminals showed up as a second, foreign tab until a later scan put it right. Ask again,
+        // once per scan, before deciding.
+        if (!pmap.has(pid) && !refreshed) {
+          refreshed = true
+          pmap = await parentMap(true)
+        }
         const owner = owned.find((o) => isDescendant(pid, o.pid, pmap!))
         ptyId = owner ? owner.ptyId : null
       }

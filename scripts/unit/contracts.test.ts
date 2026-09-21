@@ -9,6 +9,8 @@ test('DEFAULT_PREFS carries the keys the new features read', () => {
   assert.equal(DEFAULT_PREFS.showFeedLog, true)
   // the sidebar's dragged section heights: null = the automatic layout
   assert.deepEqual([DEFAULT_PREFS.sideChangedH, DEFAULT_PREFS.sideFeedH], [null, null])
+  // the app starts on the empty start card: no terminal is opened that nobody asked for
+  assert.equal(DEFAULT_PREFS.restoreTabs, false)
 })
 
 test('adoptPrefs keeps a dragged sidebar height and gives an older file the automatic layout', () => {

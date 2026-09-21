@@ -1,4 +1,4 @@
-import { app, BrowserWindow, clipboard, dialog, ipcMain, nativeTheme, shell } from 'electron'
+import { app, BrowserWindow, clipboard, dialog, ipcMain, Menu, nativeTheme, shell } from 'electron'
 import { appendFileSync, readdirSync, readFileSync, rmSync } from 'node:fs'
 import { basename, join } from 'node:path'
 import { DeskWatcher } from './watcher'
@@ -91,6 +91,16 @@ const blindRun =
     process.env.HAMSTER_UNFOCUSED
   )
 if (blindRun) app.commandLine.appendSwitch('disable-features', 'CalculateNativeWinOcclusion')
+
+// No application menu. Electron installs a default one when nobody says otherwise, and hiding its
+// bar (autoHideMenuBar) does not switch off its accelerators: Ctrl+W closed the window, Ctrl+R
+// reloaded it — every terminal gone — and Ctrl+/-/0 zoomed the page on top of the font-size
+// shortcuts. In a terminal those keys belong to the shell: Ctrl+W deletes a word in PSReadLine and
+// in Claude Code's input line (which is why closing a tab is Ctrl+Shift+W, src/shortcuts.ts), and
+// Ctrl+R searches the history. Every shortcut this app has is handled in the renderer. Copy and
+// paste in text boxes do not need a menu on Windows. Set before 'ready', so the default one is
+// never even built.
+Menu.setApplicationMenu(null)
 
 // A second copy of the packaged app would fight over that one profile, so it hands off to the
 // running window instead of starting. dev/smoke runs have their own profiles and may overlap.
@@ -296,6 +306,16 @@ function createWindow(): void {
     win.webContents.on('console-message', (ev) => {
       if (ev.level === 'error' || ev.level === 'warning') console.log(`[renderer:${ev.level}] ${ev.message}`)
       else if (ev.message.startsWith('[')) console.log(ev.message)
+    })
+  }
+  // the menu that carried DevTools is gone (see Menu.setApplicationMenu above); a dev run keeps the keys
+  if (!app.isPackaged) {
+    win.webContents.on('before-input-event', (e, input) => {
+      if (input.type !== 'keyDown') return
+      if (input.key === 'F12' || (input.control && input.shift && input.key.toLowerCase() === 'i')) {
+        e.preventDefault()
+        win?.webContents.toggleDevTools()
+      }
     })
   }
   win.webContents.setWindowOpenHandler(({ url }) => {

@@ -129,9 +129,13 @@ function installSaver(): void {
 // ---- restoring ------------------------------------------------------------------------------
 
 /**
- * Open the terminals the last run ended with, or — when there is nothing to put back — the single
- * tab this app has always started with. Awaited by App.tsx, so the window is not painted with an
- * empty tab strip first.
+ * What the app starts with. By default: nothing. No shell is spawned until the user picks a folder
+ * on the start card (recent projects, the active account, browse) — an app that opens a terminal
+ * by itself opens it in a folder, and under an account, nobody chose.
+ *
+ * With `prefs.restoreTabs` on, the terminals the last run ended with come back instead (each under
+ * the account it had). The tabs are *saved* either way, so turning the setting on later has
+ * something to restore. Awaited by App.tsx, so the window is not painted half way.
  */
 export async function restoreWorkspaces(home: string): Promise<void> {
   if (useDesk.getState().workspaces.length > 0) return
@@ -149,8 +153,7 @@ export async function restoreWorkspaces(home: string): Promise<void> {
   const alive = await stillThere(stored.tabs.map((t) => t.cwd))
   const kept = stored.tabs.map((t, i) => ({ t, i })).filter(({ t }) => alive.has(t.cwd))
 
-  if (kept.length === 0) {
-    useDesk.getState().addWorkspace(lastCwd() || home)
+  if (kept.length === 0 || !useDesk.getState().prefs.restoreTabs) {
     startSaving()
     return
   }

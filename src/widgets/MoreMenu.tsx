@@ -132,6 +132,7 @@ function Body({ onUpdate, close }: { onUpdate: () => void; close: () => void }) 
     <div className="pop-body">
       <CheckRow on={prefs.showSidebar} label="사이드바" hint="Ctrl+B" onClick={() => setPrefs({ showSidebar: !prefs.showSidebar })} />
       <CheckRow on={!prefs.folded} label="책상 펼치기" onClick={() => setPrefs({ folded: !prefs.folded })} />
+      <CheckRow on={prefs.restoreTabs} label="시작할 때 지난 탭 다시 열기" onClick={() => setPrefs({ restoreTabs: !prefs.restoreTabs })} />
       <CheckRow
         on={prefs.showSidebar && prefs.showLog}
         label="바뀐 파일"

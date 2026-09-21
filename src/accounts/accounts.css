@@ -78,6 +78,9 @@
 .au-num { flex: none; color: var(--text-2); }
 .au-num.is-warm { color: var(--warn); }
 .au-num.is-hot { color: var(--danger); font-weight: 600; }
+/* the same numbers on one line under an account's name in the accounts menu */
+.au-line { display: flex; align-items: baseline; gap: 8px; margin-top: 1px; font-size: 11px; font-variant-numeric: tabular-nums; }
+.au-line .au-age { min-width: 0; text-align: left; }
 .au-age { flex: none; min-width: 44px; text-align: right; font-size: 11px; color: var(--text-3); }
 .au-none { flex: none; font-size: 11px; color: var(--text-3); }
 .au-link { flex: none; padding: 1px 7px; border-radius: var(--radius); border: 1px solid var(--line-strong); color: var(--text-2); font-size: 11px; }

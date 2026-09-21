@@ -21,6 +21,7 @@ import { DEFAULT_PROFILE_ID, type Profile, type ProfilesState } from '@shared/ev
 import { useDesk } from '../store'
 import { lastCwd } from '../sidebar/recent'
 import { IconCheck, IconClose, IconFolder, IconPlus } from '../widgets/icons'
+import { AccountUsageLine } from '../widgets/Usage'
 import './accounts.css'
 
 /** Ask main to change the accounts, then adopt whatever it says they are now. */
@@ -43,7 +44,7 @@ export function setCurrentAccount(id: string): void {
   const s = useDesk.getState()
   if (s.currentProfileId === id) return
   // paint first: the very next click is usually "open a terminal", and it must land on this account
-  s.setProfiles({ list: s.profiles, currentId: id })
+  s.setProfiles({ list: s.profiles, currentId: id, hiddenDefault: s.cliAccountHidden })
   void change((p) => p.setCurrent(id))
 }
 
@@ -216,6 +217,8 @@ function Row({ p, current, only, onDone }: { p: Profile; current: boolean; only:
               {current && <span className="acct-active">활성</span>}
             </span>
             <span className="acct-sub">{p.email ?? '로그인 전'}</span>
+            {/* the last numbers this account reported, however old — it says how old */}
+            <AccountUsageLine profileId={p.id} />
           </span>
         </button>
       )}

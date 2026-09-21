@@ -8,8 +8,9 @@ let cache: { at: number; map: Map<number, number> } | null = null
 let inflight: Promise<Map<number, number>> | null = null
 const TTL = 4000
 
-export function parentMap(): Promise<Map<number, number>> {
-  if (cache && Date.now() - cache.at < TTL) return Promise.resolve(cache.map)
+/** `fresh`: skip the cache — the caller is looking for a process the cached map is too old to know */
+export function parentMap(fresh = false): Promise<Map<number, number>> {
+  if (!fresh && cache && Date.now() - cache.at < TTL) return Promise.resolve(cache.map)
   if (inflight) return inflight
   inflight = query()
     .then((map) => {

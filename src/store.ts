@@ -186,6 +186,8 @@ export interface Prefs {
    */
   sideChangedH: number | null
   sideFeedH: number | null
+  /** reopen the terminals of the last run at start; off = start on the empty start card */
+  restoreTabs: boolean
 }
 
 export const DEFAULT_PREFS: Prefs = {
@@ -207,6 +209,7 @@ export const DEFAULT_PREFS: Prefs = {
   showFeedLog: true,
   sideChangedH: null,
   sideFeedH: null,
+  restoreTabs: false,
 }
 
 interface DeskStore {

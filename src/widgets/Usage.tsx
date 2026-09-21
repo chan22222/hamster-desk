@@ -108,6 +108,23 @@ function Brief({ label, w }: { label: string; w: RateWindow | null }) {
 }
 
 /**
+ * One account's last known numbers on one line — `5h 81% · 주 42% · 3분 전` — for wherever accounts
+ * are listed (the accounts menu). Nothing when that account has never reported any: the CLI only
+ * says them while the account is talking, and only with the status line linked.
+ */
+export function AccountUsageLine({ profileId }: { profileId: string }) {
+  const u = useDesk((s) => s.usageByProfile[profileId])
+  if (!u || (!u.fiveHour && !u.sevenDay)) return null
+  return (
+    <span className="au-line">
+      <Brief label="5h" w={u.fiveHour} />
+      <Brief label="주" w={u.sevenDay} />
+      <span className="au-age">{ago(u.ts)}</span>
+    </span>
+  )
+}
+
+/**
  * Every account's last known numbers, under the detail of the one on screen. Rate limits belong
  * to whoever is logged in, and the CLI only reports them while that account is talking — so each
  * row also says how old it is. Nothing while there is only one account.
