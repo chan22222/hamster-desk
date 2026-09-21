@@ -204,11 +204,18 @@ export default function App() {
   )
   const studio = <DeskStudio session={active} height={beside ? Math.max(1, colH) : prefs.deskH} />
 
-  // mini mode takes the whole window: just the studio and a thin status line, always on top
-  if (mini) return <MiniShell session={active} />
-
+  /*
+   * Mini mode does *not* replace the tree. `TerminalPane` kills its pty when it unmounts, so
+   * swapping the whole app out would take every shell — and the claude running in it — down with
+   * it, and give back fresh ones on the way out. The normal tree therefore stays mounted and
+   * `.app.is-mini` hides it in CSS; `MiniShell` renders on top.
+   *
+   * The studio is the one thing that cannot be in both: `DeskStudio` is a singleton renderer, so
+   * mini mode owns it while it is on and the normal layout skips it.
+   */
   return (
-    <div className="app" data-booting={booting ? '' : undefined}>
+    <div className={`app ${mini ? 'is-mini' : ''}`} data-booting={booting ? '' : undefined}>
+      {mini && <MiniShell session={active} />}
       <header className="topbar">
         <button className="icon-btn" onClick={() => setPrefs({ showSidebar: !prefs.showSidebar })} title="사이드바 (Ctrl+B)" aria-label="사이드바" aria-pressed={prefs.showSidebar}>
           <IconSidebar />
@@ -269,7 +276,7 @@ export default function App() {
         {prefs.showSidebar && <Sidebar start={activeWs?.cwd ?? workspaces[0]?.cwd ?? ''} session={active} onOpen={openTerminal} />}
         <div ref={colRef} className={`column ${beside ? 'is-beside' : ''}`} style={{ ['--desk-w' as string]: `${prefs.deskW}px` }}>
           <Banner />
-          {!prefs.folded && !beside && (
+          {!mini && !prefs.folded && !beside && (
             <>
               {studio}
               {splitter}
@@ -290,7 +297,7 @@ export default function App() {
                 <div className="ext-pane">스튜디오 미리보기 · 터미널은 데스크톱 앱에서 사용할 수 있어요.</div>
               ))}
           </div>
-          {!prefs.folded && beside && (
+          {!mini && !prefs.folded && beside && (
             <>
               {splitter}
               {studio}

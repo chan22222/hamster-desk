@@ -247,11 +247,14 @@ ipcMain.handle('pty:create', (_e, cols: number, rows: number, cwd?: string) => {
     },
     (code) => {
       ptys.delete(handle.id)
+      if (process.env.HAMSTER_CAPTURE) console.log(`[pty] exit ${handle.id} code=${code}`)
       send('pty:exit', handle.id, code)
     },
     process.env.HAMSTER_CWD ?? cwd, // HAMSTER_CWD: debug/e2e override
   )
   ptys.set(handle.id, handle)
+  // a blind run cannot see a shell being respawned; this is how it says so
+  if (process.env.HAMSTER_CAPTURE) console.log(`[pty] create ${handle.id} ${handle.cwd}`)
   autoType(handle)
   // a claude started in this shell shows up in ~/.claude/sessions a few seconds later; poll a bit sooner
   for (const ms of [3000, 6000, 10000]) setTimeout(() => void watcher?.rescan(), ms)

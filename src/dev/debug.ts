@@ -143,6 +143,7 @@ function installEvents(events: DeskEvent[] | null): void {
     useDesk.subscribe((s) => {
       const id = s.workspaces[0]?.ptyId ?? null
       if (id === null || id === bound) return
+      console.log(`[debug] pty rebind ${bound} -> ${id}`)
       bound = id
       announceSession(id)
     })

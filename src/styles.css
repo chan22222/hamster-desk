@@ -109,6 +109,10 @@ button:focus-visible, select:focus-visible, input:focus-visible { outline: 2px s
 /* The settings file is read over IPC, so the first frame would be the defaults — a light flash for
    a dark-theme user, a shifted layout for everyone. It is one IPC round trip, not a transition. */
 .app[data-booting] { visibility: hidden; }
+/* Mini mode hides the normal layout instead of unmounting it: a TerminalPane that goes away kills
+   its pty, so swapping the tree would take every shell (and the claude in it) with it. The panes
+   keep running behind this rule; xterm's ResizeObserver no-ops while `offsetParent` is null. */
+.app.is-mini > .topbar, .app.is-mini > .body { display: none; }
 
 /* ---- top bar ------------------------------------------------------------------------- */
 .topbar { display: flex; align-items: center; gap: 8px; height: 44px; padding: 0 10px; background: var(--surface); border-bottom: 1px solid var(--line); -webkit-app-region: drag; }

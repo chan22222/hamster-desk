@@ -9,9 +9,15 @@ export function readWindowState(): WindowState | null {
   return null
 }
 
-/** Enter (or leave) mini mode; returns the state the window actually ended up in. */
-export function setMini(_win: BrowserWindow | null, _on: boolean): boolean {
-  return false
+/**
+ * Enter (or leave) mini mode; returns the state the window actually ended up in.
+ *
+ * The stub resizes nothing but reports the state it was asked for, so the renderer half of mini
+ * mode is reachable (and photographable) before the window half exists. A stub that answered
+ * `false` would make `toggleMini` flip straight back and leave the whole branch dead code.
+ */
+export function setMini(_win: BrowserWindow | null, on: boolean): boolean {
+  return on
 }
 
 /** Start remembering this window's size and position (debounced, skipped while mini). */
