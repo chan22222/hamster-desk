@@ -88,6 +88,20 @@ export interface VersionInfo {
   error: string | null
 }
 
+/** This app against `main` of its own repository on GitHub (electron/app-update.ts). */
+export interface AppUpdateInfo {
+  /** the commit this build was made from; null when it was built outside a git checkout */
+  commit: string | null
+  /** how many commits `main` has that this build does not */
+  behind: number
+  /** those commits, newest first: short sha and the first line of the message */
+  commits: { sha: string; title: string }[]
+  /** true when "update" can pull and rebuild by itself (the app runs out of its own git checkout) */
+  canSelfUpdate: boolean
+  checkedAt: number
+  error: string | null
+}
+
 export type DeskEvent =
   | ({ kind: 'session' } & SessionInfo)
   | { kind: 'session_gone'; sessionId: string }
@@ -139,6 +153,7 @@ export type DeskEvent =
   /** status-line snapshot (rate limits, context window, cost) */
   | ({ kind: 'status' } & StatusSnapshot)
   | ({ kind: 'version' } & VersionInfo)
+  | ({ kind: 'app_update' } & AppUpdateInfo)
   // from the embedded terminal (heuristic on pty output)
   | { kind: 'waiting'; ptyId: number; reason: 'permission' | 'question'; ts: number }
   | { kind: 'waiting_clear'; ptyId: number; ts: number }

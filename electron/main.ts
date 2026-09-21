@@ -1,10 +1,10 @@
 import { app, BrowserWindow, clipboard, dialog, ipcMain, nativeTheme, shell } from 'electron'
 import { appendFileSync, readdirSync, readFileSync, rmSync } from 'node:fs'
-import { join } from 'node:path'
+import { basename, join } from 'node:path'
 import { DeskWatcher } from './watcher'
-import { DEFAULT_PROFILE_ID, type BubbleRequest, type DeskEvent, type FileEntry, type NotifyRequest, type Profile, type SessionInfo, type StatusSnapshot, type UiState } from '../shared/events'
+import { DEFAULT_PROFILE_ID, type BubbleRequest, type DeskEvent, type FileEntry, type NotifyRequest, type Profile, type SessionInfo, type StatusSnapshot, type UiState, type AppUpdateInfo } from '../shared/events'
 import { spawnPty, PromptDetector, type PtyHandle } from './pty'
-import { StatusWatcher, installStatusLine, uninstallStatusLine, statusLineState, refreshStatusScripts } from './statusline'
+import { HAMSTER_HOME, StatusWatcher, installStatusLine, uninstallStatusLine, statusLineState, refreshStatusScripts } from './statusline'
 import { addProfile, baseDirOf, configDirOf, deleteProfileDir, loadProfiles, profileOfConfigDir, removeProfile, renameProfile, setCurrentProfile, withEmails } from './profiles'
 import { flushUi, loadUi, saveUi, uiPath } from './ui-store'
 import { checkVersion } from './version'
@@ -15,6 +15,12 @@ import { AUMID_VARIANTS, appUserModelId, aumidFor, showNotification } from './no
 import { attachWindowStateSaver, isMini, persistWindowState, readWindowState, setMini } from './window-state'
 import { listTranscripts } from './transcripts'
 import { gitDiff, gitInfo } from './git'
+import { COMMITS_URL, buildCommit, checkAppUpdate, repoDirOf, startSelfUpdate } from './app-update'
+import { bootMark, writeBootLog } from './boot-log'
+import { listDir, pathExists, repairShortcuts } from './shortcuts'
+
+// the first line of ours to run; what came before it is the OS loading the exe (electron/boot-log.ts)
+bootMark('main')
 
 // The portable exe, `npm run dev` and the smoke runs all landed on the same %APPDATA%\hamster-desk
 // profile: whichever started second could not lock the caches ("Unable to move the cache",
@@ -263,6 +269,9 @@ function createWindow(): void {
   // state the notification path fires in — otherwise a blind run can never reach it.
   if (unfocusedStart()) win.showInactive()
   else win.show()
+  bootMark('window')
+  win.webContents.once('dom-ready', () => bootMark('dom'))
+  win.webContents.once('did-finish-load', () => bootMark('load'))
   if (process.env.HAMSTER_CAPTURE) {
     // Smoke tests run blind: surface renderer errors on stdout, and let the renderer's own
     // tagged lines ([debug] click …, [git] …) through verbatim — a capture that shows nothing
@@ -336,6 +345,12 @@ function startWatchers(): void {
   }
   version()
   setInterval(() => version(), 60 * 60 * 1000)
+
+  // a capture run photographs the window, and a pill that depends on the network is not repeatable
+  if (!process.env.HAMSTER_CAPTURE) {
+    void appUpdate()
+    setInterval(() => void appUpdate(), 60 * 60 * 1000)
+  }
 }
 
 /**
@@ -504,6 +519,39 @@ ipcMain.handle('version:check', async (_e, force?: boolean) => {
   const v = await checkVersion(force === true)
   emitDesk({ kind: 'version', ...v })
   return v
+})
+
+// ---- IPC: the app's own updates (electron/app-update.ts)
+
+/** the checkout a packaged build can rebuild itself from; a dev run is updated by whoever runs it */
+const selfUpdateRepo = (): string | null => (app.isPackaged ? repoDirOf(process.execPath, app.getAppPath(), true) : null)
+
+async function appUpdate(force = false): Promise<AppUpdateInfo> {
+  const u = await checkAppUpdate(force, selfUpdateRepo() !== null)
+  emitDesk({ kind: 'app_update', ...u })
+  return u
+}
+
+ipcMain.handle('appUpdate:check', (_e, force?: boolean) => appUpdate(force === true))
+
+/** 'updating': the app is about to quit and come back rebuilt. 'opened': the commits page, to update by hand. */
+ipcMain.handle('appUpdate:run', () => {
+  const repoDir = selfUpdateRepo()
+  if (repoDir && startSelfUpdate({ repoDir, exe: process.execPath, pid: process.pid, home: HAMSTER_HOME })) {
+    setTimeout(() => app.quit(), 200) // let this reply reach the renderer first
+    return 'updating'
+  }
+  void shell.openExternal(COMMITS_URL)
+  return 'opened'
+})
+
+// the renderer says when the app is on screen and usable; that closes the boot log's line
+ipcMain.on('boot:done', () => {
+  bootMark('booted')
+  // same rule as window-state.ts and the saved tabs: a capture run writes nothing to the user's folder
+  if (process.env.HAMSTER_CAPTURE) return
+  const head = `${app.getVersion()} ${buildCommit()?.slice(0, 7) ?? 'nocommit'} ${app.isPackaged ? 'packaged' : 'dev'}`
+  writeBootLog(head, process.getCreationTime())
 })
 
 // ---- IPC: folder browser
@@ -766,6 +814,28 @@ function shutdown(): void {
   bubbles = null
 }
 
+/**
+ * A packaged build on Windows keeps its own shortcuts right (electron/shortcuts.ts): without it a
+ * pinned exe and the window it starts are two taskbar buttons. Off the start-up path — it is a
+ * handful of small COM calls, but nothing on screen waits for it.
+ */
+function scheduleShortcutRepair(): void {
+  if (!app.isPackaged || process.platform !== 'win32') return
+  setTimeout(() => {
+    const fixed = repairShortcuts(
+      // named after the exe, as Electron names the one it makes (a dev run's is "Electron.lnk", not the package name)
+      { appData: app.getPath('appData'), name: basename(process.execPath, '.exe'), exe: process.execPath, aumid: appUserModelId(true) },
+      {
+        read: (p) => shell.readShortcutLink(p),
+        write: (p, operation, details) => shell.writeShortcutLink(p, operation, details),
+        list: listDir,
+        exists: pathExists,
+      },
+    )
+    if (fixed.length) console.log(`[shortcuts] repaired: ${fixed.join(', ')}`)
+  }, 2000)
+}
+
 // ---- lifecycle
 // Only the instance holding the lock registers these: after app.quit() a ready handler would
 // still race to create a window.
@@ -779,6 +849,7 @@ if (gotLock) {
   })
 
   app.whenReady().then(() => {
+    bootMark('ready')
     // this app used to write agent files and settings.agent; take those back out once
     const legacy = cleanupLegacyHarness()
     if (legacy.length) console.log(`[legacy] removed collaboration-mode leftovers: ${legacy.join(', ')}`)
@@ -787,6 +858,7 @@ if (gotLock) {
     scheduleCapture()
     scheduleKeys()
     scheduleNotifyProbe()
+    scheduleShortcutRepair()
     app.on('activate', () => {
       if (BrowserWindow.getAllWindows().length === 0) createWindow()
     })

@@ -7,6 +7,7 @@ import { Sidebar } from './sidebar/Sidebar'
 import { rememberRecent, setLastCwd } from './sidebar/recent'
 import { UsageMeters } from './widgets/Usage'
 import { UpdatePill } from './widgets/Version'
+import { AppUpdatePill } from './widgets/AppUpdate'
 import { MoreMenu } from './widgets/MoreMenu'
 import { PlusMenu, StartCard } from './widgets/PlusMenu'
 import { Popover } from './widgets/Popover'
@@ -126,6 +127,7 @@ export default function App() {
   // app behind it is no longer the hidden first frame
   useEffect(() => {
     if (booting) return
+    window.desk?.bootDone()
     const el = document.getElementById('splash')
     if (!el) return
     el.dataset.done = ''
@@ -284,6 +286,7 @@ export default function App() {
             </button>
           )}
           <UpdatePill onUpdate={runUpdate} />
+          <AppUpdatePill />
           <MoreMenu onUpdate={runUpdate} />
         </div>
       </header>

@@ -5,6 +5,7 @@ import { bubbleAvailability, resetBubbleStats, type BubbleAvailability } from '.
 import { Popover } from './Popover'
 import { IconCheck, IconMore } from './icons'
 import { VersionSection } from './Version'
+import { AppUpdateSection } from './AppUpdate'
 import { AccountsSection } from '../accounts/Accounts'
 
 function CheckRow({
@@ -177,6 +178,10 @@ function Body({ onUpdate, close }: { onUpdate: () => void; close: () => void }) 
       <div className="pop-sep" />
       <div className="pop-head">Claude Code</div>
       <VersionSection onUpdate={onUpdate} />
+
+      <div className="pop-sep" />
+      <div className="pop-head">Hamster Desk</div>
+      <AppUpdateSection />
 
       <div className="pop-sep" />
       <SettingsFile />

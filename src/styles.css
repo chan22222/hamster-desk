@@ -180,6 +180,8 @@ button:focus-visible, select:focus-visible, input:focus-visible { outline: 2px s
 .pop-usage button { flex: none; padding: 3px 7px; border-radius: var(--radius); border: 1px solid var(--line-strong); color: var(--text-2); font-size: 11px; }
 .pop-usage button:hover { color: var(--text); background: var(--surface-2); }
 .pop-line { font-size: 13px; color: var(--text); }
+.pop-commits { margin: 0; padding: 0 0 0 16px; max-height: 168px; overflow-y: auto; font-size: 12px; line-height: 1.7; color: var(--text); }
+.pop-commits li { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .pop-row { display: flex; gap: 6px; }
 .pop-row > * { flex: 1; }
 .pop-primary { display: inline-flex; align-items: center; justify-content: center; gap: 6px; height: 32px; padding: 0 12px; border-radius: var(--radius); background: var(--accent); color: var(--on-accent); font-size: 13px; font-weight: 500; }

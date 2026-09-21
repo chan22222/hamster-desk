@@ -1,5 +1,5 @@
 import { create } from 'zustand'
-import type { DeskEvent, EffortLevel, GitInfo, LogItem, Profile, ProfilesState, SessionInfo, StatusSnapshot, ToolAction, TurnSummary, TurnToast, VersionInfo } from '@shared/events'
+import type { AppUpdateInfo, DeskEvent, EffortLevel, GitInfo, LogItem, Profile, ProfilesState, SessionInfo, StatusSnapshot, ToolAction, TurnSummary, TurnToast, VersionInfo } from '@shared/events'
 import { DEFAULT_PROFILE_ID } from '@shared/events'
 import { setLang, t, type PrefLang } from './i18n'
 import { cancelSummary, requestSummary } from './bubbles/summarize'
@@ -216,6 +216,8 @@ interface DeskStore {
   /** the account new terminals open under */
   currentProfileId: string
   version: VersionInfo | null
+  /** this app against `main` on GitHub; null until the first check comes back */
+  appUpdate: AppUpdateInfo | null
   prefs: Prefs
   /** the small always-on-top window; not remembered across restarts */
   mini: boolean
@@ -717,6 +719,7 @@ export const useDesk = create<DeskStore>((set, get) => {
     profiles: [{ id: DEFAULT_PROFILE_ID, name: '기본', dir: null }],
     currentProfileId: DEFAULT_PROFILE_ID,
     version: null,
+    appUpdate: null,
     prefs: loadPrefs(),
     mini: false,
     toast: null,
@@ -1010,6 +1013,11 @@ export const useDesk = create<DeskStore>((set, get) => {
         case 'version': {
           const { kind: _k, ...v } = e
           set({ version: v })
+          return
+        }
+        case 'app_update': {
+          const { kind: _k, ...u } = e
+          set({ appUpdate: u })
           return
         }
         case 'waiting': {

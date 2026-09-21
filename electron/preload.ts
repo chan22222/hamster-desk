@@ -1,5 +1,6 @@
 import { contextBridge, ipcRenderer } from 'electron'
 import type {
+  AppUpdateInfo,
   BubbleRequest,
   BubbleResult,
   BubbleState,
@@ -55,6 +56,14 @@ export interface DeskBridge {
     openFolder(id: string): Promise<string>
   }
   version: { check(force?: boolean): Promise<VersionInfo> }
+  /** this app against `main` of its repository (electron/app-update.ts) */
+  appUpdate: {
+    check(force?: boolean): Promise<AppUpdateInfo>
+    /** 'updating': the app quits, rebuilds and reopens. 'opened': the commits page, where self-update is not possible */
+    run(): Promise<'updating' | 'opened'>
+  }
+  /** the app is on screen and usable: closes this launch's line in ~/.hamster-desk/boot.log */
+  bootDone(): void
   dialog: { pickFolder(defaultPath?: string): Promise<string | null> }
   /** short speech-bubble lines summarized by a headless `claude -p --model haiku` (electron/summarize.ts) */
   bubble: {
@@ -166,6 +175,11 @@ const bridge: DeskBridge = {
     openFolder: (id) => ipcRenderer.invoke('profiles:openFolder', id),
   },
   version: { check: (force) => ipcRenderer.invoke('version:check', force) },
+  appUpdate: {
+    check: (force) => ipcRenderer.invoke('appUpdate:check', force),
+    run: () => ipcRenderer.invoke('appUpdate:run'),
+  },
+  bootDone: () => ipcRenderer.send('boot:done'),
   dialog: { pickFolder: (d) => ipcRenderer.invoke('dialog:pickFolder', d) },
   bubble: {
     summarize: (req) => ipcRenderer.invoke('bubble:summarize', req),
