@@ -135,6 +135,12 @@ export interface Workspace {
   initialCommand?: string
   /** the account (config folder) this terminal runs under; fixed for the life of the tab */
   profileId: string
+  /**
+   * Also typed into the shell once it is up, but — unlike `initialCommand` — the tab stays an
+   * ordinary one: named after its folder and restored at the next start (e.g. the login of a
+   * new account, after which the tab is simply that account's terminal).
+   */
+  runOnce?: string
 }
 
 /** `system` keeps following the OS for as long as it is picked. */
@@ -231,8 +237,8 @@ interface DeskStore {
   setGit(cwd: string, info: GitInfo): void
   apply(e: DeskEvent): void
   setActiveTab(id: string | null): void
-  /** `profileId` defaults to the current account */
-  addWorkspace(cwd: string, title?: string, initialCommand?: string, profileId?: string): Workspace
+  /** `profileId` defaults to the current account; `runOnce` is typed once without making the tab a throwaway */
+  addWorkspace(cwd: string, title?: string, initialCommand?: string, profileId?: string, runOnce?: string): Workspace
   /** adopt what main says the accounts are (after list/add/rename/remove/setCurrent) */
   setProfiles(state: ProfilesState): void
   bindWorkspacePty(id: number, ptyId: number, cwd: string): void
@@ -733,11 +739,11 @@ export const useDesk = create<DeskStore>((set, get) => {
     setGit: (cwd, info) => set({ git: { ...get().git, [gitKey(cwd)]: info } }),
 
     setActiveTab: (id) => set({ activeTab: id }),
-    addWorkspace(cwd, title, initialCommand, profileId) {
+    addWorkspace(cwd, title, initialCommand, profileId, runOnce) {
       const { profiles, currentProfileId } = get()
       // an account that was forgotten since (a stored tab, a stale menu) opens under the current one
       const pid = profileId && profiles.some((p) => p.id === profileId) ? profileId : currentProfileId
-      const ws: Workspace = { id: nextWorkspaceId++, ptyId: null, cwd, title: title ?? (baseName(cwd) || cwd), initialCommand, profileId: pid }
+      const ws: Workspace = { id: nextWorkspaceId++, ptyId: null, cwd, title: title ?? (baseName(cwd) || cwd), initialCommand, profileId: pid, ...(runOnce ? { runOnce } : {}) }
       set({ workspaces: [...get().workspaces, ws], activeTab: `ws:${ws.id}` })
       return ws
     },

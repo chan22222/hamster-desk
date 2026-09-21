@@ -19,7 +19,7 @@ import { restoreWorkspaces } from './workspaces-persist'
 import { SessionBar } from './session/SessionBar'
 import { TabContext } from './session/ContextMeter'
 import { TabGit } from './git/GitChip'
-import { AccountBadge } from './accounts/Accounts'
+import { AccountBadge, useAccountsRefresh } from './accounts/Accounts'
 import { TurnToast } from './log/TurnToast'
 import { Banner } from './notify/Banner'
 import { MiniShell } from './mini/MiniShell'
@@ -144,6 +144,7 @@ export default function App() {
   }, [])
 
   useGlobalShortcuts()
+  useAccountsRefresh()
 
   const st = { sessions, workspaces }
   const externals = externalSessions(sessions)

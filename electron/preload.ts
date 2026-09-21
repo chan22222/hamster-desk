@@ -49,7 +49,7 @@ export interface DeskBridge {
     list(): Promise<ProfilesState>
     add(name: string): Promise<ProfilesState>
     rename(id: string, name: string): Promise<ProfilesState>
-    /** forgets the account; its folder (login, conversations) stays on disk */
+    /** deletes the account: its shells are closed and its folder (login, settings, conversations) goes with it */
     remove(id: string): Promise<ProfilesState>
     setCurrent(id: string): Promise<ProfilesState>
     openFolder(id: string): Promise<string>

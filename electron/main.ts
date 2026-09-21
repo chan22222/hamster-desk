@@ -5,7 +5,7 @@ import { DeskWatcher } from './watcher'
 import { DEFAULT_PROFILE_ID, type BubbleRequest, type DeskEvent, type FileEntry, type NotifyRequest, type Profile, type SessionInfo, type StatusSnapshot, type UiState } from '../shared/events'
 import { spawnPty, PromptDetector, type PtyHandle } from './pty'
 import { StatusWatcher, installStatusLine, uninstallStatusLine, statusLineState, refreshStatusScripts } from './statusline'
-import { addProfile, baseDirOf, configDirOf, loadProfiles, profileOfConfigDir, removeProfile, renameProfile, setCurrentProfile, withEmails } from './profiles'
+import { addProfile, baseDirOf, configDirOf, deleteProfileDir, loadProfiles, profileOfConfigDir, removeProfile, renameProfile, setCurrentProfile, withEmails } from './profiles'
 import { flushUi, loadUi, saveUi, uiPath } from './ui-store'
 import { checkVersion } from './version'
 import { BubbleSummarizer } from './summarize'
@@ -96,6 +96,8 @@ if (!gotLock) app.quit()
 if (process.env.HAMSTER_NOTIFY_PROBE !== '1') app.setAppUserModelId(appUserModelId(app.isPackaged))
 
 const ptys = new Map<number, PtyHandle>()
+/** pty id → the account its shell was started under */
+const ptyProfile = new Map<number, string>()
 let win: BrowserWindow | null = null
 /** one watcher per account (profile id → watcher): each account has its own sessions/ and projects/ */
 const watchers = new Map<string, DeskWatcher>()
@@ -411,6 +413,7 @@ ipcMain.handle('pty:create', (_e, cols: number, rows: number, cwd?: string, prof
     },
     (code) => {
       ptys.delete(handle.id)
+      ptyProfile.delete(handle.id)
       if (process.env.HAMSTER_CAPTURE) console.log(`[pty] exit ${handle.id} code=${code}`)
       send('pty:exit', handle.id, code)
     },
@@ -418,6 +421,7 @@ ipcMain.handle('pty:create', (_e, cols: number, rows: number, cwd?: string, prof
     profile.dir,
   )
   ptys.set(handle.id, handle)
+  ptyProfile.set(handle.id, profile.id)
   // a blind run cannot see a shell being respawned; this is how it says so
   if (process.env.HAMSTER_CAPTURE) console.log(`[pty] create ${handle.id} ${handle.cwd} profile=${profile.id}`)
   autoType(handle)
@@ -460,8 +464,19 @@ ipcMain.handle('profiles:add', (_e, name: string) => {
 })
 ipcMain.handle('profiles:rename', (_e, id: string, name: string) => withEmails(renameProfile(String(id ?? ''), String(name ?? ''))))
 ipcMain.handle('profiles:remove', (_e, id: string) => {
-  const state = removeProfile(String(id ?? ''))
-  if (!state.list.some((p) => p.id === id)) unwatchProfile(String(id ?? ''))
+  const { state, removed } = removeProfile(String(id ?? ''))
+  if (removed) {
+    // everything that holds the folder open has to let go first: the watcher's handles, then the
+    // shells (and the claude inside them) that were started under this account
+    unwatchProfile(removed.id)
+    for (const [ptyId, pid] of ptyProfile) {
+      if (pid !== removed.id) continue
+      ptys.get(ptyId)?.kill()
+      ptys.delete(ptyId)
+      ptyProfile.delete(ptyId)
+    }
+    deleteProfileDir(removed)
+  }
   return withEmails(state)
 })
 ipcMain.handle('profiles:setCurrent', (_e, id: string) => withEmails(setCurrentProfile(String(id ?? ''))))

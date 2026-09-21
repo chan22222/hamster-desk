@@ -115,7 +115,7 @@ function SettingsFile() {
   )
 }
 
-function Body({ onUpdate }: { onUpdate: () => void }) {
+function Body({ onUpdate, close }: { onUpdate: () => void; close: () => void }) {
   const prefs = useDesk((s) => s.prefs)
   const setPrefs = useDesk((s) => s.setPrefs)
   const mini = useDesk((s) => s.mini)
@@ -144,7 +144,7 @@ function Body({ onUpdate }: { onUpdate: () => void }) {
       <Segmented label="터미널 글꼴" value={String(prefs.termFont)} options={TERM_FONTS} onChange={(v) => setPrefs({ termFont: Number(v) })} />
 
       <div className="pop-sep" />
-      <AccountsSection />
+      <AccountsSection onDone={close} />
 
       <div className="pop-sep" />
       <div className="pop-head">알림</div>
@@ -188,7 +188,7 @@ function Body({ onUpdate }: { onUpdate: () => void }) {
 export function MoreMenu({ onUpdate }: { onUpdate: () => void }) {
   return (
     <Popover className="icon-btn" label={<IconMore />} ariaLabel="설정" title="설정" width={268} debugClick="more">
-      {() => <Body onUpdate={onUpdate} />}
+      {(close) => <Body onUpdate={onUpdate} close={close} />}
     </Popover>
   )
 }

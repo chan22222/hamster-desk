@@ -256,7 +256,7 @@ export function TerminalPane({ ws, visible }: { ws: Workspace; visible: boolean 
       ptyIdRef.current = info.id
       bind(ws.id, info.id, info.cwd)
       bridge.pty.resize(info.id, term.cols, term.rows)
-      const first = ws.initialCommand
+      const first = ws.initialCommand ?? ws.runOnce
       // give the shell a moment to print its prompt before typing into it
       if (first) setTimeout(() => runInTerminal(info.id, first), 1200)
       if (visible) term.focus()

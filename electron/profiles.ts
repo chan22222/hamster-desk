@@ -1,6 +1,6 @@
-import { closeSync, mkdirSync, openSync, readFileSync, readSync, statSync } from 'node:fs'
+import { closeSync, existsSync, mkdirSync, openSync, readFileSync, readSync, rmSync, statSync } from 'node:fs'
 import { homedir } from 'node:os'
-import { join, resolve } from 'node:path'
+import { dirname, join, resolve } from 'node:path'
 import { DEFAULT_PROFILE_ID, type Profile, type ProfilesState } from '../shared/events'
 import { loadUi, saveUi } from './ui-store'
 import { claudeDir } from './watcher/paths'
@@ -75,18 +75,22 @@ function store(state: ProfilesState): ProfilesState {
   return state
 }
 
-/** A short id nobody else has: `acc-2`, `acc-3`, … (it is also the folder name). */
-export function nextProfileId(taken: string[]): string {
+/**
+ * A short id nobody else has: `acc-2`, `acc-3`, … (it is also the folder name). `folderTaken` skips
+ * an id whose folder is still there — a delete that could not finish (a file was locked) must not
+ * hand its leftovers, login included, to the next account that gets the same number.
+ */
+export function nextProfileId(taken: string[], folderTaken: (id: string) => boolean = () => false): string {
   for (let n = 2; ; n++) {
     const id = `acc-${n}`
-    if (!taken.includes(id)) return id
+    if (!taken.includes(id) && !folderTaken(id)) return id
   }
 }
 
 /** A new, empty account folder. The user logs in by running `claude` there and typing `/login`. */
 export function addProfile(name: string): { state: ProfilesState; added: Profile } {
   const state = loadProfiles()
-  const id = nextProfileId(state.list.map((p) => p.id))
+  const id = nextProfileId(state.list.map((p) => p.id), (x) => existsSync(join(profilesRoot(), x)))
   const dir = join(profilesRoot(), id)
   mkdirSync(dir, { recursive: true })
   const added: Profile = { id, name: cleanName(name, `계정 ${state.list.length + 1}`), dir }
@@ -98,15 +102,32 @@ export function renameProfile(id: string, name: string): ProfilesState {
   return store({ ...state, list: state.list.map((p) => (p.id === id ? { ...p, name: cleanName(name, p.name) } : p)) })
 }
 
-/**
- * Forget an account. Its folder stays on disk on purpose — it holds a login and transcripts, and
- * deleting somebody's conversations is not something a list row's × should do.
- */
-export function removeProfile(id: string): ProfilesState {
+/** Take an account off the list. `removed` is what the caller then hands to `deleteProfileDir`. */
+export function removeProfile(id: string): { state: ProfilesState; removed: Profile | null } {
   const state = loadProfiles()
-  if (id === DEFAULT_PROFILE_ID) return state
+  const removed = id === DEFAULT_PROFILE_ID ? null : (state.list.find((p) => p.id === id) ?? null)
+  if (!removed) return { state, removed: null }
   const list = state.list.filter((p) => p.id !== id)
-  return store({ list, currentId: state.currentId === id ? DEFAULT_PROFILE_ID : state.currentId })
+  return { state: store({ list, currentId: state.currentId === id ? DEFAULT_PROFILE_ID : state.currentId }), removed }
+}
+
+/**
+ * Delete a removed account's folder — its login, settings and conversations. Only ever a folder
+ * directly under ~/.hamster-desk/profiles: the default account has none, and a list somebody
+ * edited by hand must not be able to point this at anything else. Best effort; what a running
+ * process still holds stays behind (and `nextProfileId` then leaves that number alone).
+ */
+export function deleteProfileDir(p: Profile | null): boolean {
+  if (!p?.dir) return false
+  const root = resolve(profilesRoot())
+  const dir = resolve(p.dir)
+  if (!sameDir(dirname(dir), root) || sameDir(dir, root)) return false
+  try {
+    rmSync(dir, { recursive: true, force: true, maxRetries: 3, retryDelay: 100 })
+  } catch {
+    /* locked by something still running */
+  }
+  return !existsSync(dir)
 }
 
 export function setCurrentProfile(id: string): ProfilesState {
