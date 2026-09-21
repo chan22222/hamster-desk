@@ -1,0 +1,76 @@
+/* Mini mode: a 480×360 always-on-top window that is the studio plus one thin line. Plan §3.10.
+   The normal layout is still mounted behind this (App.tsx keeps the terminals alive); `.app.is-mini`
+   in styles.css hides it. */
+
+.mini-shell {
+  display: flex;
+  flex-direction: column;
+  flex: 1;
+  min-height: 0;
+  height: 100%;
+  background: var(--bg);
+}
+
+/* the studio fills whatever is left above the bar; DeskStudio wants the number, not a flex rule */
+.mini-shell .mini-stage {
+  flex: 1;
+  min-height: 0;
+  position: relative;
+  overflow: hidden;
+}
+
+.mini-bar {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  height: 28px;
+  flex: none;
+  padding: 0 4px 0 9px;
+  background: var(--surface);
+  border-top: 1px solid var(--line);
+  font-size: 11px;
+  color: var(--text-2);
+  /* the mini window has no title bar of its own, so this line is the one place to grab it by */
+  -webkit-app-region: drag;
+}
+.mini-bar button { -webkit-app-region: no-drag; }
+
+.mini-bar .mb-title {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  color: var(--text);
+  font-weight: 500;
+}
+/* the finished turn takes the title's place for a few seconds — mini has no room for a toast */
+.mini-bar .mb-title.is-turn { color: var(--accent); font-weight: 600; }
+
+.mini-bar .mb-chips {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  flex: none;
+  white-space: nowrap;
+}
+.mini-bar .mb-chip { color: var(--text-2); }
+.mini-bar .mb-chip.is-wait { color: var(--warn); font-weight: 600; }
+.mini-bar .mb-chip.is-warm { color: var(--warn); }
+.mini-bar .mb-chip.is-hot { color: var(--danger); font-weight: 600; }
+
+.mini-bar .mb-btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  height: 20px;
+  min-width: 22px;
+  padding: 0 6px;
+  flex: none;
+  border-radius: var(--radius);
+  color: var(--text-2);
+  font-size: 11px;
+}
+.mini-bar .mb-btn:hover { background: var(--surface-2); color: var(--text); }
+.mini-bar .mb-btn[aria-pressed='true'] { background: var(--accent-soft); color: var(--accent); }
+.mini-bar .mb-exit { font-size: 12px; }

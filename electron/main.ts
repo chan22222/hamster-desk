@@ -10,8 +10,8 @@ import { checkVersion } from './version'
 import { BubbleSummarizer } from './summarize'
 import { cleanupLegacyHarness } from './legacy'
 import { claudeDir } from './watcher/paths'
-import { showNotification } from './notify'
-import { attachWindowStateSaver, readWindowState, setMini } from './window-state'
+import { AUMID_VARIANTS, appUserModelId, aumidFor, showNotification } from './notify'
+import { attachWindowStateSaver, isMini, persistWindowState, readWindowState, setMini } from './window-state'
 import { listTranscripts } from './transcripts'
 import { gitDiff, gitInfo } from './git'
 
@@ -34,6 +34,11 @@ if (!app.isPackaged) {
 // running window instead of starting. dev/smoke runs have their own profiles and may overlap.
 const gotLock = app.isPackaged ? app.requestSingleInstanceLock() : true
 if (!gotLock) app.quit()
+
+// Windows files a toast under an Application User Model ID, and it has to be set before anything
+// shows one (electron/notify.ts holds the three variants and why). HAMSTER_NOTIFY_PROBE leaves it
+// alone on purpose: its first variant *is* "whatever this process gets without asking".
+if (process.env.HAMSTER_NOTIFY_PROBE !== '1') app.setAppUserModelId(appUserModelId(app.isPackaged))
 
 const ptys = new Map<number, PtyHandle>()
 let win: BrowserWindow | null = null
@@ -136,12 +141,22 @@ function scheduleKeys(): void {
   }
 }
 
-/** `HAMSTER_NOTIFY_PROBE=1` — one notification 5 s in, to find out what this PC does with it. */
+/**
+ * `HAMSTER_NOTIFY_PROBE=1` — the three AUMID variants, 3 s apart, so one blind run says what this
+ * PC actually does with a toast (plan §3.1, R1). The id is only set here, which is what makes the
+ * first variant ('none', i.e. whatever the process gets without asking) an honest test.
+ */
 function scheduleNotifyProbe(): void {
   if (debugOff() || process.env.HAMSTER_NOTIFY_PROBE !== '1') return
-  setTimeout(() => {
-    void showNotification({ title: 'probe', body: 'probe', tag: 'turn', tab: '' }, win).then((r) => console.log(`[notify] probe=${r}`))
-  }, 5000)
+  AUMID_VARIANTS.forEach((variant, i) => {
+    setTimeout(() => {
+      const id = aumidFor(variant)
+      if (id) app.setAppUserModelId(id)
+      void showNotification({ title: `probe ${variant}`, body: `aumid=${id ?? '(unset)'}`, tag: 'turn', tab: '' }, win).then((r) =>
+        console.log(`[notify] probe aumid=${variant} result=${r}`),
+      )
+    }, 5000 + i * 3000)
+  })
 }
 
 function createWindow(): void {
@@ -164,7 +179,18 @@ function createWindow(): void {
       sandbox: true,
     },
   })
+  // a window that was left maximized comes back maximized; the bounds above are what it
+  // un-maximizes to (see `getNormalBounds` in window-state.ts)
+  if (saved?.maximized) win.maximize()
   attachWindowStateSaver(win)
+  // the taskbar button blinks while a notification is unanswered; looking at the window answers it
+  win.on('focus', () => {
+    try {
+      win?.flashFrame(false)
+    } catch {
+      /* the window went away between the event and here */
+    }
+  })
   win.once('ready-to-show', () => {
     // debug/e2e: HAMSTER_UNFOCUSED=1 brings the window up *without* focus, which is the only
     // state the notification path fires in — otherwise a blind run can never reach it.
@@ -426,6 +452,9 @@ ipcMain.handle('dialog:pickFolder', async (_e, defaultPath?: string) => {
 })
 
 ipcMain.on('win:alwaysOnTop', (_e, on: boolean) => {
+  // mini mode pins the window itself; the renderer keeps re-sending `mini || prefs.onTop`, and an
+  // `onTop:false` that slipped through mid-mini would un-pin the one window that must stay up
+  if (isMini() && !on) return
   win?.setAlwaysOnTop(on, 'floating')
 })
 
@@ -479,6 +508,11 @@ ipcMain.handle('app:info', () => {
     debugClick: app.isPackaged ? null : process.env.HAMSTER_CLICK ?? null,
     debugEvents: debugEvents(),
     debugClicks: debugClicks(),
+    // debug/e2e: every shell is pinned to this folder, so restoring the real tabs is meaningless
+    debugCwd: app.isPackaged ? null : process.env.HAMSTER_CWD ?? null,
+    // debug/e2e: a capture run restores the stored tabs (that is what it photographs) but must
+    // never write them back — same rule window-state.ts keeps for the bounds
+    debugCapture: !app.isPackaged && !!process.env.HAMSTER_CAPTURE,
     unfocused: unfocusedStart(),
     claudeLanguage: claudeLanguage(),
     uiPath: uiPath(),
@@ -540,6 +574,7 @@ let shuttingDown = false
 function shutdown(): void {
   if (shuttingDown) return
   shuttingDown = true
+  persistWindowState(win) // quitting from mini mode stores the bounds mini took over, not 480×360
   flushUi() // a setting changed in the last 300 ms is still only in memory
   for (const p of ptys.values()) p.kill()
   ptys.clear()

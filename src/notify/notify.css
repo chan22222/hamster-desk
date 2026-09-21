@@ -1,0 +1,49 @@
+/* The in-app fallback for a toast this machine would not show (plan §3.1, R1). It sits at the top
+   of the column, above the studio, and takes the same click as the notification would have. */
+
+.notify-banner {
+  display: flex;
+  align-items: stretch;
+  gap: 2px;
+  flex: none;
+  margin: 8px 10px 0;
+  border: 1px solid var(--warn);
+  border-radius: var(--radius);
+  background: var(--warn-soft);
+  color: var(--text);
+  box-shadow: var(--shadow-1);
+  overflow: hidden;
+}
+
+.notify-banner .nb-main {
+  display: flex;
+  align-items: baseline;
+  gap: 8px;
+  flex: 1;
+  min-width: 0;
+  padding: 7px 10px;
+  text-align: left;
+  color: inherit;
+}
+.notify-banner .nb-main:hover { background: #8a5a081a; }
+
+.notify-banner .nb-title { font-weight: 600; font-size: 12px; flex: none; }
+.notify-banner .nb-body {
+  font-size: 12px;
+  color: var(--text-2);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.notify-banner .nb-x {
+  width: 28px;
+  flex: none;
+  color: var(--text-2);
+  font-size: 14px;
+  line-height: 1;
+}
+.notify-banner .nb-x:hover { background: #8a5a081a; color: var(--text); }
+
+/* mini mode has no room for a banner; its status line says the same thing in one line */
+.app.is-mini .notify-banner { display: none; }
