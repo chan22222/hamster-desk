@@ -81,6 +81,26 @@ app.whenReady().then(async () => {
     assert.equal(clicked.count, 1, `a click should drop one row only: ${JSON.stringify(clicked)}`)
     assert.deepEqual(clicked.texts, ['두 번째 문장이 아래에 쌓여야 해요'])
     await evaluate("window.__studio.feedLife({ act: 3000, say: 9000 })")
+    // The speech-bubble log: bubbles expire, the log does not. Two sentences and one activity
+    // repeated three times must read as three rows with a ×3 badge, and clicking the newest row
+    // has to point the camera at whoever said it.
+    await evaluate("window.testStore.setState(s => ({ prefs: { ...s.prefs, showSidebar: true, showFeedLog: true } }))")
+    // the cases above already left rows in it (that is the point of the log); start from empty so
+    // the counts below are about these five pushes and nothing else
+    await evaluate("const store = window.testStore, s = store.getState().sessions['studio-preview']; store.setState({ sessions: { ...store.getState().sessions, 'studio-preview': { ...s, log: [] } } })")
+    await evaluate("window.__studio.say('studio-4', '로그에 남을 첫 문장')")
+    await evaluate("window.__studio.say('studio-4', '로그에 남을 두 번째 문장')")
+    for (let i = 0; i < 3; i++) await evaluate("window.__studio.act('studio-4', 'npm run test:office')")
+    await settle()
+    const log = await evaluate("const rows = Array.from(document.querySelectorAll('.log-row')); return { count: rows.length, first: rows[0] ? rows[0].querySelector('.log-text').textContent : null, badges: rows.map(r => (r.querySelector('.log-n') || {}).textContent || null) }")
+    assert.equal(log.count, 3, `the log should keep three rows: ${JSON.stringify(log)}`)
+    assert.ok(log.badges.includes('×3'), `the repeated activity needs a ×3 badge in the log: ${JSON.stringify(log)}`)
+    await evaluate("document.querySelector('.log-row').click()")
+    await settle()
+    assert.ok(await evaluate(`return !!document.querySelector('.office-nameplate.is-selected[data-id="studio-4"]')`), 'clicking a log row must select that hamster in the studio')
+    await shot('studio-log')
+    await evaluate("window.testStore.setState(s => ({ prefs: { ...s.prefs, showSidebar: false } }))")
+    await settle()
     await evaluate(`
       const store = window.testStore, s = store.getState().sessions['studio-preview'];
       store.setState({ sessions: { ...store.getState().sessions, 'studio-preview': { ...s, hamsters: Object.fromEntries(Object.entries(s.hamsters).map(([id, h]) => [id, { ...h, feed: [] }])) } } });
@@ -173,8 +193,8 @@ app.whenReady().then(async () => {
     await settle()
     assert.ok(await evaluate("return document.querySelector('.office-welcome').textContent.includes('자리는 준비되어 있어요')"))
     assert.deepEqual(errors, [])
-    fs.writeFileSync(path.resolve('work/office-smoke-result.json'),JSON.stringify({passed:true,checks:['webgl context','voxel hamster rig','feed stacking, merging, expiry, click-to-dismiss and the zoom row budget','add/remove/reorder stability','stationary animation','drag pan','minimap click','zoom','wheel','overview','locate agent','session camera isolation','fold camera persistence','compact viewport','48-agent overflow','empty office','no renderer errors'],art},null,2))
-    console.log('PASS: renderer, voxel rig, chat feed (stack/merge/expiry/dismiss), occupancy changes, navigation, session switches, folding, compact layout')
+    fs.writeFileSync(path.resolve('work/office-smoke-result.json'),JSON.stringify({passed:true,checks:['webgl context','voxel hamster rig','feed stacking, merging, expiry, click-to-dismiss and the zoom row budget','speech-bubble log rows, merge badge and click-to-focus','add/remove/reorder stability','stationary animation','drag pan','minimap click','zoom','wheel','overview','locate agent','session camera isolation','fold camera persistence','compact viewport','48-agent overflow','empty office','no renderer errors'],art},null,2))
+    console.log('PASS: renderer, voxel rig, chat feed (stack/merge/expiry/dismiss), speech-bubble log, occupancy changes, navigation, session switches, folding, compact layout')
   } catch(e) { console.error(e); process.exitCode=1 }
   finally { win.destroy(); app.quit() }
 })

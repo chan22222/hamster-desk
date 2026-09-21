@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
 import { favDirs, isFav, toggleFav } from './recent'
 import { changedFiles, FileLog } from '../log/FileLog'
+import { FeedLog } from '../log/FeedLog'
 import { useDesk, type SessionState } from '../store'
 import { IconBranch, IconChevron, IconFile, IconFolder, IconMore, IconSearch, IconStar } from '../widgets/icons'
 
@@ -101,6 +102,7 @@ export function Sidebar({ start, session, onOpen }: { start: string; session: Se
   const [notice, setNotice] = useState<string | null>(null)
   const menuRef = useRef<HTMLDivElement>(null)
   const changed = useMemo(() => changedFiles(session).length, [session])
+  const logged = session?.log.length ?? 0
 
   const go = async (p: string): Promise<void> => {
     if (!window.desk) return
@@ -182,6 +184,12 @@ export function Sidebar({ start, session, onOpen }: { start: string; session: Se
       {changed > 0 && (
         <Section title="바뀐 파일" count={changed} className="side-changed" open={prefs.showLog} onToggle={() => setPrefs({ showLog: !prefs.showLog })}>
           <FileLog session={session} />
+        </Section>
+      )}
+
+      {logged > 0 && (
+        <Section title="말풍선 로그" count={logged} className="side-feedlog" open={prefs.showFeedLog} onToggle={() => setPrefs({ showFeedLog: !prefs.showFeedLog })}>
+          <FeedLog session={session} />
         </Section>
       )}
 

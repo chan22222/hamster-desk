@@ -1,5 +1,7 @@
 import { useMemo, useState } from 'react'
 import type { EditEntry, SessionState } from '../store'
+import { DiffView } from '../git/DiffView'
+import './log.css'
 
 interface FileAgg {
   file: string
@@ -48,6 +50,8 @@ export function changedFiles(session: SessionState | null): FileAgg[] {
  */
 export function FileLog({ session }: { session: SessionState | null }) {
   const [open, setOpen] = useState<string | null>(null)
+  /** which open file is showing its real `git diff` instead of just the edit preview */
+  const [diff, setDiff] = useState<string | null>(null)
   const files = useMemo(() => changedFiles(session), [session])
 
   if (!session) return <div className="side-empty">아직 세션이 없어요.</div>
@@ -55,10 +59,11 @@ export function FileLog({ session }: { session: SessionState | null }) {
 
   return (
     <>
-      {files.map((f) => (
+      {files.map((f, i) => (
         <div key={f.file} className={`file-row ${open === f.file ? 'open' : ''}`}>
           <button
             className="file-main"
+            data-debug-click={`file-${i}`}
             onClick={() => setOpen(open === f.file ? null : f.file)}
             title={`${f.file}\n+${f.added} −${f.removed} · ${f.count}회 · ${[...f.who].join(', ')} · ${timeOf(f.last.ts)}`}
           >
@@ -70,13 +75,26 @@ export function FileLog({ session }: { session: SessionState | null }) {
             </span>
             {f.dir && <span className="file-dir">{f.dir}</span>}
           </button>
-          {open === f.file && f.last.preview && (
+          {open === f.file && (
             <div className="file-preview">
-              <div className="pv-label">
-                {f.last.op === 'write' ? '마지막 Write' : '마지막 Edit'} · {f.last.whoName} · {timeOf(f.last.ts)}
+              <div className="pv-head">
+                <span className="pv-label">
+                  {f.last.op === 'write' ? '마지막 Write' : '마지막 Edit'} · {f.last.whoName} · {timeOf(f.last.ts)}
+                </span>
+                {/* the preview is what the tool reported; this is what the working tree holds */}
+                <button
+                  className={`pv-diff ${diff === f.file ? 'is-on' : ''}`}
+                  data-debug-click={`file-${i}-diff`}
+                  aria-pressed={diff === f.file}
+                  title="이 파일의 실제 git diff"
+                  onClick={() => setDiff(diff === f.file ? null : f.file)}
+                >
+                  git diff
+                </button>
               </div>
-              {f.last.preview.old && <pre className="pv-old">{f.last.preview.old}</pre>}
-              <pre className="pv-new">{f.last.preview.new}</pre>
+              {diff === f.file && <DiffView cwd={session.info.cwd} file={f.file} />}
+              {f.last.preview?.old && <pre className="pv-old">{f.last.preview.old}</pre>}
+              {f.last.preview && <pre className="pv-new">{f.last.preview.new}</pre>}
             </div>
           )}
         </div>

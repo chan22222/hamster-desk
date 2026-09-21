@@ -511,6 +511,23 @@ export function DeskStudio({ session, height }: { session: SessionState | null; 
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [session?.info.sessionId])
 
+  // A row of the speech-bubble log was clicked: look at whoever said it. Same shape as the
+  // terminal's focus request — a stamped request in the store, acted on by whoever can.
+  //
+  // The stamp is also what keeps a *remount* quiet: folding the studio away and bringing it back
+  // builds a new component with the old request still in the store, and without this it would
+  // yank the camera to whatever was clicked minutes ago.
+  const hamsterFocus = useDesk((s) => s.focusHamster)
+  const handledFocus = useRef(useDesk.getState().focusHamster?.at ?? 0)
+  useEffect(() => {
+    if (!hamsterFocus || hamsterFocus.at <= handledFocus.current) return
+    handledFocus.current = hamsterFocus.at
+    if (hamsterFocus.sessionId !== session?.info.sessionId) return
+    focus(hamsterFocus.hid)
+    setSelected(hamsterFocus.hid)
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [hamsterFocus])
+
   // Capture-script hook. Only in the browser preview: the capture script has to drive the camera
   // and the hamsters' states, and there is no other way to reach them from outside the component.
   useEffect(() => {

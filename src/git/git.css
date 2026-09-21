@@ -1,0 +1,33 @@
+/* The branch chip on a tab, and the diff under a changed file. Kept out of styles.css so the git
+   feature is one folder plus one import. */
+
+.tab-git {
+  display: inline-flex; align-items: center; gap: 3px; flex: none; max-width: 110px;
+  padding: 0 5px; border-radius: 999px;
+  background: var(--surface-2); color: var(--text-3);
+  font-size: 11px; line-height: 17px; font-variant-numeric: tabular-nums;
+}
+.tab.active .tab-git { background: var(--surface); color: var(--text-2); }
+.tab-git svg { flex: none; }
+.tg-branch { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.tg-n { flex: none; }
+
+.diff-view { margin: 0 0 6px; }
+/* two classes on purpose: styles.css has `.file-preview pre { white-space: pre-wrap; word-break: break-all }`
+   at the same specificity as a bare `.diff-view pre`, and which of the two files loads last is the
+   bundler's business — a diff that wraps mid-token is not a diff any more */
+.file-preview .diff-view pre, .diff-view pre {
+  margin: 0; padding: 8px; border: 1px solid var(--line); border-radius: var(--radius);
+  background: var(--bg); font-size: 12px; line-height: 1.5;
+  font-family: ui-monospace, Consolas, monospace;
+  max-height: 260px; overflow: auto; white-space: pre; word-break: normal; tab-size: 2;
+}
+/* a grid so every line is as wide as the widest one: scrolled sideways, the +/- bands stay whole */
+.file-preview .diff-view pre, .diff-view pre { display: grid; grid-auto-rows: min-content; }
+.diff-view pre > div { min-height: 1.5em; }
+.dl-add { background: var(--diff-new-bg); color: var(--diff-new-text); }
+.dl-del { background: var(--diff-old-bg); color: var(--diff-old-text); }
+.dl-hunk { color: var(--info); font-weight: 600; }
+.dl-meta { color: var(--text-3); }
+.dl-ctx { color: var(--text-2); }
+.dv-note { padding: 8px; border-radius: var(--radius); background: var(--bg); color: var(--text-2); font-size: 12px; line-height: 1.5; }

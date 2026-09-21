@@ -1,0 +1,55 @@
+/* The turn card and the speech-bubble log. Both belong to the same idea: a bubble is gone in a
+   few seconds, and these two are where it stays readable afterwards. Kept out of styles.css so
+   the feature can be developed (and reverted) on its own. */
+
+/* ---- the turn card ------------------------------------------------------------------------ */
+/* Floats over the terminal in the bottom-right of the column, clear of the studio above it. */
+.turn-toast {
+  position: absolute; right: 14px; bottom: 14px; z-index: 30;
+  display: flex; align-items: stretch; width: 280px;
+  border: 1px solid var(--line); border-radius: var(--radius-lg);
+  background: var(--surface); box-shadow: var(--shadow-pop);
+  animation: tt-in 160ms ease-out;
+}
+@keyframes tt-in { from { opacity: 0; transform: translateY(8px); } }
+.tt-main {
+  display: flex; flex-direction: column; gap: 3px; flex: 1; min-width: 0;
+  padding: 10px 4px 10px 12px; text-align: left;
+}
+.tt-main:hover { background: var(--surface-2); border-radius: var(--radius-lg) 0 0 var(--radius-lg); }
+.tt-line { font-size: 12px; font-weight: 600; color: var(--text); font-variant-numeric: tabular-nums; }
+.tt-said { font-size: 12px; color: var(--text-2); line-height: 1.45; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.tt-x { display: flex; align-items: flex-start; padding: 10px 10px 0 6px; color: var(--text-3); border-radius: 0 var(--radius-lg) var(--radius-lg) 0; }
+.tt-x:hover { color: var(--text); background: var(--surface-2); }
+
+/* ---- the speech-bubble log (a sidebar section) -------------------------------------------- */
+.side-feedlog { flex: none; max-height: 40%; border-bottom: 1px solid var(--line); }
+.log-tools { display: flex; align-items: center; gap: 6px; padding: 2px 8px 6px; }
+.log-search {
+  flex: 1; min-width: 0; height: 26px; padding: 0 8px;
+  border: 1px solid var(--line); border-radius: var(--radius);
+  background: var(--surface-2); color: var(--text); font: inherit; font-size: 12px; outline: none;
+}
+.log-search:focus { border-color: var(--accent); box-shadow: 0 0 0 3px var(--accent-soft); }
+.log-search::placeholder { color: var(--text-3); }
+.log-tools .seg { flex: none; }
+.log-row {
+  display: flex; align-items: baseline; gap: 6px; width: 100%;
+  padding: 4px 8px; text-align: left; font-size: 12px; line-height: 1.5; color: var(--text);
+}
+.log-row:hover { background: var(--surface-2); }
+/* a hamster that has gone home is still in the log, but it is history now */
+.log-row.is-gone { opacity: 0.55; }
+.log-row.kind-act { color: var(--text-2); }
+.log-row.tone-warn { color: var(--warn); }
+.log-time { flex: none; font-size: 11px; color: var(--text-3); font-variant-numeric: tabular-nums; }
+.log-who { flex: none; max-width: 76px; color: var(--text-2); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.log-text { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.log-n { flex: none; padding: 0 5px; border-radius: 999px; background: var(--surface-3); color: var(--text-2); font-size: 11px; line-height: 16px; }
+
+/* ---- the `git diff` toggle in a changed-file preview -------------------------------------- */
+.pv-head { display: flex; align-items: center; gap: 8px; margin: 6px 0; }
+.pv-head .pv-label { flex: 1; min-width: 0; margin: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.pv-diff { flex: none; padding: 2px 7px; border-radius: var(--radius); border: 1px solid var(--line-strong); color: var(--text-2); font-size: 11px; }
+.pv-diff:hover { background: var(--surface-3); color: var(--text); }
+.pv-diff.is-on { background: var(--surface-3); color: var(--text); border-color: var(--line-strong); }

@@ -2,6 +2,7 @@ import { create } from 'zustand'
 import type { DeskEvent, EffortLevel, GitInfo, LogItem, SessionInfo, StatusSnapshot, ToolAction, TurnSummary, TurnToast, VersionInfo } from '@shared/events'
 import { setLang, t, type PrefLang } from './i18n'
 import { cancelSummary, requestSummary } from './bubbles/summarize'
+import { summarizeTurn } from './log/turn'
 
 export type HamsterState =
   | 'idle'
@@ -117,6 +118,11 @@ export interface SessionState {
 
 /** how many feed rows one session keeps in `log` */
 export const LOG_MAX = 500
+
+/** how long the turn card stays up before it takes itself away */
+const TOAST_LIFE = 8000
+/** a `turn_end` older than this is backlog, not news — no card (see `apply`) */
+const TOAST_MAX_AGE = 30_000
 
 /** An embedded terminal tab. Its claude session (if any) is matched through process ancestry. */
 export interface Workspace {
@@ -559,6 +565,10 @@ export const useDesk = create<DeskStore>((set, get) => {
   /**
    * Add a row to a hamster's feed, merging it into an identical row that is already there.
    * Returns the id the row ended up with, which is what a late summary is matched against.
+   *
+   * Every row is also copied into the session's `log`, under the same id. The bubble above the
+   * head expires after a few seconds and a new prompt wipes the feed outright; the log is the
+   * record of what was actually said and done, so the panel can scroll back through it.
    */
   const push = (sessionId: string, hid: string, item: NewItem, patch: Partial<Hamster> = {}): string | null => {
     const h = get().sessions[sessionId]?.hamsters[hid]
@@ -567,17 +577,32 @@ export const useDesk = create<DeskStore>((set, get) => {
     const alive = h.feed.filter((f) => now - f.ts < feedLife(f))
     const at = alive.findIndex((f) => f.kind === item.kind && f.text === item.text)
     let id: string
+    let count: number
     let feed: FeedItem[]
     if (at >= 0) {
       // same line again: keep its id and `born`, count it, and move it back to the bottom
       const cur = alive[at]
       id = cur.id
-      feed = [...alive.slice(0, at), ...alive.slice(at + 1), { ...cur, ...item, ts: now, count: cur.count + 1 }]
+      count = cur.count + 1
+      feed = [...alive.slice(0, at), ...alive.slice(at + 1), { ...cur, ...item, ts: now, count }]
     } else {
       id = `${hid}:${++feedSeq}`
-      feed = [...alive, { ...item, id, born: now, ts: now, count: 1 }]
+      count = 1
+      feed = [...alive, { ...item, id, born: now, ts: now, count }]
     }
-    updHamster(sessionId, hid, (cur) => ({ ...cur, ...patch, feed: feed.slice(-FEED_MAX) }))
+    const hidName = patch.name ?? h.name
+    updSession(sessionId, (s) => {
+      const cur = s.hamsters[hid]
+      if (!cur) return s
+      // a merge updates the row already in the log rather than appending a second copy: the feed
+      // merged on *text*, and `id` is what ties the two sides together
+      const logAt = s.log.findIndex((l) => l.id === id)
+      const log =
+        logAt >= 0
+          ? s.log.map((l, i) => (i === logAt ? { ...l, text: item.text, raw: item.raw, ts: now, count } : l))
+          : [...s.log.slice(-(LOG_MAX - 1)), { id, hid, hidName, kind: item.kind, tone: item.tone, text: item.text, raw: item.raw, ts: now, count }]
+      return { ...s, hamsters: { ...s.hamsters, [hid]: { ...cur, ...patch, feed: feed.slice(-FEED_MAX) } }, log, lastActivity: now }
+    })
     scheduleSweep(feedLife(item))
     return id
   }
@@ -587,15 +612,27 @@ export const useDesk = create<DeskStore>((set, get) => {
     updHamster(sessionId, hid, (h) => ({ ...h, ...patch, feed: h.feed.filter(keep) }))
   }
 
-  /** Ask the summarizer to shorten a sentence; a late answer is dropped if that row is gone. */
+  /**
+   * Ask the summarizer to shorten a sentence; a late answer is dropped if that row is gone.
+   * The log keeps its copy of the row, so the shorter text has to land there too — otherwise the
+   * panel would show the raw sentence next to a bubble that says something else.
+   */
   const askSummary = (sessionId: string, hid: string, id: string, raw: string, kind: 'said' | 'assigned'): void => {
     requestSummary({ lane: laneOf(sessionId, hid), kind, raw, ts: Date.now(), enabled: get().prefs.bubbleSummary }, (_ts, text) =>
-      updHamster(sessionId, hid, (h) => {
-        const at = h.feed.findIndex((f) => f.id === id)
-        if (at < 0) return h
-        const feed = [...h.feed]
-        feed[at] = { ...feed[at], text, summarized: true }
-        return { ...h, feed }
+      updSession(sessionId, (s) => {
+        const h = s.hamsters[hid]
+        let hamsters = s.hamsters
+        if (h) {
+          const at = h.feed.findIndex((f) => f.id === id)
+          if (at >= 0) {
+            const feed = [...h.feed]
+            feed[at] = { ...feed[at], text, summarized: true }
+            hamsters = { ...s.hamsters, [hid]: { ...h, feed } }
+          }
+        }
+        const li = s.log.findIndex((l) => l.id === id)
+        const log = li >= 0 ? s.log.map((l, i) => (i === li ? { ...l, text } : l)) : s.log
+        return hamsters === s.hamsters && log === s.log ? s : { ...s, hamsters, log }
       }),
     )
   }
@@ -639,6 +676,12 @@ export const useDesk = create<DeskStore>((set, get) => {
 
   /** the session a waiting-prompt event belongs to: the one running in that terminal */
   const sessionOfPty = (ptyId: number): SessionState | undefined => Object.values(get().sessions).find((s) => s.info.ptyId === ptyId)
+
+  /** The tab a session is shown on: our own terminal when it runs in one, its own tab otherwise. */
+  const tabOfSession = (s: SessionState): string => {
+    const ws = s.info.ptyId === null ? undefined : get().workspaces.find((w) => w.ptyId === s.info.ptyId)
+    return ws ? `ws:${ws.id}` : `session:${s.info.sessionId}`
+  }
 
   return {
     sessions: {},
@@ -757,9 +800,10 @@ export const useDesk = create<DeskStore>((set, get) => {
           cancelSummary(laneOf(e.sessionId, 'main'))
           updSession(e.sessionId, (s) => {
             const main = s.hamsters.main
-            // a new prompt starts a fresh conversation on screen too: the feed is wiped
+            // a new prompt starts a fresh conversation on screen too: the feed is wiped (the log
+            // keeps its copy) and the turn clock starts, so `turn_end` can measure what follows
             const hamsters = main ? { ...s.hamsters, main: { ...main, state: 'thinking' as HamsterState, since: e.ts, feed: [] } } : s.hamsters
-            return { ...s, lastPrompt: e.text, hamsters, waiting: false, lastActivity: Date.now() }
+            return { ...s, lastPrompt: e.text, hamsters, waiting: false, lastActivity: Date.now(), turnStartedAt: e.ts, lastSaid: '' }
           })
           return
         }
@@ -858,6 +902,9 @@ export const useDesk = create<DeskStore>((set, get) => {
           const walking = ['arriving', 'leaving'].includes(get().sessions[e.sessionId]?.hamsters[hid]?.state ?? '')
           const id = push(e.sessionId, hid, said, walking ? {} : { state: 'talking', since: e.ts })
           if (id) askSummary(e.sessionId, hid, id, said.raw, 'said')
+          // the turn card quotes the conversation, not a subagent's side channel: main only, and
+          // the raw sentence rather than the summary, which may never arrive
+          if (!e.agentId) updSession(e.sessionId, (s) => ({ ...s, lastSaid: said.raw }))
           return
         }
         case 'thinking': {
@@ -875,14 +922,26 @@ export const useDesk = create<DeskStore>((set, get) => {
           })
           return
         }
-        case 'turn_end':
+        case 'turn_end': {
+          const before = st.sessions[e.sessionId]
+          if (!before) return
+          const summary = summarizeTurn(before, e)
           updSession(e.sessionId, (s) => {
             const main = s.hamsters.main
             // the turn is over: drop what it was doing, keep what it said
             const hamsters = main ? { ...s.hamsters, main: { ...main, state: 'idle' as HamsterState, since: Date.now(), inFlight: [], feed: main.feed.filter((f) => f.kind !== 'act') } } : s.hamsters
-            return { ...s, hamsters, turns: s.turns + 1 }
+            return { ...s, hamsters, turns: s.turns + 1, lastTurn: summary, turnStartedAt: null }
+          })
+          // The backlog is replayed whenever the renderer (re)mounts, so an old `turn_end` arrives
+          // again on every reload. A card popping up for a turn that finished an hour ago would be
+          // a lie, so only a fresh one is shown — `lastTurn` above is set either way.
+          if (Date.now() - e.ts > TOAST_MAX_AGE) return
+          set({ toast: { ...summary, sessionId: e.sessionId, tab: tabOfSession(before) } })
+          later('toast', TOAST_LIFE, () => {
+            if (get().toast?.at === summary.at) set({ toast: null })
           })
           return
+        }
         case 'cost':
           updSession(e.sessionId, (s) => ({ ...s, linesAdded: e.linesAdded, linesRemoved: e.linesRemoved, costUSD: e.costUSD }))
           return
