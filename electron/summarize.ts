@@ -181,7 +181,7 @@ function runClaude(system: string, user: string, signal: AbortSignal): Promise<s
   ]
   const inv = claudeInvocation(bin, argv)
   return new Promise((resolve, reject) => {
-    execFile(
+    const child = execFile(
       inv.file,
       inv.args,
       {
@@ -197,6 +197,8 @@ function runClaude(system: string, user: string, signal: AbortSignal): Promise<s
         resolve(String(stdout))
       },
     )
+    // with a pipe on stdin that nobody closes, `-p` first waits 3 s for input it will never get
+    child.stdin?.end()
   })
 }
 
