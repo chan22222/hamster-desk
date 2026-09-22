@@ -15,6 +15,7 @@ import type {
   NotifyRequest,
   NotifyResult,
   ProfilesState,
+  ProjectInfo,
   PtyInfo,
   SessionInfo,
   TranscriptEntry,
@@ -112,6 +113,8 @@ export interface DeskBridge {
     exists(paths: string[]): Promise<Record<string, boolean>>
     openPath(path: string): Promise<string>
     showInFolder(path: string): void
+    /** what kind of project the folder is and the commands it takes — the sidebar's 실행 menu (electron/project-actions.ts) */
+    project(path: string): Promise<ProjectInfo>
   }
   /**
    * UI settings kept in ~/.hamster-desk/ui.json — not localStorage, which lives in the Electron
@@ -248,6 +251,7 @@ const bridge: DeskBridge = {
     exists: (paths) => ipcRenderer.invoke('fs:exists', paths),
     openPath: (p) => ipcRenderer.invoke('fs:openPath', p),
     showInFolder: (p) => ipcRenderer.send('fs:showInFolder', p),
+    project: (p) => ipcRenderer.invoke('fs:project', p),
   },
   ui: {
     load: () => ipcRenderer.invoke('ui:load'),

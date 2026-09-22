@@ -114,7 +114,27 @@ npm run release            # 검사만: npm run release -- --check
 **사이드바** (사이드바 아이콘 또는 `Ctrl+B`, 기본 숨김) — `[검색] / [바뀐 파일 N ▾] / [말풍선 로그 N ▾] / [탐색 ▾]`
 - **바뀐 파일**: 활성 세션이 고친 파일들이다(예전엔 오른쪽 300px 패널이었다). **아직 고친 것이 없어도 섹션은 한 줄로 보인다** — 흐린 머리줄에 이름과 `0` 만 있고 펼쳐지지 않는다(설명 문구는 넣었다가 뺐다: 이름으로 충분하다). 예전에는 첫 편집이 있어야 섹션이 생겨서, 써 보기 전에는 그런 것이 있는 줄 알 수 없었다. 말풍선 로그도 같다. 세 섹션은 사이드바를 **고르게 나눠 쓴다**: 바뀐 파일과 말풍선 로그는 각각 높이의 **최대 1/3**(내용이 적으면 그만큼만)까지 차지하고 그 안에서 스크롤하며, 탐색은 나머지를 채우되 1/3 아래로 줄지 않는다. 접은 섹션은 머리줄만 남는다. **높이는 끌어서 바꿀 수 있다**: 바뀐 파일과 말풍선 로그의 아래쪽 가장자리를 위아래로 끌면 그 섹션의 높이가 되고(`prefs.sideChangedH` · `sideFeedH`, 최소 84px, 사이드바 폭처럼 끄는 동안은 스토어에만 쓰고 놓을 때 한 번 저장), 탐색이 나머지를 가진다. 끌어 둔 섹션에는 "최대 1/3" 이 적용되지 않지만 창이 낮아지거나 탐색이 1/3 에 닿으면 줄어들 수는 있어서, 놓을 때 저장하는 값은 요청한 높이가 아니라 **화면에 실제로 잡힌 높이**다. 가장자리를 더블클릭하면 자동 배치(`null`)로 돌아간다. 한 행은 두 줄 — 파일명(모노 12px)과 오른쪽 끝 `+N −N`, 그 아래 11px 경로(끝이 남게 말줄임). 클릭하면 마지막 Edit/Write 의 old/new 미리보기가 그 자리에서 펼쳐진다(지운 줄 붉은 바탕, 넣은 줄 초록 바탕). 횟수·누가·언제는 행 툴팁에. 미리보기 머리줄 오른쪽의 **`git diff`** 를 누르면 Edit 한 번의 old/new 가 아니라 **작업 트리의 실제 diff** 로 바뀐다(추가 초록 · 삭제 붉은색 · hunk 머리줄 흐리게; 아직 git 에 없는 파일이면 `아직 git 에 없는 파일이에요`, 20,000자를 넘으면 잘렸다는 꼬리표).
 - **말풍선 로그**: 머리 위 말풍선은 몇 초면 사라지지만 여기에는 남는다(세션별 최근 500줄, 세션이 사라지면 같이 사라진다). 검색 한 칸 + `전체·말·활동` 필터, 최신이 위. 한 줄은 `HH:MM:SS · 이름 · 글`(겹쳐 센 줄은 `×N`, 원문은 툴팁, 요약이 도착하면 같은 줄의 글이 바뀐다). **줄을 누르면 그 자리에서 펼쳐진다**: 말풍선은 머리 위에 들어갈 한 줄로 줄인 것이라, 펼치면 실제로 한 말·한 일의 원문(`raw`)이 전부 나오고(선택·복사 가능, 길면 그 안에서 스크롤) 누가·언제·몇 번이 함께 보인다. 그 안의 `햄스터 보기` 가 예전의 줄 클릭 — 그 햄스터로 카메라가 간다 — 이고, `복사` 는 원문을 클립보드에 넣는다. **스튜디오의 말풍선을 눌러도 여기로 온다**: 사이드바와 이 섹션이 닫혀 있으면 열고, 검색·필터를 비우고, 그 줄을 펼쳐 화면 안으로 스크롤한다(말풍선과 로그 줄은 같은 id 다). 말풍선을 치우는 것은 우클릭으로 옮겼다. 이미 퇴근한 햄스터의 줄은 흐리게 나온다. 새 프롬프트가 머리 위 피드를 비워도 로그는 그대로다. 사이드바 높이의 최대 1/3.
-- **탐색**: 드라이브 · 경로 조각 · 하위 폴더에 이어 **파일**도 보인다. 폴더는 클릭 = 들어가기, 더블클릭 또는 `열기` = 터미널 열기. 파일은 더블클릭 = 기본 앱으로 열기, 우클릭 = 경로 복사 · 탐색기에서 보기 · 기본 앱으로 열기. 아래 줄에 주황 `여기서 터미널 열기` 버튼과 아이콘 버튼 셋 — 위로 · 즐겨찾기 · `…`(시스템 폴더 선택 창).
+- **탐색**: 드라이브 · 경로 조각 · 하위 폴더에 이어 **파일**도 보인다. 폴더는 클릭 = 들어가기, 더블클릭 또는 `열기` = 터미널 열기. 파일은 더블클릭 = 기본 앱으로 열기, 우클릭 = 경로 복사 · 탐색기에서 보기 · 기본 앱으로 열기. 아래 줄에 주황 `여기서 터미널 열기` 버튼과 아이콘 버튼 셋 — 위로 · 즐겨찾기 · `…`(시스템 폴더 선택 창). **그 아래, 지금 폴더가 프로젝트로 보이면 `▶ 실행 · Node · pnpm · Vite ▾` 알약 한 줄이 더 생긴다**(아무것도 아닌 폴더에는 없다 — 빈 메뉴는 없다). 이 줄이 위 행의 네 번째 버튼이 아닌 이유: 기본 폭 248px 에서 그 행은 16px 밖에 남지 않아 `여기서 터미널 열기` 의 꼬리가 잘린다. 알약 자체가 무엇을 알아봤는지 말하므로 열어 보지 않아도 폴더의 종류가 보인다.
+- **실행 메뉴**(`src/sidebar/Sidebar.tsx` 의 `RunMenu`, 판정은 `electron/project-actions.ts`): 알약을 누르면 맨 위에 흐린 배지 줄(`Node · pnpm · Vite`, 두 가지면 `Node · npm · Next + Make`), 그 아래 `개발 · 빌드 · 테스트 · 설치 · 기타` 머리줄로 묶인 행들이 온다. 한 행은 왼쪽에 이름(`개발 서버`), 오른쪽에 **실제로 쳐질 명령**이 모노 글꼴로 흐리게(`pnpm dev`; 전부는 툴팁에). 행을 누르면 **새 터미널 탭**이 그 폴더에서 열리고 셸이 뜬 뒤 그 명령이 쳐진다 — 계정 추가의 로그인과 같은 `runOnce` 다(`initialCommand` 가 아니다): 탭은 그 폴더의 보통 터미널이라 폴더 이름이 붙고, `Ctrl+C` 로 개발 서버를 끄면 그냥 그 폴더의 셸이며, **다음 실행에 되돌아올 때는 셸만 돌아오고 명령은 다시 치지 않는다**(`src/workspaces-persist.ts` 는 명령을 저장하지 않는다). 새 탭이 열리므로 이미 돌고 있는 것을 방해하지 않는다.
+  - **판정은 폴더의 맨 윗단만 읽는다**: `readdir` 한 번, 아는 표식 파일들의 `stat`, 그리고 실제로 파싱하는 몇 개(`package.json` · `Makefile` · `pyproject.toml` · `pom.xml` · `build.gradle`)의 내용뿐이다. 아래로 내려가지 않고 아무것도 실행하지 않는다. 결과는 **폴더의 mtime + 표식 파일들의 `크기:mtime`** 으로 캐시한다(`electron/transcripts.ts` 와 같은 방식) — 폴더에 항목이 생기거나 없어지면(`node_modules`, `.venv`, 잠금 파일) 폴더의 mtime 이, 표식을 고치면 그 파일의 것이 움직이므로 지난 답이 아직 맞는지 그것으로 안다. 탐색이 폴더를 옮길 때마다 `fs:list` 와 **같은 왕복**으로 `fs:project` 를 묻고, 늦게 온 답은 버린다(`goSeq`).
+  - **표식 → 배지 → 명령**:
+
+  | 표식 | 배지 | 명령 |
+  |---|---|---|
+  | `package.json` | `Node · <러너> · <프레임워크>` | `scripts` 전부(최대 30, `pre*`/`post*` 훅 제외). `dev · start · serve · preview · build · test · lint` 를 이 순서로 먼저, 나머지는 파일 순서로 `기타` 에(`build:vite` · `test:unit` 처럼 `:` 앞이 아는 이름이면 그 묶음으로). `node_modules` 가 없으면 `설치` 에 `<러너> install` |
+  | `pyproject.toml` · `requirements.txt` · `setup.py` · `manage.py` · `Pipfile` · `uv.lock` · `poetry.lock` | `Python · uv|poetry|pipenv|venv · Django` | Django(`manage.py`): `runserver` · 테스트(`pytest` 설정이나 `tests` 폴더가 있으면 `pytest`, 아니면 `manage.py test`) · `migrate`. 그 밖에는 `main.py`/`app.py` 가 있으면 `실행`, `pytest` 흔적이 있으면 테스트. 설치는 `uv sync` · `poetry install` · `pipenv install` · `pip install -r requirements.txt` · `pip install -e .` 중 맞는 것 |
+  | `Cargo.toml` | `Rust` | `cargo run` · `cargo build` · `cargo test` · `cargo check` |
+  | `go.mod` | `Go` | `go run .` · `go build ./...` · `go test ./...` |
+  | `*.csproj` · `*.fsproj` · `*.sln` | `.NET` | `dotnet run` · `dotnet build` · `dotnet test` |
+  | `pom.xml` | `Maven` | `mvn clean package` · `mvn test`, 파일에 `spring-boot` 가 있으면 `mvn spring-boot:run` |
+  | `build.gradle(.kts)` | `Gradle` | `build` · `test`(`gradlew` 가 있으면 `.\gradlew.bat`/`./gradlew`, 없으면 `gradle`), `application` 플러그인이면 `run`, Spring Boot 면 `bootRun` |
+  | `Gemfile` | `Ruby` · `Ruby · Rails` | `bundle install`; `bin/rails` 가 있으면 `bundle exec rails server`, `spec` 폴더면 `bundle exec rspec` |
+  | `Makefile` · `makefile` · `GNUmakefile` | `Make` | 타깃마다 `make <타깃>`(최대 12개, 파일 순서). 줄 머리의 `이름:` 만 세고 `.PHONY` 같은 `.` 타깃 · `%` 패턴 · `이름 :=` 변수 · 탭으로 시작하는 레시피 줄은 뺀다. **`make` 가 PATH 에 있을 때만**(`findOnPath`) |
+  | `docker-compose.yml` · `compose.yaml` | `Docker Compose` | `docker compose up` · `docker compose down`. `docker` 가 PATH 에 있을 때만 |
+
+  - **러너 규칙**(Node): `package.json` 의 `packageManager` 필드가 있으면 그것(`pnpm@9.1.0` → pnpm), 없으면 잠금 파일 — `pnpm-lock.yaml` → pnpm · `yarn.lock` → yarn · `bun.lockb`/`bun.lock` → bun — 그것도 없으면 npm. 명령은 사람들이 실제로 치는 꼴이다: npm 은 `npm run dev` 지만 `npm start` · `npm test`; pnpm·yarn 은 위의 일곱 이름을 `pnpm dev` 처럼 바로, 그 밖의 스크립트는 자기 명령과 겹칠 수 있어 `pnpm run typecheck`; bun 은 늘 `bun run <스크립트>` — `bun test` 는 스크립트가 아니라 bun 의 테스트 러너다.
+  - **venv 규칙**(Python): `uv.lock` 이면 `uv run …`, `poetry.lock`(또는 `[tool.poetry]`) 이면 `poetry run …`, `Pipfile` 이면 `pipenv run …` — 이 셋은 환경을 스스로 고른다. 그 밖의 프로젝트에 `.venv` 나 `venv` 폴더가 있으면 **먼저 활성화하고 잇는다**: Windows(PowerShell) 는 `.venv\Scripts\Activate.ps1; python manage.py runserver`, 그 밖에는 `source .venv/bin/activate && python3 manage.py runserver`. venv 의 python 을 경로로 직접 부르는 대신 활성화를 고른 이유: 명령이 끝난 뒤에도 그 셸이 venv 안에 있어서, 다음에 치는 것도 거기서 돈다(PowerShell 은 구분자가 든 경로라 `.\` 없이도 스크립트를 실행한다; 실행 정책이 `Restricted` 면 활성화만 실패하고 뒤의 명령은 전역 python 으로 돈다). 메뉴의 행에서는 이 활성화 부분이 모든 행에 똑같으므로 폭이 모자랄 때 **그쪽이 먼저 줄고** 뒤의 명령은 남는다. python 은 Windows 에서 `python`, 그 밖에서 `python3`.
+  - 새로 `npm install` 을 해서 `node_modules` 가 생긴 뒤에도 메뉴는 폴더를 다시 나열할 때(다른 폴더에 갔다 오거나 탭을 바꿀 때) 갱신된다 — 폴더를 감시하지는 않는다.
 - 탐색은 **앞에 있는 터미널의 폴더를 따라간다**: 폴더 찾아보기·최근 프로젝트·즐겨찾기·`여기서 터미널 열기`·폴더 더블클릭으로 터미널을 열면 그 폴더로 옮겨 가고, 다른 폴더의 탭으로 바꿔도 따라간다(`explorerDir`, `src/sidebar/recent.ts`). 탭이 하나도 없을 때(시작 카드)는 다음 터미널이 열릴 폴더(`lastCwd`), 그것도 없으면 홈에서 시작하고, 마지막 탭을 닫아도 있던 자리에 머문다. 앱의 실행 폴더로는 가지 않는다 — 예전에는 사이드바가 첫 탭보다 먼저 떠서 빈 경로를 한 번 나열하고 그 뒤로는 움직이지 않았는데, 빈 경로의 목록은 프로세스의 작업 폴더, 곧 설치판의 설치 폴더(`npx electron .` 이면 저장소)였다. `fs:list`·`fs:listDirs` 도 이제 빈 경로를 홈으로 본다.
 - 맨 위 `이 폴더에서 검색` 한 칸이 탐색 목록을 거른다. 목록 행은 좌우 6px 마진 + 라운드로 카드처럼 떨어져 있고, 폴더 아이콘은 `.git` 이면 branch, `CLAUDE.md`/`.claude` 면 🐹 다.
 - **최근 목록은 사이드바에 없다.** 늘 보고 있을 것이 아니라 새로 시작할 때 필요한 것이라, `+`(새 터미널)과 빈 화면의 시작 카드에만 있다. 두 곳 다 설정 가방(`uiGet`)에서 **가방이 바뀔 때마다 다시 계산**한다(`DeskState.uiRev`: 파일을 읽었을 때와 `uiSet` 마다 하나씩 오른다). 시작 카드는 파일을 읽기 **전에** 먼저 뜨는데, 예전에는 그때 `useState` 로 한 번 계산한 목록을 끝까지 들고 있어서 켤 때마다 "아직 이 앱에서 연 프로젝트가 없어요" 로 시작했다 — `+` 를 열면(그때 새로 마운트되므로) 다 있었으니 "껐다 켜면 즐겨찾기·최근이 사라진다" 로 보였다. 이제 사이드바의 별과 카드의 별도 서로 바로 따라간다.
@@ -259,6 +279,7 @@ npm run smoke:ui                   # ~/.hamster-desk/ui.json: 병합·null 삭�
 | `usage-query.test.ts` | CLI 의 `get_usage` 답(실제 응답에서 잘라 옴)에서 5시간·주간(전체)·모델별 주간 창을 읽음, 오류 답·쓰레기는 null, 로그인된 계정만 묻고 실패한 계정은 답에서 빠짐 |
 | `patrol.test.ts` | 사장의 순찰(`src/desk/patrol.ts`)을 가짜 시계와 실제 `Walker` 로 돌린다: 직원이 없으면 10분을 돌려도 안 일어남, 첫 순찰이 12~25초 안에 시작되고 의자 옆·뒤에 서며 2~4초 뒤 돌아와 45~120초 쉼, 주사위가 직원 아무나 고름, `waiting`·새 `say` 줄·그 직원의 퇴근이 도중에 되돌림(다른 직원의 퇴근은 무관), 사무실이 비면 첫 지연이 다시 적용, `off` 는 자리에 묶어 두고 `hurry` 는 즉시·3초·6초. 지름길(`directRoute`): 열두 자리 전부에 대해 **실제 소품 크기**(책상·의자·화분·정수기·커피 테이블·프린터)의 어느 것에도 닿지 않고 왕복하며 갈 때와 올 때 길이가 같고, 첫 줄 가운데 두 자리는 복도 경로의 40% 이하; 차선·통로 자체가 비어 있고, 도중에 끊긴 길은 허브를 거치지 않고 그 자리에서 돌아선다 |
 | `toast-stack.test.ts` | 알림 창의 카드 스택: 질문·권한이 턴 완료보다 오래 남음, 넷째 카드가 오면 가장 오래된 것이 빠짐, 만료 순서, 호버 정지가 시간을 돌려줌(정지 중 들어온 카드는 풀린 뒤 제 수명 전부), `toastBounds`(오른쪽 아래 16px, 아래 고정으로 위로 자람, 보조 모니터 오프셋, 미니 창 위로 비킴) |
+| `project-actions.test.ts` | 실행 메뉴의 판정을 임시 폴더로: pnpm 잠금의 Vite/React 앱(아는 스크립트 먼저 · `test:unit` 은 테스트 묶음 · `node_modules` 가 없을 때만 설치), `packageManager` 가 잠금 파일을 이김 · npm/yarn/bun 의 명령 꼴, `.venv` 가 있는 Django(Windows 는 `Activate.ps1;` · 그 밖은 `source … &&`, `tests` 가 있으면 pytest), uv·poetry, Cargo · Go · .NET, `.PHONY`·변수·패턴·레시피를 뺀 Makefile 타깃 12개 상한과 `make` 없으면 없음, 아무것도 아닌 폴더·없는 폴더·파일 → 빈 답, Node + Makefile + compose 는 셋 다, 표식이 바뀌기 전까지 같은 객체를 돌려주는 캐시, Maven · Gradle · Rails |
 
 스모크 테스트(창을 보지 않고 스크린샷만). `HAMSTER_TYPE` 은 첫 셸에 자동 입력할 텍스트(`\r` = Enter, `|` 로 단계 구분, 단계 간격 `HAMSTER_TYPE_DELAY` ms), `HAMSTER_CWD` 는 셸 시작 폴더. 긴 문장은 Claude 입력창이 붙여넣기로 보므로 Enter(`
 `)를 별도 단계로 보낸다:
@@ -292,7 +313,7 @@ HAMSTER_CAPTURE=work/ui-dark.png HAMSTER_CAPTURE_DELAY=8000 HAMSTER_CAPTURE_QUIT
 
 캡처 실행은 stdout 에 **꼬리표 달린 줄**을 남긴다 — 스크린샷에 안 찍히는 사실을 말하는 길이다: `[capture]` `[keys]` `[pty]`(create/exit) `[debug]`(events·click) `[notify]` `[mini]` `[bounds]` `[restore]` `[git]` `[transcripts]` `[bar]`(보낸 바이트) `[history]` `[shortcut]` `[term]`(search N/M · font) 그리고 렌더러의 `[renderer:error]`·`[renderer:warning]`. 렌더러 쪽 꼬리표(`[`로 시작하는 콘솔 줄)는 캡처 실행에서만 stdout 으로 넘어온다.
 
-`data-debug-click` 이름: `welcome-run` · `more` · `plus`(새 터미널 `+`) · `usage`(사용량 칩) · `mini-toggle` · `mini-exit` · `mini-sound` · `notify-permission` · `notify-question` · `notify-turn` · `notify-sound` · `notify-banner` · `bar-model` · `bar-model-<fable|opus|sonnet|haiku>` · `bar-effort-<low|medium|high|xhigh|max>` · `bar-compact` · `bar-clear` · `bar-clear-yes` · `bar-history` · `history-<n>` · `history-continue` · `toast` · `log-<n>` · `file-<n>` · `file-<n>-diff` · `term-search-close`. (`⋯` 메뉴 안의 항목은 `more` 를 먼저 눌러 팝오버를 열어야 존재한다.)
+`data-debug-click` 이름: `welcome-run` · `more` · `plus`(새 터미널 `+`) · `usage`(사용량 칩) · `mini-toggle` · `mini-exit` · `mini-sound` · `notify-permission` · `notify-question` · `notify-turn` · `notify-sound` · `notify-banner` · `bar-model` · `bar-model-<fable|opus|sonnet|haiku>` · `bar-effort-<low|medium|high|xhigh|max>` · `bar-compact` · `bar-clear` · `bar-clear-yes` · `bar-history` · `history-<n>` · `history-continue` · `toast` · `log-<n>` · `file-<n>` · `file-<n>-diff` · `term-search-close` · `run`(사이드바의 실행 알약) · `run-<n>`(그 메뉴의 n번째 행, 머리줄 순서로 0부터). (`⋯` 메뉴 안의 항목은 `more` 를 먼저 눌러 팝오버를 열어야 존재한다.)
 
 읽을 때 알아 둘 것:
 - **캡처 PNG 는 창이 아니라 콘텐츠 영역 크기다.** Windows 에서 창보다 16×39 작다 — 1280×880 창은 1264×841, 미니 480×360 은 464×321. `[mini] on 480x360` 같은 stdout 의 숫자가 창 크기다.
@@ -326,6 +347,11 @@ HAMSTER_CWD=C:/proj HAMSTER_EVENTS='[{"kind":"prompt","sessionId":"$sid","agentI
 # 미니 모드: 들어갔다 나온다 → [mini] on 480x360 saved=1280x880, [mini] off 1280x880
 HAMSTER_CLICK='more@4000|mini-toggle@5000|mini-exit@9000' \
   HAMSTER_CAPTURE=work/f-mini.png HAMSTER_CAPTURE_DELAY=3500,7500,11000 HAMSTER_CAPTURE_QUIT=1 npx electron .
+
+# 실행 메뉴: 셸을 프로젝트 폴더에 고정하고 알약을 열어 찍은 뒤, 첫 행을 눌러 새 탭에서 명령이 쳐진 것을 찍는다
+# (work/sample-react 는 dev/build/test 스크립트와 pnpm-lock.yaml 이 있는 package.json 하나면 된다) → [pty] create 2 … 가 두 번째 탭
+HAMSTER_CWD=work/sample-react HAMSTER_PREFS='{"showSidebar":true}' HAMSTER_CLICK='run@5000|run-0@9500' \
+  HAMSTER_CAPTURE=work/f-run.png HAMSTER_CAPTURE_DELAY=8500,14500 HAMSTER_CAPTURE_QUIT=1 npx electron .
 ```
 
 사람이 한 번 봐야 하는 것(캡처 실행은 저장을 막아 두었거나 실제 세션이 필요해서 자동으로는 못 본다): **패키지 빌드에서 Windows 토스트가 뜨는지**, **창 크기를 바꾸고 종료한 뒤 `ui.json` 의 `window` 가 바뀌었는지**, **`지난 대화` 의 행을 눌렀을 때 실제로 `claude --resume` 이 그 대화를 이어 여는지**.
@@ -355,6 +381,7 @@ electron/toast-stack.ts  알림 창의 순수 부분: 카드 최대 3·수명(15
 electron/toast-preload.ts 알림 창 페이지의 브리지(ready·state·click·close) — 앱 브리지(preload.ts)는 넘기지 않는다
 electron/window-state.ts 창 위치 저장·복원(fitBounds) · 미니 모드(setMini·miniPlacement) — 순수 함수는 단위 테스트
 electron/transcripts.ts 지난 대화 목록: 트랜스크립트 앞 64KB + 꼬리 512KB 만, `경로:크기:mtime` 캐시
+electron/project-actions.ts 사이드바 실행 메뉴의 판정: 폴더 맨 윗단의 표식 파일(package.json · pyproject · Cargo.toml · go.mod · Makefile …)로 종류·배지·명령을 정하고 표식의 mtime 으로 캐시 — electron 의존 없음
 electron/git.ts         읽기 전용 git: info(브랜치·바뀐 수·ahead/behind) · diff(작업 트리 → staged → untracked), 5초 타임아웃
 electron/version.ts     claude --version / npm 최신 비교
 shared/events.ts        이벤트 타입
@@ -369,7 +396,7 @@ src/desk/office-camera.ts 3D 궤도 카메라 상태·광선/투영 수학(groun
 src/desk/vox/            복셀 코어: builder.ts(상자→지오메트리) · material.ts(셰이더·물·하늘) · hamster.ts(직립 리그) · props.ts(사무실·자연 소품) · world.ts(시드 섬 생성)
 src/desk/skins.ts        모델별 스킨 · src/desk/anim.ts 상태→애니메이션·화면색·에이전트 색
 src/desk/signs.ts        북쪽 벽의 Spritfy 액자: 로고 PNG(src/assets/spritfy-logo.png) + 캡션을 캔버스에 그려 텍스처 평면으로 거는 것, 클릭 = 사이트 열기
-src/sidebar/            사이드바(Sidebar.tsx: 바뀐 파일·탐색·폭 핸들) · recent.ts(ui.json 의 최근/즐겨찾기·상대 시간)
+src/sidebar/            사이드바(Sidebar.tsx: 바뀐 파일·탐색·실행 메뉴·폭 핸들) · recent.ts(ui.json 의 최근/즐겨찾기·상대 시간)
 src/dev/                브라우저 재생(replay-driver.ts) · 데모 햄스터(demo.ts) · debug.ts(HAMSTER_EVENTS 재생 · HAMSTER_CLICK)
 src/Terminal.tsx        xterm 탭(복사·붙여넣기 키 처리, 테마 연동, 검색 애드온, 글꼴 크기, 앱 단축키는 셸로 안 보냄)
 src/term/               TermSearch.tsx(검색 오버레이) · search.ts(검색 옵션, 캡처 실행용 꼬리표 로그)
@@ -381,7 +408,7 @@ src/notify/             notifier.ts(store 구독 → 알림, 네 겹 게이트, 
 src/toast/              알림 창 페이지(toast.html · toast.ts · toast.css): 배너와 같은 토큰, styles.css 를 같이 읽어 라이트/다크가 같다 — React 없음
 src/mini/               MiniShell.tsx(미니 모드: 스튜디오 + 상태줄)
 src/workspaces-persist.ts 터미널 탭 저장·복원(ui.json 의 workspaces)
-scripts/unit/           단위 테스트(i18n · transcripts · turn-git · window-state · contracts · toast-stack …)
+scripts/unit/           단위 테스트(i18n · transcripts · turn-git · window-state · contracts · toast-stack … · project-actions …)
 ```
 
 트랜스크립트 JSONL 은 Claude Code 내부 형식이라 버전이 바뀌면 파서(`electron/watcher/parse.ts`)를 손봐야 할 수 있다. 모르는 레코드는 무시한다.

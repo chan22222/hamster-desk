@@ -266,6 +266,34 @@ export interface FileEntry {
   ext: string
 }
 
+// ---- what kind of project a folder is (electron/project-actions.ts, fs:project)
+
+export type ProjectKind = 'node' | 'python' | 'rust' | 'go' | 'dotnet' | 'maven' | 'gradle' | 'ruby' | 'make' | 'compose'
+/** the headings the sidebar's 실행 menu sorts the commands under */
+export type ProjectActionGroup = 'dev' | 'build' | 'test' | 'install' | 'other'
+
+export interface ProjectAction {
+  /** `<kind>:<name>`, unique within one folder */
+  id: string
+  label: string
+  /** exactly what gets typed into the new terminal */
+  command: string
+  group: ProjectActionGroup
+}
+
+export interface ProjectKindInfo {
+  kind: ProjectKind
+  /** `Node · pnpm · Vite`, `Python · uv · Django`, `Rust` … */
+  badge: string
+  actions: ProjectAction[]
+}
+
+export interface ProjectInfo {
+  path: string
+  /** in detection order; empty for a folder that is nothing in particular. A Node app with a Makefile is two */
+  kinds: ProjectKindInfo[]
+}
+
 // ---- speech bubble summaries (electron/summarize.ts)
 
 export interface BubbleRequest {

@@ -1,9 +1,11 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
+import type { ProjectActionGroup, ProjectInfo } from '@shared/events'
 import { explorerDir, favDirs, isFav, lastCwd, toggleFav } from './recent'
 import { changedFiles, FileLog } from '../log/FileLog'
 import { FeedLog } from '../log/FeedLog'
 import { useDesk, type SessionState } from '../store'
-import { IconBranch, IconChevron, IconFile, IconFolder, IconMore, IconSearch, IconStar } from '../widgets/icons'
+import { IconBranch, IconChevron, IconFile, IconFolder, IconMore, IconPlay, IconSearch, IconStar } from '../widgets/icons'
+import { Popover } from '../widgets/Popover'
 
 /** the sidebar's own limits; the handle on its right edge writes `prefs.sidebarW` */
 export const SIDEBAR_MIN = 200
@@ -55,6 +57,85 @@ function crumbs(p: string): { label: string; path: string }[] {
     out.push({ label: part, path: acc })
   })
   return out
+}
+
+/** the 실행 menu's headings, in the order they come */
+const RUN_GROUPS: { id: ProjectActionGroup; label: string }[] = [
+  { id: 'dev', label: '개발' },
+  { id: 'build', label: '빌드' },
+  { id: 'test', label: '테스트' },
+  { id: 'install', label: '설치' },
+  { id: 'other', label: '기타' },
+]
+
+/**
+ * `.venv\Scripts\Activate.ps1; python manage.py runserver` → the environment step and the command
+ * after it. The step is the same on every row of a venv project, so when a row is too narrow for
+ * the whole line it is the step that gets elided, not the part that tells the rows apart.
+ */
+function splitCommand(command: string): [string, string] {
+  const m = /^(.*?(?:; | && ))(.+)$/.exec(command)
+  return m ? [m[1], m[2]] : ['', command]
+}
+
+/**
+ * `실행 ▾`: the commands the current folder takes, by what it is (electron/project-actions.ts). One
+ * pill under the actions row rather than a fourth button in it — at the default sidebar width the
+ * row has 16px to spare, and `여기서 터미널 열기` would have lost its tail. The pill names what was
+ * found (`Node · pnpm · Vite`), so a folder's kind shows without opening anything; the menu repeats
+ * it above the groups, and each row is the label with the exact command to be typed on the right.
+ */
+function RunMenu({ project, onRun }: { project: ProjectInfo; onRun: (command: string) => void }) {
+  // a folder that is two things at once: `Node · pnpm · Vite + Make`
+  const badge = project.kinds.map((k) => k.badge).join(' + ')
+  let n = 0
+  const groups = RUN_GROUPS.map((g) => ({
+    ...g,
+    rows: project.kinds.flatMap((k) => k.actions.filter((a) => a.group === g.id)).map((a) => ({ ...a, n: n++ })),
+  })).filter((g) => g.rows.length > 0)
+  const label = (
+    <>
+      <IconPlay size={14} />
+      <span className="side-run-name">실행</span>
+      <span className="side-run-badge">{badge}</span>
+      <IconChevron dir="down" size={12} />
+    </>
+  )
+  return (
+    <Popover className="side-run-btn" label={label} title={`이 폴더에서 실행할 명령 · ${badge}`} ariaLabel="실행" width={320} debugClick="run">
+      {(close) => (
+        <div className="pop-body run-menu">
+          <p className="pop-note run-badge">{badge}</p>
+          {groups.map((g) => (
+            <div key={g.id} className="run-group">
+              <div className="pop-head">{g.label}</div>
+              {g.rows.map((a) => {
+                const [step, cmd] = splitCommand(a.command)
+                return (
+                  <button
+                    key={a.id}
+                    className="pop-item run-row"
+                    data-debug-click={`run-${a.n}`}
+                    title={`${a.command}\n새 터미널 탭에서 실행해요.`}
+                    onClick={() => {
+                      onRun(a.command)
+                      close()
+                    }}
+                  >
+                    <span className="run-label">{a.label}</span>
+                    <span className="run-cmd dim">
+                      {step && <span className="run-cmd-step">{step}</span>}
+                      <span className="run-cmd-main">{cmd}</span>
+                    </span>
+                  </button>
+                )
+              })}
+            </div>
+          ))}
+        </div>
+      )}
+    </Popover>
+  )
 }
 
 /** a dragged section never gets smaller than its header plus a couple of rows */
@@ -164,11 +245,27 @@ function Section({
  * card, before any tab exists, so `start` was '' and the listing of '' is the process's working
  * directory: the install folder of the packaged app, the repository of `npx electron .`. The
  * user's own words: "cli 는 그 폴더로 켜지는데 왼쪽은 계속 hamster 데스크 설치쪽으로 감".
+ *
+ * `onRun` opens a terminal in a folder with a command already typed — the 실행 menu's rows.
  */
-export function Sidebar({ start, session, onOpen }: { start: string; session: SessionState | null; onOpen: (dir: string) => void }) {
+export function Sidebar({
+  start,
+  session,
+  onOpen,
+  onRun,
+}: {
+  start: string
+  session: SessionState | null
+  onOpen: (dir: string) => void
+  onRun?: (dir: string, command: string) => void
+}) {
   const prefs = useDesk((s) => s.prefs)
   const setPrefs = useDesk((s) => s.setPrefs)
   const [listing, setListing] = useState<Listing | null>(null)
+  /** what the listed folder is (Node, Python, …) and what can be run in it; null = nothing in particular */
+  const [project, setProject] = useState<ProjectInfo | null>(null)
+  /** the newest `go` wins: two folders clicked in a row must not paint the slower answer last */
+  const goSeq = useRef(0)
   const [drives, setDrives] = useState<string[]>([])
   // derived from the settings bag, again whenever it changes — the sidebar can be up before the
   // file has been read, and a star pressed in the `+` menu has to show on the button here too
@@ -184,11 +281,17 @@ export function Sidebar({ start, session, onOpen }: { start: string; session: Se
 
   const go = async (p: string): Promise<void> => {
     if (!window.desk || !p) return
+    const seq = ++goSeq.current
     setLoading(true)
     try {
-      setListing(await window.desk.fs.list(p))
+      // the project question rides along with the listing: one round trip per folder change, and
+      // the main process answers it from a cache keyed on the marker files' mtimes
+      const [next, proj] = await Promise.all([window.desk.fs.list(p), window.desk.fs.project(p).catch(() => null)])
+      if (seq !== goSeq.current) return
+      setListing(next)
+      setProject(proj && proj.kinds.length > 0 ? proj : null)
     } finally {
-      setLoading(false)
+      if (seq === goSeq.current) setLoading(false)
     }
   }
 
@@ -336,6 +439,12 @@ export function Sidebar({ start, session, onOpen }: { start: string; session: Se
             <IconMore size={14} />
           </button>
         </div>
+        {/* only a folder that is something gets the pill; an empty menu would be a question with no answer */}
+        {project && onRun && listing && !listing.error && (
+          <div className="side-run">
+            <RunMenu project={project} onRun={(command) => onRun(listing.path, command)} />
+          </div>
+        )}
 
         {loading && <div className="side-empty">읽는 중…</div>}
         {listing?.error && <div className="side-empty warn-line">{listing.error}</div>}

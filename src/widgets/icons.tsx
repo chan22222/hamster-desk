@@ -183,6 +183,15 @@ export function IconDownload(p: IconProps) {
   )
 }
 
+/** the sidebar's 실행 menu: run something in this folder */
+export function IconPlay(p: IconProps) {
+  return (
+    <Svg {...p}>
+      <path d="M5.4 3.3v9.4L12.4 8z" />
+    </Svg>
+  )
+}
+
 /** the `⎇` a git folder used to wear */
 export function IconBranch(p: IconProps) {
   return (

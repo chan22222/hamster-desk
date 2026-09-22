@@ -351,6 +351,26 @@ body.is-row-resizing * { cursor: row-resize !important; }
 .side-mini:hover:not(:disabled) { background: var(--surface-2); border-color: var(--line-strong); color: var(--text); }
 .side-mini:disabled { opacity: 0.4; cursor: default; }
 .side-mini.is-on { color: var(--warn); border-color: var(--line-strong); }
+/* `실행 ▾`: its own line under the actions row (see RunMenu in Sidebar.tsx for why not a fourth button in it) */
+.side-run { padding: 0 8px 10px; margin-top: -4px; }
+.side-run-btn { display: flex; align-items: center; gap: 6px; width: 100%; height: 28px; padding: 0 8px; border-radius: var(--radius); border: 1px solid var(--line); background: var(--surface); color: var(--text-2); font-size: 12px; text-align: left; }
+.side-run-btn:hover, .side-run-btn.is-open { background: var(--surface-2); border-color: var(--line-strong); color: var(--text); }
+.side-run-btn > svg:first-child { flex: none; color: var(--accent); }
+.side-run-btn > svg:last-child { flex: none; color: var(--text-3); margin-left: auto; }
+.side-run-name { flex: none; font-weight: 500; }
+.side-run-badge { flex: 1; min-width: 0; color: var(--text-3); font-size: 11px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.side-run-btn:hover .side-run-badge, .side-run-btn.is-open .side-run-badge { color: var(--text-2); }
+/* the menu: the badge line, then the groups; a row is the label with the exact command on the right */
+.run-menu { gap: 6px; }
+.run-badge { padding: 0 6px 2px; }
+.run-group { display: flex; flex-direction: column; gap: 1px; }
+.run-group .pop-head { padding: 4px 6px 3px; }
+.run-row { justify-content: space-between; gap: 10px; min-height: 30px; padding: 4px 6px; }
+.run-label { flex: none; max-width: 55%; color: var(--text); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.run-cmd { display: inline-flex; justify-content: flex-end; flex: 1; min-width: 0; font-family: ui-monospace, Consolas, monospace; font-size: 11px; white-space: nowrap; }
+/* a venv row's activation step is the same on every row: it gives way first, the command after it last */
+.run-cmd-step { flex: 0 100 auto; min-width: 2.5em; overflow: hidden; text-overflow: ellipsis; white-space: pre; /* keeps the space before the command */ }
+.run-cmd-main { flex: 0 1 auto; min-width: 0; overflow: hidden; text-overflow: ellipsis; }
 .fs-row { display: flex; align-items: center; gap: 8px; height: 30px; margin: 0 6px; padding: 0 8px; border-radius: var(--radius); font-size: 12px; cursor: pointer; user-select: none; }
 .fs-row:hover { background: var(--surface-2); }
 .fs-ico { display: inline-flex; align-items: center; justify-content: center; width: 16px; flex: none; color: var(--text-3); font-size: 12px; }

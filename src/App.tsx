@@ -190,6 +190,18 @@ export default function App() {
     addWorkspace(dir)
   }
 
+  /**
+   * The sidebar's 실행 menu: a fresh terminal in that folder with the command already typed. It goes
+   * in as `runOnce`, like a new account's login, not as `initialCommand`: the tab is that folder's
+   * terminal — named after the folder, and back at the next start as a plain shell, with the dev
+   * server *not* started again (src/workspaces-persist.ts keeps no command).
+   */
+  const runInFolder = (dir: string, command: string): void => {
+    setLastCwd(dir)
+    rememberRecent(dir)
+    addWorkspace(dir, undefined, undefined, undefined, command)
+  }
+
   const runUpdate = (): void => {
     const cwd = activeWs?.cwd ?? workspaces[0]?.cwd ?? ''
     useDesk.getState().addWorkspace(cwd, '업데이트', 'claude update')
@@ -302,7 +314,7 @@ export default function App() {
         </div>
       </header>
       <div className="body">
-        {prefs.showSidebar && <Sidebar start={activeWs?.cwd ?? workspaces[0]?.cwd ?? ''} session={active} onOpen={openTerminal} />}
+        {prefs.showSidebar && <Sidebar start={activeWs?.cwd ?? workspaces[0]?.cwd ?? ''} session={active} onOpen={openTerminal} onRun={runInFolder} />}
         <div ref={colRef} className={`column ${beside ? 'is-beside' : ''}`} style={{ ['--desk-w' as string]: `${prefs.deskW}px` }}>
           <Banner />
           {!mini && !prefs.folded && !beside && (

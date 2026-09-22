@@ -19,6 +19,7 @@ import { openFromNotification, showNotification } from './notify'
 import { ToastHost } from './toast-window'
 import { attachWindowStateSaver, isMini, persistWindowState, readWindowState, setMini } from './window-state'
 import { listTranscripts } from './transcripts'
+import { detectProject } from './project-actions'
 import { gitDiff, gitInfo } from './git'
 import { COMMITS_URL, buildCommit, checkAppUpdate, repoDirOf, startSelfUpdate } from './app-update'
 import { checkRelease, downloadRelease, installRelease, isInstalled, releaseInfo } from './app-release'
@@ -783,6 +784,16 @@ ipcMain.handle('fs:exists', async (_e, paths: unknown) => {
 
 ipcMain.handle('fs:openPath', (_e, p: string) => shell.openPath(String(p || '')))
 ipcMain.on('fs:showInFolder', (_e, p: string) => shell.showItemInFolder(String(p || '')))
+
+/**
+ * What kind of project the folder is and what can be run in it (electron/project-actions.ts). Asked
+ * together with fs:list on every folder change, so it reads the folder's top level only and caches
+ * on the markers' mtimes; no shell is spawned to find out.
+ */
+ipcMain.handle('fs:project', async (_e, p: string) => {
+  const { resolve } = await import('node:path')
+  return detectProject(p ? resolve(String(p)) : browseHome())
+})
 
 ipcMain.handle('fs:drives', async () => {
   if (process.platform !== 'win32') return ['/']
