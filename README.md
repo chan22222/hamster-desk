@@ -171,10 +171,11 @@ npm run release            # 검사만: npm run release -- --check
 - 목록은 **트랜스크립트 파일만** 읽는다(`~/.claude/projects/<cwd 슬러그>/*.jsonl`, 최근 60개). 파일 하나에서 읽는 양은 **앞 64KB**(첫 프롬프트·브랜치) + **꼬리 512KB**(마지막 `custom-title`/`ai-title`/`last-prompt`)뿐이고 전량 파싱은 하지 않는다 — 95MB 짜리 트랜스크립트도 있다. 제목 우선순위는 `custom-title > ai-title > 첫 프롬프트 60자 > id 앞 8자`. 직접 친 프롬프트가 없는 파일(슬래시 명령만 있는 세션 등)은 목록에서 빠진다. 결과는 `경로:크기:mtime` 으로 캐시한다(`electron/transcripts.ts`).
 
 **알림**
-- 창이 **포커스 밖일 때만** 권한 요청 · 질문 · 턴 완료를 Windows 알림으로 띄우고 작업표시줄 버튼을 깜빡인다(창을 보면 멈춘다). 종류별 on/off 와 소리는 `⋯` 메뉴의 `알림`. 알림을 누르면 창이 앞으로 오고 그 탭의 터미널에 커서가 간다. 턴 완료는 이 앱에서 띄운 세션만 울린다.
+- 창이 **포커스 밖일 때만** 권한 요청 · 질문 · 턴 완료를 **앱의 알림 창**(아래)으로 띄우고 작업표시줄 버튼을 깜빡인다(창을 보면 둘 다 멈춘다). 종류별 on/off 와 소리는 `⋯` 메뉴의 `알림`. 알림을 누르면 창이 앞으로 오고 그 탭의 터미널에 커서가 간다. 턴 완료는 이 앱에서 띄운 세션만 울린다.
 - **"답을 기다린다"는 두 곳에서 안다**(`electron/prompt.ts`). ① 터미널 화면 글자: 이스케이프와 공백을 지운 뒤 권한 요청·신뢰 확인·MCP 확인의 고정 문구를 찾고, **선택지형 질문**(AskUserQuestion)은 마지막 선택지 `N. Chat about this` 바로 밑에 `Enter to select · ↑/↓ to navigate · Esc to cancel`(질문이 여럿이면 `Tab/Arrow keys to navigate`)이 붙은 모양으로 찾는다 — 예전에는 `Enter to confirm` 만 찾아서 CLI 2.1.x 의 선택지 질문이 한 번도 걸리지 않았다. 문구 하나만으로는 찾지 않는다: 그 문구를 말하는 산문(대화·README)에도 걸린다. ② 트랜스크립트: `AskUserQuestion` 도구 호출이 기록되면(답을 기다리는 동안에도 기록된다) 그 세션이 도는 터미널이 질문 중이다. 화면 문구가 CLI 버전마다 바뀌어도 이쪽은 남는다. 다만 새 세션의 첫 질문은 CLI 가 ~20초 늦게 쓴다(실측). 둘이 같은 질문을 보면 한 번만 알린다(10초 안, 그사이 Enter/Esc 가 없으면 같은 것), 기록이 오기 전에 이미 답했으면(Enter/Esc) 알리지 않고, 60초보다 오래된 기록(따라잡기)은 무시한다.
 - 네 겹으로 거른다: 설정, 포커스, **이벤트 나이 30초**(렌더러를 새로 고치면 백로그가 옛 `waiting`/`turn_end` 를 다시 흘린다), 같은 종류 + 같은 터미널 5초 중복 억제.
-- Windows 토스트는 **AUMID**(Application User Model ID) 아래에 등록된다. 패키지 빌드는 `kr.amag.hamsterdesk`(electron-builder 의 `appId` 와 같다), 개발 실행은 `process.execPath` 를 쓰고, `HAMSTER_AUMID`(`none`·`app`·`exec` 또는 임의의 id)로 바꿔 볼 수 있다. **토스트가 안 뜨는 환경**(`failed` 이벤트, 또는 2.5초 안에 `show` 도 `failed` 도 없음)에서는 같은 제목·본문이 **앱 안 배너**로 8초 뜬다(누르면 그 탭으로). 깜빡임은 어느 쪽이든 동작하므로 알림이 조용히 사라지는 일은 없다.
+- **알림 창**(`electron/toast-window.ts`, 페이지는 `src/toast/`): 주 모니터 작업 영역의 오른쪽 아래(작업표시줄 위, 가장자리에서 16px)에 뜨는 테두리 없는 · 투명 · 항상 위 · 작업표시줄에 안 보이는 · **포커스를 안 가져가는**(`focusable: false` + `showInactive`) 창 하나다 — 사용자는 하던 입력을 계속하고, 주 창의 "포커스 밖" 판정(`document.hasFocus`)도 흔들리지 않는다. 카드는 360×96, 최대 3장. **새 카드가 아래에** 붙고 창은 위로 자란다: 눈이 먼저 가는 모서리 쪽이 최신(Windows 토스트와 같은 방향)이고, 창 아래를 고정하니 누르려던 카드가 새 카드 때문에 움직이지 않는다. 권한 요청·질문은 15초, 턴 완료는 8초 뒤 스스로 사라진다(질문은 터미널이 막혀 있으니 기다릴 가치가 있다). 포인터가 창 위에 있으면 전부 멈춘다 — 페이지의 `mouseenter` 가 아니라 메인이 250ms 마다 포인터 위치를 창 영역과 비교한다(활성화된 적 없는 창을 크기 조절하거나 찍으면 Chromium 이 `mouseleave` 없는 가짜 `mouseenter` 를 만들어 카드가 영영 남았다). 카드를 누르면 그 탭으로(`notify:click` → `openNotifyTarget`, 창이 앞으로), `×` 는 그 카드만, 주 창이 포커스를 받으면 전부 걷는다. 색은 앱 안 배너와 같은 토큰(권한·질문은 `--warn`, 턴 완료는 `--accent`)이고, 렌더러가 지금 칠해진 테마(`<html data-theme>`)를 요청에 실어 보내 라이트·다크가 따라간다. 미니 모드 창이 그 모서리에 있으면 그 위에 쌓인다. 투명 창은 자기 영역의 클릭을 다 먹으므로 창을 카드 수에 맞춰 늘였다 줄인다(그림자 여백 16px 만 남는다).
+- **왜 Windows 토스트가 아닌가**: 이 PC 에서 토스트는 Windows 가 받았다고 답하고(Electron `show` 이벤트, 레지스트리 `Notifications\Settings\kr.amag.hamsterdesk` 의 `LastNotificationAddedTime` 갱신) 화면에는 안 그렸다. **방해 금지**(CloudStore 의 `quiethourssettings` 가 `Microsoft.QuietHoursProfile.PriorityOnly`; Windows 11 은 전체 화면 앱·디스플레이 복제 때 스스로 켠다)가 배너를 삼키고 알림 센터에만 쌓는데 앱에는 아무 말도 없어서, `failed` 로 갈아타던 배너 폴백도 돌지 않았다 — 작업표시줄만 깜빡였다. AUMID 세 변형(`none`·`app`·`exec`)을 돌려 봐도 셋 다 `shown` 이었다. 그래서 OS 토스트 경로와 `HAMSTER_NOTIFY_PROBE`·`HAMSTER_AUMID` 는 지웠고(AUMID 자체는 작업표시줄 묶음용으로 `electron/shortcuts.ts` 에 남는다), 앱 안 배너는 알림 창을 만들지 못했을 때(`failed`)의 폴백으로 8초 뜬다. 깜빡임은 어느 쪽이든 동작하므로 알림이 조용히 사라지는 일은 없다.
 
 **턴 완료 요약 토스트**
 - 턴이 끝나면 오른쪽 아래에 `파일 3 · +120 −40 · 2분 10초` 와 마지막으로 한 말 한 줄이 8초 뜬다. 그 턴의 프롬프트 **이후** 편집만 세고(대화 전체가 아니다), 시간은 `turn_end.durationMs` 가 있으면 그 값이다. 모델을 더 부르지 않는다. 누르면 그 탭으로 가서 사이드바의 `바뀐 파일` 이 열린다. 미니 모드에서는 상태줄 한 줄로 대신 나온다.
@@ -257,6 +258,7 @@ npm run smoke:ui                   # ~/.hamster-desk/ui.json: 병합·null 삭�
 | `delegation.test.ts` | 멀티 에이전트 블록: 사용자의 글은 한 글자도 안 바뀜, 켜기/끄기/프리셋 바꾸기가 블록 하나만 넣고 빼고 바꿈, CRLF 유지, 빈 파일은 지움, 캡처 실행(읽기 전용)은 쓰지 않음 |
 | `usage-query.test.ts` | CLI 의 `get_usage` 답(실제 응답에서 잘라 옴)에서 5시간·주간(전체)·모델별 주간 창을 읽음, 오류 답·쓰레기는 null, 로그인된 계정만 묻고 실패한 계정은 답에서 빠짐 |
 | `patrol.test.ts` | 사장의 순찰(`src/desk/patrol.ts`)을 가짜 시계와 실제 `Walker` 로 돌린다: 직원이 없으면 10분을 돌려도 안 일어남, 첫 순찰이 12~25초 안에 시작되고 의자 옆·뒤에 서며 2~4초 뒤 돌아와 45~120초 쉼, 주사위가 직원 아무나 고름, `waiting`·새 `say` 줄·그 직원의 퇴근이 도중에 되돌림(다른 직원의 퇴근은 무관), 사무실이 비면 첫 지연이 다시 적용, `off` 는 자리에 묶어 두고 `hurry` 는 즉시·3초·6초. 지름길(`directRoute`): 열두 자리 전부에 대해 **실제 소품 크기**(책상·의자·화분·정수기·커피 테이블·프린터)의 어느 것에도 닿지 않고 왕복하며 갈 때와 올 때 길이가 같고, 첫 줄 가운데 두 자리는 복도 경로의 40% 이하; 차선·통로 자체가 비어 있고, 도중에 끊긴 길은 허브를 거치지 않고 그 자리에서 돌아선다 |
+| `toast-stack.test.ts` | 알림 창의 카드 스택: 질문·권한이 턴 완료보다 오래 남음, 넷째 카드가 오면 가장 오래된 것이 빠짐, 만료 순서, 호버 정지가 시간을 돌려줌(정지 중 들어온 카드는 풀린 뒤 제 수명 전부), `toastBounds`(오른쪽 아래 16px, 아래 고정으로 위로 자람, 보조 모니터 오프셋, 미니 창 위로 비킴) |
 
 스모크 테스트(창을 보지 않고 스크린샷만). `HAMSTER_TYPE` 은 첫 셸에 자동 입력할 텍스트(`\r` = Enter, `|` 로 단계 구분, 단계 간격 `HAMSTER_TYPE_DELAY` ms), `HAMSTER_CWD` 는 셸 시작 폴더. 긴 문장은 Claude 입력창이 붙여넣기로 보므로 Enter(`
 `)를 별도 단계로 보낸다:
@@ -281,9 +283,8 @@ HAMSTER_CAPTURE=work/ui-dark.png HAMSTER_CAPTURE_DELAY=8000 HAMSTER_CAPTURE_QUIT
 | `HAMSTER_CLICK='more@4000\|mini-toggle@5000'` | `[data-debug-click="<이름>"]` 을 그 시각(ms)에 누른다. 500ms 폴링이라 아직 없는 버튼은 생길 때까지 기다리고, 끝내 없으면 `[debug] click <이름> missing`. 이름만 쓰면 `@3000` |
 | `HAMSTER_KEYS='ctrl+f@6000\|ctrl+shift+m@9000'` | 메인이 `webContents.sendInputEvent` 로 **진짜 키 이벤트**를 넣는다 — 핸들러를 직접 부르는 게 아니라 단축키가 실제로 타는 경로다 |
 | `HAMSTER_UNFOCUSED=1` | 창을 `showInactive()` 로 띄운다. 알림은 포커스 밖에서만 울리므로 이게 없으면 그 경로에 닿을 수 없다 |
-| `HAMSTER_NOTIFY_PROBE=1` | 시작 5초 뒤부터 3초 간격으로 AUMID 세 변형(`none`·`app`·`exec`)의 알림을 하나씩 띄우고 `[notify] probe aumid=… result=…` 를 찍는다 — 이 PC 가 토스트를 어떻게 다루는지 한 번에 본다 |
-| `HAMSTER_NOTIFY_FAIL=1` | 모든 알림 요청에 `failed` 로 답한다(토스트 없음) → 배너 폴백 경로를 찍을 수 있다 |
-| `HAMSTER_AUMID=none\|app\|exec\|<id>` | 이번 실행의 AUMID |
+| `HAMSTER_CAPTURE_TOAST=<png>` | `HAMSTER_CAPTURE` 의 각 시각에 **알림 창**도 찍는다(카드가 없으면 안 찍는다; 이름 규칙은 같다). 화면 전체를 PowerShell `CopyFromScreen` 으로 찍으면 이 창은 안 보인다 — DirectComposition 표면(`WS_EX_NOREDIRECTIONBITMAP`)이라 GDI `BitBlt` 에 `CAPTUREBLT` 가 있어야 찍힌다 |
+| `HAMSTER_NOTIFY_FAIL=1` | 모든 알림 요청에 `failed` 로 답한다(알림 창 없음) → 배너 폴백 경로를 찍을 수 있다 |
 | `HAMSTER_PATROL=1` | 사장의 순찰(`src/desk/patrol.ts`)을 **서두르게** 한다: 직원이 앉자마자 일어나고, 3초 혼내고, 6초 쉬고 또 간다. 주사위도 고정(직원 목록의 가운데)이라 캡처 지연을 계산해 걷는 중·혼내는 중을 찍을 수 있다. 예: `HAMSTER_PREFS='{"demoAgents":2,"autoCam":true}' HAMSTER_EVENTS='[{"kind":"thinking","sessionId":"$sid","agentId":null,"ts":"$now"}]' HAMSTER_PATROL=1 HAMSTER_CAPTURE=work/patrol.png HAMSTER_CAPTURE_DELAY=8000,8500,9500` — 첫 직원이 앉는 것이 세션 뒤 3초쯤, 걷기 1.5초, 그다음 3초가 혼내는 중이다. 브라우저 미리보기에서는 `window.__studio.patrol('hurry' \| 'off' \| 'on')` |
 | `HAMSTER_PTY_LOG=<파일>` | 셸이 찍은 것을 그대로, **셸에 써 넣은 것**은 `>> ` 로 시작하는 한 줄씩 남긴다. 제어문자는 풀어 쓴다: 컨트롤 바의 `/compact` 는 `>> \x15/compact` 와 `>> \r` **두 줄**(= 두 청크)로 남는다. 친 글이 전부 남으므로(비밀번호 포함) 패키지 빌드에는 없다 |
 | `HAMSTER_TYPE` `HAMSTER_TYPE_DELAY` `HAMSTER_TYPE_VIA=renderer` `HAMSTER_CWD` `HAMSTER_PREFS` | 위 문단 참고 |
@@ -303,9 +304,11 @@ HAMSTER_CAPTURE=work/ui-dark.png HAMSTER_CAPTURE_DELAY=8000 HAMSTER_CAPTURE_QUIT
 기능별 캡처(전부 임시 `HAMSTER_HOME`, 한 번에 하나씩):
 
 ```bash
-# 알림: 포커스 없이 띄우고 권한 요청을 흘린다 → stdout 에 [notify] show tag=permission … result=shown (안 뜨는 PC 면 result=failed + 배너)
-HAMSTER_UNFOCUSED=1 HAMSTER_EVENTS='[{"kind":"waiting","ptyId":"$pty","reason":"permission","ts":"$now"}]' \
-  HAMSTER_CAPTURE=work/f-notify.png HAMSTER_CAPTURE_DELAY=7000 HAMSTER_CAPTURE_QUIT=1 npx electron .
+# 알림: 포커스 없이 띄우고 권한 요청·턴 완료·질문을 흘린다 → 알림 창에 카드 셋, 17초에는 턴 완료가 사라져 둘.
+# stdout 에 [notify] popup show tag=… n=3 · [notify] popup window 392x336 at 1528,696 theme=light · [notify] popup expire tag=turn
+# (HAMSTER_CWD 가 없으면 셸이 없어 $pty 가 null 이고 재생이 12초 늦다. 테마는 HAMSTER_PREFS='{"theme":"dark"}')
+HAMSTER_UNFOCUSED=1 HAMSTER_CWD=C:/proj HAMSTER_EVENTS='[{"kind":"waiting","ptyId":"$pty","reason":"permission","ts":"$now"},{"kind":"prompt","sessionId":"$sid","agentId":null,"text":"t","ts":"$now"},{"kind":"turn_end","sessionId":"$sid","durationMs":130000,"ts":"$now"},{"kind":"waiting","ptyId":"$pty","reason":"question","ts":"$now"}]' \
+  HAMSTER_CAPTURE=work/f-notify.png HAMSTER_CAPTURE_TOAST=work/f-toast.png HAMSTER_CAPTURE_DELAY=9000,17000 HAMSTER_CAPTURE_QUIT=1 npx electron .
 
 # 컨트롤 바 + 지난 대화: 컨텍스트 92% → 탭의 빨간 92%, 강조된 /compact, 모델 드롭다운 `Fable 5.1 ▾`. 그다음 지난 대화 목록
 HAMSTER_CWD=C:/proj HAMSTER_EVENTS='[{"kind":"status","sessionId":"$sid","ts":"$now","model":{"id":"claude-fable-5-1","displayName":"Fable 5.1"},"effort":"high","contextUsedPct":92,"contextSize":200000,"costUSD":null,"linesAdded":null,"linesRemoved":null,"fiveHour":null,"sevenDay":null,"otherWindows":{}}]' \
@@ -346,7 +349,10 @@ electron/watcher/       sessions(세션 파일·pty 소유 판별) · project(�
 electron/legacy.ts      예전 협업 모드가 남긴 파일 정리(첫 실행 1회)
 electron/statusline.ts  상태줄 스크립트 설치/해제, 스냅샷 감시
 electron/ui-store.ts    ~/.hamster-desk/ui.json 읽기/쓰기(디바운스·원자적 쓰기·손상 복구) — electron 의존 없음
-electron/notify.ts      OS 알림(Notification + flashFrame) · AUMID 세 변형 · 안 뜨면 'failed' 로 답해 렌더러가 배너로
+electron/notify.ts      알림 입구: flashFrame + 알림 창(toast-window) · 못 만들면 'failed' 로 답해 렌더러가 배너로 · 알림 클릭 → 창 앞으로 + notify:click
+electron/toast-window.ts 앱의 알림 창(투명·항상 위·포커스 없음, 주 모니터 오른쪽 아래): 카드 스택 · 만료 타이머 · 포인터 폴링으로 정지 · 페이지는 src/toast/
+electron/toast-stack.ts  알림 창의 순수 부분: 카드 최대 3·수명(15초/8초)·정지/재개·창 위치(toastBounds, 미니 창 피하기) — 단위 테스트
+electron/toast-preload.ts 알림 창 페이지의 브리지(ready·state·click·close) — 앱 브리지(preload.ts)는 넘기지 않는다
 electron/window-state.ts 창 위치 저장·복원(fitBounds) · 미니 모드(setMini·miniPlacement) — 순수 함수는 단위 테스트
 electron/transcripts.ts 지난 대화 목록: 트랜스크립트 앞 64KB + 꼬리 512KB 만, `경로:크기:mtime` 캐시
 electron/git.ts         읽기 전용 git: info(브랜치·바뀐 수·ahead/behind) · diff(작업 트리 → staged → untracked), 5초 타임아웃
@@ -371,10 +377,11 @@ src/shortcuts.ts        전역 단축키 전부(창 keydown 한 곳)
 src/session/            SessionBar.tsx(컨트롤 바) · ContextMeter.tsx(탭의 % · 바의 미터) · TranscriptList.tsx(지난 대화)
 src/log/                FileLog.tsx(바뀐 파일) · FeedLog.tsx(말풍선 로그) · TurnToast.tsx(턴 요약 토스트) · turn.ts(summarizeTurn, 순수)
 src/git/                GitChip.tsx(탭 칩) · useGit.ts(10초 폴링 + 편집 디바운스) · DiffView.tsx · diff.ts(줄 분류, 순수)
-src/notify/             notifier.ts(store 구독 → 알림, 네 겹 게이트) · Banner.tsx(토스트가 안 뜰 때의 배너) · src/assets/notify.wav
+src/notify/             notifier.ts(store 구독 → 알림, 네 겹 게이트, 칠해진 테마를 실어 보냄) · Banner.tsx(알림 창을 못 만들 때의 배너) · src/assets/notify.wav
+src/toast/              알림 창 페이지(toast.html · toast.ts · toast.css): 배너와 같은 토큰, styles.css 를 같이 읽어 라이트/다크가 같다 — React 없음
 src/mini/               MiniShell.tsx(미니 모드: 스튜디오 + 상태줄)
 src/workspaces-persist.ts 터미널 탭 저장·복원(ui.json 의 workspaces)
-scripts/unit/           단위 테스트(i18n · transcripts · turn-git · window-state · contracts)
+scripts/unit/           단위 테스트(i18n · transcripts · turn-git · window-state · contracts · toast-stack …)
 ```
 
 트랜스크립트 JSONL 은 Claude Code 내부 형식이라 버전이 바뀌면 파서(`electron/watcher/parse.ts`)를 손봐야 할 수 있다. 모르는 레코드는 무시한다.

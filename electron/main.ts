@@ -15,14 +15,15 @@ import { UsageQuerier } from './usage-query'
 import { sanitizeConfig as sanitizeDelegation, storeConfig as storeDelegation, syncDelegation } from './delegation'
 import { cleanupLegacyHarness } from './legacy'
 import { claudeDir } from './watcher/paths'
-import { AUMID_VARIANTS, appUserModelId, aumidFor, showNotification } from './notify'
+import { openFromNotification, showNotification } from './notify'
+import { ToastHost } from './toast-window'
 import { attachWindowStateSaver, isMini, persistWindowState, readWindowState, setMini } from './window-state'
 import { listTranscripts } from './transcripts'
 import { gitDiff, gitInfo } from './git'
 import { COMMITS_URL, buildCommit, checkAppUpdate, repoDirOf, startSelfUpdate } from './app-update'
 import { checkRelease, downloadRelease, installRelease, isInstalled, releaseInfo } from './app-release'
 import { bootMark, writeBootLog } from './boot-log'
-import { listDir, pathExists, repairShortcuts } from './shortcuts'
+import { appUserModelId, listDir, pathExists, repairShortcuts } from './shortcuts'
 
 // the first line of ours to run; what came before it is the OS loading the exe (electron/boot-log.ts)
 bootMark('main')
@@ -117,15 +118,23 @@ Menu.setApplicationMenu(null)
 const gotLock = app.isPackaged ? app.requestSingleInstanceLock() : true
 if (!gotLock) app.quit()
 
-// Windows files a toast under an Application User Model ID, and it has to be set before anything
-// shows one (electron/notify.ts holds the three variants and why). HAMSTER_NOTIFY_PROBE leaves it
-// alone on purpose: its first variant *is* "whatever this process gets without asking".
-if (process.env.HAMSTER_NOTIFY_PROBE !== '1') app.setAppUserModelId(appUserModelId(app.isPackaged))
+// The taskbar groups windows under an Application User Model ID, and a pinned button lights up
+// only for a window carrying the shortcut's id (electron/shortcuts.ts). Set before any window.
+app.setAppUserModelId(appUserModelId(app.isPackaged))
 
 const ptys = new Map<number, PtyHandle>()
 /** pty id → the account its shell was started under */
 const ptyProfile = new Map<number, string>()
 let win: BrowserWindow | null = null
+/** the app's own notification window (electron/toast-window.ts); a click there is a notification click */
+const toasts = new ToastHost({
+  onClick: (item) => openFromNotification(win, item.tab),
+  // the mini window owns the corner the cards go to; they stack above it then
+  avoid: () => (win && !win.isDestroyed() && isMini() ? win.getBounds() : null),
+  log: (line) => {
+    if (process.env.HAMSTER_CAPTURE) console.log(line)
+  },
+})
 /** one watcher per account (profile id → watcher): each account has its own sessions/ and projects/ */
 const watchers = new Map<string, DeskWatcher>()
 let status: StatusWatcher | null = null
@@ -228,24 +237,6 @@ function scheduleKeys(): void {
   }
 }
 
-/**
- * `HAMSTER_NOTIFY_PROBE=1` — the three AUMID variants, 3 s apart, so one blind run says what this
- * PC actually does with a toast (plan §3.1, R1). The id is only set here, which is what makes the
- * first variant ('none', i.e. whatever the process gets without asking) an honest test.
- */
-function scheduleNotifyProbe(): void {
-  if (debugOff() || process.env.HAMSTER_NOTIFY_PROBE !== '1') return
-  AUMID_VARIANTS.forEach((variant, i) => {
-    setTimeout(() => {
-      const id = aumidFor(variant)
-      if (id) app.setAppUserModelId(id)
-      void showNotification({ title: `probe ${variant}`, body: `aumid=${id ?? '(unset)'}`, tag: 'turn', tab: '' }, win).then((r) =>
-        console.log(`[notify] probe aumid=${variant} result=${r}`),
-      )
-    }, 5000 + i * 3000)
-  })
-}
-
 function createWindow(): void {
   // where the window sat last time, once it has been checked against the screens that exist now
   const saved = readWindowState()
@@ -293,13 +284,15 @@ function createWindow(): void {
       /* cosmetic: the window still works without it */
     }
   }
-  // the taskbar button blinks while a notification is unanswered; looking at the window answers it
+  // the taskbar button blinks and the popup cards stay while a notification is unanswered;
+  // looking at the window answers it
   win.on('focus', () => {
     try {
       win?.flashFrame(false)
     } catch {
       /* the window went away between the event and here */
     }
+    toasts.dismissAll()
   })
   // Up at once rather than on 'ready-to-show': that waits for the first paint, and a window that
   // is not there yet looks like a click that did nothing. Until the page paints the window is
@@ -336,6 +329,7 @@ function createWindow(): void {
   })
   win.on('closed', () => {
     win = null
+    toasts.dispose() // a card with no window to open is pointless
   })
   const devUrl = process.env.ELECTRON_RENDERER_URL
   if (!app.isPackaged && devUrl) void win.loadURL(devUrl)
@@ -868,7 +862,7 @@ ipcMain.on('win:opacity', (_e, v: number) => {
 
 // ---- IPC: notifications and mini mode (electron/notify.ts, electron/window-state.ts)
 
-ipcMain.handle('notify:show', (_e, req: NotifyRequest) => showNotification(req, win))
+ipcMain.handle('notify:show', (_e, req: NotifyRequest) => showNotification(req, win, toasts))
 ipcMain.handle('win:mini', (_e, on: boolean) => setMini(win, on === true))
 
 // ---- IPC: past conversations of a folder (electron/transcripts.ts)
@@ -931,9 +925,12 @@ ipcMain.handle('app:info', () => {
 // A comma-separated delay list takes several shots in one run — `shot.png` then becomes
 // `shot-1.png`, `shot-2.png`, … so before/after can be compared. A single delay keeps the plain
 // file name, which is what every existing script and README command expects.
+// HAMSTER_CAPTURE_TOAST=<png path> photographs the notification window at the same moments
+// (nothing is written while it has no cards up).
 function scheduleCapture(): void {
   const target = process.env.HAMSTER_CAPTURE
   if (!target || app.isPackaged) return
+  const toastTarget = process.env.HAMSTER_CAPTURE_TOAST
   const delays = (process.env.HAMSTER_CAPTURE_DELAY ?? '4000')
     .split(',')
     .map((s) => Number(s.trim()))
@@ -941,22 +938,25 @@ function scheduleCapture(): void {
     .sort((a, b) => a - b)
   if (delays.length === 0) delays.push(4000)
   const many = delays.length > 1
-  const dot = target.lastIndexOf('.')
-  const slash = Math.max(target.lastIndexOf('/'), target.lastIndexOf('\\'))
-  const nameFor = (i: number): string => {
-    if (!many) return target
-    return dot > slash ? `${target.slice(0, dot)}-${i + 1}${target.slice(dot)}` : `${target}-${i + 1}`
+  const nameFor = (base: string, i: number): string => {
+    if (!many) return base
+    const dot = base.lastIndexOf('.')
+    const slash = Math.max(base.lastIndexOf('/'), base.lastIndexOf('\\'))
+    return dot > slash ? `${base.slice(0, dot)}-${i + 1}${base.slice(dot)}` : `${base}-${i + 1}`
+  }
+  const shoot = async (w: BrowserWindow | null | undefined, base: string, i: number): Promise<void> => {
+    const img = await w?.webContents.capturePage()
+    if (!img) return
+    const { writeFileSync } = await import('node:fs')
+    const file = nameFor(base, i)
+    writeFileSync(file, img.toPNG())
+    console.log(`[capture] ${file}`)
   }
   delays.forEach((delay, i) => {
     setTimeout(async () => {
       try {
-        const img = await win?.webContents.capturePage()
-        if (img) {
-          const { writeFileSync } = await import('node:fs')
-          const file = nameFor(i)
-          writeFileSync(file, img.toPNG())
-          console.log(`[capture] ${file}`)
-        }
+        await shoot(win, target, i)
+        if (toastTarget) await shoot(toasts.window(), toastTarget, i)
       } catch (e) {
         console.error('[capture] failed', e)
       }
@@ -1040,7 +1040,6 @@ if (gotLock) {
     startWatchers()
     scheduleCapture()
     scheduleKeys()
-    scheduleNotifyProbe()
     scheduleShortcutRepair()
     // every timer is late after a sleep; a window that ended meanwhile gets its message once the
     // network is back, not up to half a minute later

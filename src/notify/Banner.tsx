@@ -1,4 +1,4 @@
-// The in-app fallback for when the OS refuses to show a toast (plan §3.1).
+// The in-app fallback for when the app's own notification window could not be made (plan §3.1).
 //
 // This component is also what *installs* the notifier: App.tsx is frozen and already renders a
 // `<Banner/>`, so importing `./notifier` here is how the store subscription gets set up — no extra

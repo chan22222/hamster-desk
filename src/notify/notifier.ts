@@ -1,5 +1,6 @@
-// Raise an OS notification when something in the store starts waiting for the user and the window
-// is not the one they are looking at. Plan §3.1.
+// Raise a notification — the app's own popup window, electron/toast-window.ts — when something in
+// the store starts waiting for the user and the window is not the one they are looking at.
+// Plan §3.1.
 //
 // Why a store subscription and not an event handler: `turn_end` is written by the store owner (C)
 // and `ptyWaiting` by the same reducer, so watching the *result* keeps this file out of store.ts
@@ -13,7 +14,7 @@
 import soundUrl from '../assets/notify.wav?url'
 import { formatDuration, t } from '../i18n'
 import { shortName, useDesk, type SessionState } from '../store'
-import type { NotifyResult } from '@shared/events'
+import type { NotifyRequest, NotifyResult } from '@shared/events'
 
 /** ignore anything that happened longer ago than this — backlog replay, mostly */
 const AGE_MS = 30_000
@@ -26,7 +27,7 @@ const DEDUP_MS = 5_000
  * is the one gap, and it is exactly one renderer-startup wide.
  */
 const ARM_MS = 1500
-/** how long the in-app banner stays up when the OS would not show a toast */
+/** how long the in-app banner stays up when the popup window could not be made */
 const BANNER_MS = 8_000
 
 export interface BannerItem {
@@ -36,7 +37,7 @@ export interface BannerItem {
   /** the tab to open when the banner is clicked */
   tab: string
   ptyId: number | null
-  /** why the banner is here rather than a toast */
+  /** why the banner is here rather than the popup */
   reason: NotifyResult
 }
 
@@ -150,20 +151,23 @@ function beep(): void {
     const audio = new Audio(soundUrl)
     audio.volume = 0.5
     void audio.play().catch(() => {
-      /* autoplay policy, no output device — the toast is still there */
+      /* autoplay policy, no output device — the popup is still there */
     })
   } catch {
     /* ignore */
   }
 }
 
+/** the palette on screen right now — App.tsx writes it on <html>; the popup is painted to match */
+const painted = (): NotifyRequest['theme'] => (document.documentElement.dataset.theme === 'dark' ? 'dark' : 'light')
+
 /** Hand one notification to main, and fall back to the in-app banner when it cannot show it. */
-function raise(req: { title: string; body: string; tag: 'permission' | 'question' | 'turn'; tab: string }, ptyId: number | null): void {
+function raise(req: Omit<NotifyRequest, 'theme'>, ptyId: number | null): void {
   beep()
   const bridge = window.desk
   if (!bridge) return
   void bridge.notify
-    .show(req)
+    .show({ ...req, theme: painted() })
     .then((result) => {
       if (result === 'shown') return
       showBanner({ title: req.title, body: req.body, tab: req.tab, ptyId, reason: result })
@@ -232,7 +236,7 @@ export function installNotifier(): void {
     for (const id of [...prevTurns.keys()]) if (!s.sessions[id]) prevTurns.delete(id)
   })
 
-  // a clicked toast opens the tab it was about and puts the caret back in its terminal
+  // a clicked popup card opens the tab it was about and puts the caret back in its terminal
   window.desk.notify.onClick((tab) => {
     dismissBanner()
     openNotifyTarget(tab)

@@ -319,9 +319,15 @@ export interface NotifyRequest {
   tag: 'permission' | 'question' | 'turn'
   /** the tab id to open when the notification is clicked (`ws:<id>` / `session:<id>`) */
   tab: string
+  /** the palette the window is painted with, so the popup matches it; main falls back to the OS's */
+  theme?: 'light' | 'dark'
 }
 
-/** `unsupported` = this OS/build cannot show toasts at all; `failed` = it tried and the OS refused. */
+/**
+ * `shown` = the app's own notification window has it; `failed` = that window could not be made,
+ * so the renderer shows its in-app banner instead. `unsupported` is kept for the banner's wording
+ * (no current path returns it).
+ */
 export type NotifyResult = 'shown' | 'failed' | 'unsupported'
 
 // ---- past conversations (electron/transcripts.ts)

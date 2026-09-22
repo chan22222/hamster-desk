@@ -1,0 +1,18 @@
+<!doctype html>
+<!--
+  The notification window's page (electron/toast-window.ts). Nothing paints until main sends the
+  first state, and the window is transparent, so there is no loading screen to show. The
+  transparent background is inline: the app stylesheet paints `html, body` with the palette's
+  `--bg`, and which of the two stylesheets the bundler links last is not ours to choose.
+-->
+<html lang="ko" style="background: transparent">
+  <head>
+    <meta charset="UTF-8" />
+    <meta http-equiv="Content-Security-Policy" content="default-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data:" />
+    <title>Hamster Desk 알림</title>
+  </head>
+  <body style="background: transparent">
+    <div id="stack" role="status" aria-live="polite"></div>
+    <script type="module" src="./toast.ts"></script>
+  </body>
+</html>

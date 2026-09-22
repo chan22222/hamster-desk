@@ -5,8 +5,8 @@ import { dirname, join, resolve, sep } from 'node:path'
  * Keeps the app's Windows shortcuts pointing at — and filed under the same id as — the window.
  *
  * The taskbar puts a window on a pinned button only when both carry the same Application User
- * Model ID. This app sets one explicitly (electron/notify.ts, toasts need it), but there is no
- * installer to write it into a shortcut, so:
+ * Model ID. This app sets one explicitly (`appUserModelId` below, set in electron/main.ts before
+ * the window exists), but there is no installer to write it into a shortcut, so:
  *
  *  - an exe pinned from Explorer gets a shortcut with *no* id. Started from it, the app shows up as
  *    a second button next to the pinned one, which stays unlit;
@@ -24,6 +24,18 @@ import { dirname, join, resolve, sep } from 'node:path'
  *
  * The `electron` calls come in through `io`, so the decisions below can be tested with tsx.
  */
+
+/** The id the packaged build registers under (electron-builder `appId`); keep the two in step. */
+export const PACKAGED_AUMID = 'kr.amag.hamsterdesk'
+
+/**
+ * The id this run's windows are filed under: the packaged app id, or — for a run started from
+ * `node_modules/electron/electron.exe`, which has no shortcut of its own — the exe that started
+ * us, so a dev window is not grouped under "Electron" with every other dev app on the taskbar.
+ */
+export function appUserModelId(packaged: boolean): string {
+  return packaged ? PACKAGED_AUMID : process.execPath
+}
 
 export interface ShortcutInfo {
   target?: string

@@ -131,7 +131,7 @@ export interface DeskBridge {
     /** enter/leave mini mode; resolves to the state the window actually ended up in */
     mini(on: boolean): Promise<boolean>
   }
-  /** OS notifications when the window is in the background (electron/notify.ts) */
+  /** notifications when the window is in the background: the app's own popup window (electron/notify.ts) */
   notify: {
     show(req: NotifyRequest): Promise<NotifyResult>
     /** the user clicked a notification: its `tab` is the one to open */
