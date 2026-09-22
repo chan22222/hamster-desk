@@ -167,6 +167,7 @@ npm run release            # 검사만: npm run release -- --check
 
 **알림**
 - 창이 **포커스 밖일 때만** 권한 요청 · 질문 · 턴 완료를 Windows 알림으로 띄우고 작업표시줄 버튼을 깜빡인다(창을 보면 멈춘다). 종류별 on/off 와 소리는 `⋯` 메뉴의 `알림`. 알림을 누르면 창이 앞으로 오고 그 탭의 터미널에 커서가 간다. 턴 완료는 이 앱에서 띄운 세션만 울린다.
+- **"답을 기다린다"는 두 곳에서 안다**(`electron/prompt.ts`). ① 터미널 화면 글자: 이스케이프와 공백을 지운 뒤 권한 요청·신뢰 확인·MCP 확인의 고정 문구를 찾고, **선택지형 질문**(AskUserQuestion)은 마지막 선택지 `N. Chat about this` 바로 밑에 `Enter to select · ↑/↓ to navigate · Esc to cancel`(질문이 여럿이면 `Tab/Arrow keys to navigate`)이 붙은 모양으로 찾는다 — 예전에는 `Enter to confirm` 만 찾아서 CLI 2.1.x 의 선택지 질문이 한 번도 걸리지 않았다. 문구 하나만으로는 찾지 않는다: 그 문구를 말하는 산문(대화·README)에도 걸린다. ② 트랜스크립트: `AskUserQuestion` 도구 호출이 기록되면(답을 기다리는 동안에도 기록된다) 그 세션이 도는 터미널이 질문 중이다. 화면 문구가 CLI 버전마다 바뀌어도 이쪽은 남는다. 다만 새 세션의 첫 질문은 CLI 가 ~20초 늦게 쓴다(실측). 둘이 같은 질문을 보면 한 번만 알린다(10초 안, 그사이 Enter/Esc 가 없으면 같은 것), 기록이 오기 전에 이미 답했으면(Enter/Esc) 알리지 않고, 60초보다 오래된 기록(따라잡기)은 무시한다.
 - 네 겹으로 거른다: 설정, 포커스, **이벤트 나이 30초**(렌더러를 새로 고치면 백로그가 옛 `waiting`/`turn_end` 를 다시 흘린다), 같은 종류 + 같은 터미널 5초 중복 억제.
 - Windows 토스트는 **AUMID**(Application User Model ID) 아래에 등록된다. 패키지 빌드는 `kr.amag.hamsterdesk`(electron-builder 의 `appId` 와 같다), 개발 실행은 `process.execPath` 를 쓰고, `HAMSTER_AUMID`(`none`·`app`·`exec` 또는 임의의 id)로 바꿔 볼 수 있다. **토스트가 안 뜨는 환경**(`failed` 이벤트, 또는 2.5초 안에 `show` 도 `failed` 도 없음)에서는 같은 제목·본문이 **앱 안 배너**로 8초 뜬다(누르면 그 탭으로). 깜빡임은 어느 쪽이든 동작하므로 알림이 조용히 사라지는 일은 없다.
 
@@ -315,7 +316,8 @@ HAMSTER_CLICK='more@4000|mini-toggle@5000|mini-exit@9000' \
 
 ```
 electron/main.ts        창, pty 스폰, 감시기·상태줄·버전 → 렌더러(순번 붙은 백로그로 늦게 붙어도 따라잡음)
-electron/pty.ts         node-pty(ConPTY) + 권한/신뢰/MCP 프롬프트 감지(공백 무시 비교)
+electron/pty.ts         node-pty(ConPTY) 스폰 · 종료(taskkill /T)
+electron/prompt.ts      "답을 기다린다" 감지: 화면 문구(공백 무시 비교, 선택지 질문 모양) + 트랜스크립트의 AskUserQuestion 을 합치는 WaitingGate — node-pty 없음
 electron/env.ts         cleanEnv(환경 정리) · findClaude(claude 실행 파일 탐색, .cmd 는 cmd.exe 경유) — node-pty 를 안 물어서 tsx 로도 돈다
 electron/summarize.ts   말풍선 요약: headless `claude -p --model haiku` 의 큐·캐시·회로 차단
 electron/five-hour.ts   5시간 창 자동 시작: 계정별 예약 · stream-json 의 rate_limit_event 파싱 · 재시도 — electron 의존 없음

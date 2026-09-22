@@ -90,56 +90,5 @@ export function spawnPty(
   }
 }
 
-// ---- prompt detection on the terminal stream (heuristic; the transcript never records a permission prompt)
-// The full-screen TUI positions every word with cursor moves, so after stripping escapes the spaces are gone.
-// We therefore compare with all whitespace removed on both sides.
-
-const ESC = String.fromCharCode(27)
-const ANSI = new RegExp(
-  [
-    `${ESC}\\[[0-9;?]*[ -/]*[@-~]`, // CSI
-    `${ESC}\\][^${ESC}\\u0007]*(?:\\u0007|${ESC}\\\\)`, // OSC ... BEL | ST
-    `${ESC}[PX^_][^${ESC}]*${ESC}\\\\`, // DCS / SOS / PM / APC ... ST
-    `${ESC}[@-Z\\\\-_]`, // 2-byte escapes
-    `\\u009b[0-9;?]*[ -/]*[@-~]`, // 8-bit CSI
-  ].join('|'),
-  'g',
-)
-
-export function stripTerminal(s: string): string {
-  return s.replace(ANSI, '').replace(/\s+/g, '')
-}
-
-const squash = (s: string): string => s.replace(/\s+/g, '')
-
-type WaitReason = 'permission' | 'question'
-const RAW_PATTERNS: { text: string; reason: WaitReason }[] = [
-  { text: 'Do you want to proceed', reason: 'permission' },
-  { text: 'Do you want to make this edit', reason: 'permission' },
-  { text: 'Do you want to create', reason: 'permission' },
-  { text: 'Do you want to allow', reason: 'permission' },
-  { text: 'Do you want to run', reason: 'permission' },
-  { text: 'No, and tell Claude what to do differently', reason: 'permission' },
-  { text: "Yes, and don't ask again", reason: 'permission' },
-  { text: 'Allow once', reason: 'permission' },
-  { text: 'Allow always', reason: 'permission' },
-  { text: 'Yes, I trust this folder', reason: 'question' },
-  { text: 'Enter to confirm·Esc to cancel', reason: 'question' },
-  { text: 'Enter to confirm • Esc to cancel', reason: 'question' },
-]
-export const WAITING_PATTERNS = RAW_PATTERNS.map((p) => ({ ...p, text: squash(p.text).toLowerCase() }))
-
-export class PromptDetector {
-  private buf = ''
-  constructor(private readonly onWaiting: (reason: 'permission' | 'question') => void) {}
-  feed(chunk: string): void {
-    this.buf = (this.buf + stripTerminal(chunk).toLowerCase()).slice(-4000)
-    for (const p of WAITING_PATTERNS) {
-      if (this.buf.includes(p.text)) {
-        this.buf = ''
-        this.onWaiting(p.reason)
-        return
-      }
-    }
-  }
-}
+// Prompt detection lives in ./prompt (no node-pty there, so scripts/unit can test it); main.ts takes it from here.
+export { PromptDetector, stripTerminal, WAITING_PATTERNS } from './prompt'

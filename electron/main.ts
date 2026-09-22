@@ -4,6 +4,7 @@ import { basename, join } from 'node:path'
 import { DeskWatcher } from './watcher'
 import { DEFAULT_PROFILE_ID, type BubbleRequest, type DeskEvent, type FileEntry, type NotifyRequest, type Profile, type SessionInfo, type StatusSnapshot, type UiState, type AppUpdateInfo } from '../shared/events'
 import { spawnPty, PromptDetector, type PtyHandle } from './pty'
+import { WaitingGate } from './prompt'
 import { HAMSTER_HOME, StatusWatcher, installStatusLine, uninstallStatusLine, statusLineState, refreshStatusScripts } from './statusline'
 import { addProfile, adoptOrphanProfiles, baseDirOf, configDirOf, deleteProfileDir, loadProfiles, profileOfConfigDir, removeProfile, renameProfile, setCurrentProfile, showDefaultProfile, withEmails } from './profiles'
 import { flushUi, loadUi, saveUi, uiPath } from './ui-store'
@@ -345,9 +346,28 @@ function watchProfile(p: Profile): void {
     ...(p.dir ? { baseDir: p.dir } : {}),
     profileId: p.id,
   })
-  w.on('event', (e: DeskEvent) => emitDesk(e))
+  w.on('event', (e: DeskEvent) => {
+    emitDesk(e)
+    questionFromTranscript(w, e)
+  })
   watchers.set(p.id, w)
   void w.start()
+}
+
+/** "this terminal waits for an answer", from the screen text and from the transcript (electron/prompt.ts) */
+const waitingGate = new WaitingGate((ptyId, reason, ts) => {
+  if (process.env.HAMSTER_CAPTURE) console.log(`[waiting] pty=${ptyId} ${reason}`)
+  emitDesk({ kind: 'waiting', ptyId, reason, ts })
+})
+
+/** A multiple-choice question in the transcript of a session that runs in one of our terminals. */
+function questionFromTranscript(w: DeskWatcher, e: DeskEvent): void {
+  if (e.kind !== 'tool' || e.name !== 'AskUserQuestion') return
+  const ptyId = w.liveSessions.find((s) => s.sessionId === e.sessionId)?.ptyId
+  if (ptyId == null || !ptys.has(ptyId)) return
+  // a blind run says which witness saw it (the screen's is logged where the detector fires)
+  if (process.env.HAMSTER_CAPTURE) console.log(`[waiting] transcript pty=${ptyId} AskUserQuestion ${Date.now() - e.ts}ms after it was asked`)
+  waitingGate.asked(ptyId, e.ts)
 }
 
 /** A forgotten account: its sessions leave the office, the folder itself is left alone. */
@@ -474,7 +494,10 @@ ipcMain.handle('pty:create', (_e, cols: number, rows: number, cwd?: string, prof
   // an account that has been forgotten since the tab was stored falls back to the default one
   const profiles = loadProfiles()
   const profile = profiles.list.find((p) => p.id === profileId) ?? profiles.list[0]
-  const detector = new PromptDetector((reason) => emitDesk({ kind: 'waiting', ptyId: handle.id, reason, ts: Date.now() }))
+  const detector = new PromptDetector((reason) => {
+    if (process.env.HAMSTER_CAPTURE) console.log(`[waiting] screen pty=${handle.id} ${reason}`)
+    waitingGate.waiting(handle.id, reason)
+  })
   const handle = spawnPty(
     cols,
     rows,
@@ -486,6 +509,7 @@ ipcMain.handle('pty:create', (_e, cols: number, rows: number, cwd?: string, prof
     (code) => {
       ptys.delete(handle.id)
       ptyProfile.delete(handle.id)
+      waitingGate.forget(handle.id)
       if (process.env.HAMSTER_CAPTURE) console.log(`[pty] exit ${handle.id} code=${code}`)
       send('pty:exit', handle.id, code)
     },
@@ -506,6 +530,7 @@ ipcMain.on('pty:input', (_e, id: number, data: string) => {
   ptys.get(id)?.write(data)
   ptyLogInput(data)
   if (data.includes(String.fromCharCode(13)) || data.includes(String.fromCharCode(27))) {
+    waitingGate.answered(id)
     emitDesk({ kind: 'waiting_clear', ptyId: id, ts: Date.now() })
   }
 })
