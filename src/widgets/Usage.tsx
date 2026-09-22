@@ -81,7 +81,22 @@ interface WindowRow {
   name: string
   /** the short name, for the chip */
   short: string
+  /** which model's own weekly window this is; the chip says it after the number */
+  who?: string
   w: RateWindow
+}
+
+/** The weekly window that will stop the account first: the all-model one, or one model's own. */
+function weeklyMax(u: StatusSnapshot): { who: string | null; w: RateWindow | null } {
+  let best: { who: string | null; w: RateWindow | null } = { who: null, w: u.sevenDay }
+  for (const [k, w] of Object.entries(u.otherWindows ?? {})) if (!best.w || w.usedPercentage > best.w.usedPercentage) best = { who: k, w }
+  return best
+}
+
+/** `주 42%`, or `주·Fable 88%` when a model's own weekly window is the fuller one. */
+function WeekBrief({ u }: { u: StatusSnapshot }) {
+  const m = weeklyMax(u)
+  return <Brief label={m.who ? `주·${m.who}` : '주'} w={m.w} />
 }
 
 /** `3분 전` — how old a snapshot is. An account nobody is using right now keeps its last numbers. */
@@ -116,7 +131,7 @@ export function AccountUsageLine({ profileId }: { profileId: string }) {
   return (
     <span className="au-line">
       <Brief label="5h" w={u.fiveHour} />
-      <Brief label="주" w={u.sevenDay} />
+      <WeekBrief u={u} />
       <span className="au-age">{ago(u.ts)}</span>
     </span>
   )
@@ -165,7 +180,7 @@ function AccountUsageList({ shownId }: { shownId: string }) {
             {u ? (
               <>
                 <Brief label="5h" w={u.fiveHour} />
-                <Brief label="주" w={u.sevenDay} />
+                <WeekBrief u={u} />
                 <span className="au-age">{ago(u.ts)}</span>
               </>
             ) : st === 'none' || st === 'foreign' ? (
@@ -191,6 +206,7 @@ function Line({ row }: { row: WindowRow }) {
       <span className="um-label">{row.short}</span>
       <Meter pct={pct} />
       <span className={`um-pct ${step(pct)}`}>{pct.toFixed(0)}%</span>
+      {row.who && <span className="um-who">{row.who}</span>}
       {/* "얼마나 썼나" 만큼이나 "언제 다시 차나" 가 궁금한 숫자라, 남은 시간은 늘 붙어 있다.
           초기화 *시각* 은 title 과 팝오버에 있다. 좁은 창에서는 이 조각이 가장 먼저 접힌다. */}
       {row.w.resetsAt && <span className="um-reset">· {countdown(row.w.resetsAt)}</span>}
@@ -211,18 +227,25 @@ function describe(row: WindowRow): string {
  * costs about half the width and the bar does not grow (two 11px lines fit inside its 44px).
  * Clicking anywhere on it opens the one detail panel with every window in it.
  */
-function UsageChip({ lines, rows, shownId, onUninstall }: { lines: WindowRow[]; rows: WindowRow[]; shownId: string; onUninstall: () => void }) {
+function UsageChip({ lines, rows, ts, shownId, onRefresh, onUninstall }: { lines: WindowRow[]; rows: WindowRow[]; ts: number; shownId: string; onRefresh: () => void; onUninstall: () => void }) {
   const label = lines.map((r) => <Line key={r.key} row={r} />)
   // the tooltip gets one line per window; the accessible name is the same words on one line
   const words = lines.map(describe)
   return (
-    <Popover className="pill um" label={label} title={words.join('\n')} ariaLabel={words.join(', ')} width={252} debugClick="usage">
+    <Popover className="pill um" label={label} title={words.join('\n')} ariaLabel={words.join(', ')} width={292} debugClick="usage">
       {(close) => (
         <div className="pop-body">
           <div className="pop-head">사용량</div>
           {rows.map((r) => (
             <Row key={r.key} label={r.name} w={r.w} />
           ))}
+          {/* the numbers are as old as the last status line or usage query; the button asks the CLI now */}
+          <div className="pop-usage">
+            <span>{ago(ts)} 기준 · 모델별 주간 창은 10분마다 CLI 에 물어봐요</span>
+            <button onClick={onRefresh} title="지금 다시 물어봅니다" data-debug-click="usage-refresh">
+              다시 확인
+            </button>
+          </div>
           <AccountUsageList shownId={shownId} />
           <button
             className="pop-ghost"
@@ -351,11 +374,20 @@ export function UsageMeters() {
 
   const rows: WindowRow[] = []
   if (five) rows.push({ key: 'five', name: '5시간', short: '5h', w: five })
-  if (week) rows.push({ key: 'week', name: '주간', short: '주', w: week })
-  for (const [k, w] of others) rows.push({ key: `other:${k}`, name: k, short: k, w })
-  // the chip has a line for each of the two windows every account has; any extra window the CLI
-  // reports is only in the panel (there is no room for a third line, and nobody has seen one yet)
-  const lines = rows.filter((r) => r.key === 'five' || r.key === 'week')
+  // The weekly windows: the all-model one, then each model's own. Fable has a weekly budget of its
+  // own that can run out before the all-model one does — the usage query is what knows it
+  // (src/store.ts 'usage_windows'); the status line never says.
+  const weekly: WindowRow[] = []
+  if (week) weekly.push({ key: 'week', name: '주간 (전체)', short: '주', w: week })
+  for (const [k, w] of others) {
+    const f = fresh(w)
+    if (f) weekly.push({ key: `week:${k}`, name: `주간 (${k})`, short: '주', who: k, w: f })
+  }
+  rows.push(...weekly)
+  // the chip's lower line is whichever weekly window is fullest — that is the one that stops the
+  // account first; the panel lists them all
+  const fullest = weekly.reduce<WindowRow | null>((best, r) => (best && best.w.usedPercentage >= r.w.usedPercentage ? best : r), null)
+  const lines = [...rows.filter((r) => r.key === 'five'), ...(fullest ? [fullest] : [])]
 
   return (
     <div className="usage">
@@ -365,7 +397,7 @@ export function UsageMeters() {
           {shown.name}
         </span>
       )}
-      <UsageChip lines={lines} rows={rows} shownId={shownId} onUninstall={() => void uninstall()} />
+      <UsageChip lines={lines} rows={rows} ts={usage?.ts ?? 0} shownId={shownId} onRefresh={() => void window.desk?.usage.refresh(shownId)} onUninstall={() => void uninstall()} />
     </div>
   )
 }

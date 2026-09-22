@@ -83,6 +83,22 @@ export interface StatusSnapshot {
   profileId?: string
 }
 
+/**
+ * What the CLI's own usage query says about an account (electron/usage-query.ts): the two windows
+ * the status line also reports, plus the per-model weekly windows the status line never carries —
+ * `Fable` has a weekly budget of its own that can run out before the all-model one does.
+ */
+export interface UsageWindows {
+  profileId: string
+  ts: number
+  fiveHour: RateWindow | null
+  sevenDay: RateWindow | null
+  /** per-model weekly windows, keyed by the name the server gives the bucket (`Fable`, `Opus`, `Sonnet`) */
+  models: Record<string, RateWindow>
+  /** 'max' | 'pro' | … as the CLI reports it; null when the account is not a subscription */
+  subscription: string | null
+}
+
 /** One account's "start the next 5-hour window as soon as the last one ends" (electron/five-hour.ts). */
 export interface FiveHourAccount {
   on: boolean
@@ -211,6 +227,8 @@ export type DeskEvent =
   | { kind: 'model'; sessionId: string; agentId: string | null; model: string; effort: string | null; ts: number }
   /** status-line snapshot (rate limits, context window, cost) */
   | ({ kind: 'status' } & StatusSnapshot)
+  /** the CLI's usage query for one account (per-model weekly windows included) */
+  | ({ kind: 'usage_windows' } & UsageWindows)
   | ({ kind: 'version' } & VersionInfo)
   | ({ kind: 'app_update' } & AppUpdateInfo)
   // from the embedded terminal (heuristic on pty output)

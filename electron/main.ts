@@ -11,6 +11,7 @@ import { flushUi, loadUi, saveUi, setUiReadOnly, uiPath } from './ui-store'
 import { checkVersion } from './version'
 import { BubbleSummarizer } from './summarize'
 import { FiveHourStarter } from './five-hour'
+import { UsageQuerier } from './usage-query'
 import { sanitizeConfig as sanitizeDelegation, storeConfig as storeDelegation, syncDelegation } from './delegation'
 import { cleanupLegacyHarness } from './legacy'
 import { claudeDir } from './watcher/paths'
@@ -130,6 +131,7 @@ const watchers = new Map<string, DeskWatcher>()
 let status: StatusWatcher | null = null
 let bubbles: BubbleSummarizer | null = null
 let fiveHour: FiveHourStarter | null = null
+let usageQuery: UsageQuerier | null = null
 
 function send(channel: string, ...args: unknown[]): void {
   if (win && !win.isDestroyed()) win.webContents.send(channel, ...args)
@@ -406,6 +408,12 @@ function startWatchers(): void {
 
   // every account's CLAUDE.md carries the "명령 하달" block the stored config asks for (on by default)
   delegationSync(true)
+
+  // the per-model weekly windows, asked of the CLI for every logged-in account (electron/usage-query.ts);
+  // a capture run asks nothing — a blind screenshot must not spawn claudes under the user's logins
+  usageQuery = new UsageQuerier({ accounts: () => withEmails(loadProfiles()).list.map((p) => ({ id: p.id, dir: p.dir, loggedIn: !!p.email })) })
+  usageQuery.on('usage', (u) => emitDesk({ kind: 'usage_windows', ...u }))
+  if (!process.env.HAMSTER_CAPTURE) usageQuery.start()
 
   // before the status watcher: its first scan is what tells this when each account's window ends
   fiveHour = new FiveHourStarter({ accounts: () => loadProfiles().list.map((p) => ({ id: p.id, dir: p.dir })) })
@@ -828,6 +836,9 @@ ipcMain.handle('delegation:set', (_e, config: unknown) => {
 
 // ---- IPC: start the next 5-hour window as soon as the last one ends (electron/five-hour.ts, per account)
 
+/** the usage popover's "다시 확인": ask the CLI now, for one account or all; the answers arrive as events */
+ipcMain.handle('usage:refresh', (_e, profileId?: string) => (process.env.HAMSTER_CAPTURE ? [] : (usageQuery?.refresh(profileId ? String(profileId) : undefined) ?? [])))
+
 ipcMain.handle('fiveHour:state', () => fiveHour?.state() ?? {})
 ipcMain.handle('fiveHour:set', (_e, profileId: string, on: boolean) => fiveHour?.set(String(profileId ?? ''), on === true) ?? {})
 
@@ -979,6 +990,8 @@ function shutdown(): void {
   bubbles = null
   fiveHour?.stop()
   fiveHour = null
+  usageQuery?.stop()
+  usageQuery = null
 }
 
 /**

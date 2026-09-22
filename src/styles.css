@@ -168,6 +168,8 @@ button:focus-visible, select:focus-visible, input:focus-visible { outline: 2px s
 .um-pct.is-warm { color: var(--warn); }
 .um-pct.is-hot { color: var(--danger); }
 .um-reset { color: var(--text-3); font-size: 11px; font-variant-numeric: tabular-nums; }
+/* `주 ▰▰▰▱▱ 14% Fable · 3일`: which model's weekly window the lower line is showing, when it is not the all-model one */
+.um-who { color: var(--text-3); font-size: 10.5px; }
 /* --text-3 only clears 4.5:1 on white, so it steps up whenever its surface darkens */
 .um:hover .um-label, .um:hover .um-reset, .um.is-open .um-label, .um.is-open .um-reset { color: var(--text-2); }
 /* five segments, so the level reads at a glance; the number next to it is the real answer */
@@ -235,7 +237,7 @@ button:focus-visible, select:focus-visible, input:focus-visible { outline: 2px s
 .pop-item-sub { font-size: 11px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 
 /* usage detail rows */
-.u-row { display: grid; grid-template-columns: 46px 1fr 38px; gap: 2px 8px; align-items: center; padding: 5px 6px; margin: 0 -6px; border-radius: var(--radius); font-size: 12px; }
+.u-row { display: grid; grid-template-columns: 78px 1fr 38px; /* wide enough for `주간 (Fable)` on one line */ gap: 2px 8px; align-items: center; padding: 5px 6px; margin: 0 -6px; border-radius: var(--radius); font-size: 12px; }
 .u-name { color: var(--text-2); }
 .u-track { height: 6px; border-radius: 3px; background: var(--surface-3); overflow: hidden; }
 .u-fill { display: block; height: 100%; background: var(--accent); }

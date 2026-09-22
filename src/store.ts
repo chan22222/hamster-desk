@@ -1055,6 +1055,38 @@ export const useDesk = create<DeskStore>((set, get) => {
         case 'compact':
           say(e.sessionId, 'main', fixed(t().compacting, 'talk'))
           return
+        case 'usage_windows': {
+          // The CLI's own usage query (electron/usage-query.ts): the only source of the per-model
+          // weekly windows, and fresher than the status line for the other two. Laid over whatever
+          // the status line last said about that account.
+          const mine = st.usageByProfile[e.profileId]
+          const base: StatusSnapshot = mine ?? {
+            sessionId: '',
+            ts: 0,
+            model: null,
+            effort: null,
+            contextUsedPct: null,
+            contextSize: null,
+            costUSD: null,
+            linesAdded: null,
+            linesRemoved: null,
+            fiveHour: null,
+            sevenDay: null,
+            otherWindows: {},
+            profileId: e.profileId,
+          }
+          const newer = e.ts >= base.ts
+          const merged: StatusSnapshot = {
+            ...base,
+            ts: Math.max(base.ts, e.ts),
+            fiveHour: newer ? (e.fiveHour ?? base.fiveHour) : base.fiveHour,
+            sevenDay: newer ? (e.sevenDay ?? base.sevenDay) : base.sevenDay,
+            otherWindows: e.models,
+            profileId: e.profileId,
+          }
+          set({ usageByProfile: { ...st.usageByProfile, [e.profileId]: merged } })
+          return
+        }
         case 'status': {
           const { kind: _k, ...snap } = e
           // a fresh session reports no rate limits until its first API call; keep the newest snapshot that has them
@@ -1063,7 +1095,9 @@ export const useDesk = create<DeskStore>((set, get) => {
           // …and the newest one per account, which is what the gauges show once there are several
           const pid = snap.profileId ?? DEFAULT_PROFILE_ID
           const mine = st.usageByProfile[pid]
-          const usageByProfile = hasWindows && (!mine || snap.ts >= mine.ts) ? { ...st.usageByProfile, [pid]: snap } : st.usageByProfile
+          // the per-model weekly windows come from the usage query, never from the status line: keep them
+          const kept = mine && Object.keys(snap.otherWindows).length === 0 ? { ...snap, otherWindows: mine.otherWindows } : snap
+          const usageByProfile = hasWindows && (!mine || snap.ts >= mine.ts) ? { ...st.usageByProfile, [pid]: kept } : st.usageByProfile
           set({ usage, usageByProfile })
           if (!st.sessions[snap.sessionId]) pendingStatus.set(snap.sessionId, snap)
           updSession(snap.sessionId, (s) => ({

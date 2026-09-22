@@ -19,6 +19,7 @@ import type {
   SessionInfo,
   TranscriptEntry,
   UiState,
+  UsageWindows,
   VersionInfo,
 } from '../shared/events'
 
@@ -79,6 +80,11 @@ export interface DeskBridge {
     summarize(req: BubbleRequest): Promise<BubbleResult>
     state(): Promise<BubbleState>
     resetStats(): Promise<BubbleState>
+  }
+  /** the CLI's own usage query, per-model weekly windows included (electron/usage-query.ts) */
+  usage: {
+    /** ask now, for one account or every logged-in one; the same answers also arrive as `usage_windows` events */
+    refresh(profileId?: string): Promise<UsageWindows[]>
   }
   /** "명령 하달": the sub-agent instruction block in every account's CLAUDE.md (electron/delegation.ts) */
   delegation: {
@@ -212,6 +218,9 @@ const bridge: DeskBridge = {
     summarize: (req) => ipcRenderer.invoke('bubble:summarize', req),
     state: () => ipcRenderer.invoke('bubble:state'),
     resetStats: () => ipcRenderer.invoke('bubble:resetStats'),
+  },
+  usage: {
+    refresh: (profileId) => ipcRenderer.invoke('usage:refresh', profileId),
   },
   delegation: {
     get: () => ipcRenderer.invoke('delegation:get'),
