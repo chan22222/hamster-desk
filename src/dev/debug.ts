@@ -9,6 +9,7 @@
 import type { DeskBridge } from '../../electron/preload'
 import type { DeskEvent } from '@shared/events'
 import { useDesk } from '../store'
+import { setPatrolMode } from '../desk/patrol'
 
 export type AppInfo = Awaited<ReturnType<DeskBridge['info']>>
 
@@ -22,6 +23,8 @@ const POLL_MS = 500
 export function installDebugHooks(info: AppInfo): void {
   installClicks(info.debugClicks)
   installEvents(info.debugEvents)
+  // HAMSTER_PATROL=1: the boss's rounds at once, on fixed dice, so the capture delays can be planned
+  if (info.debugPatrol) setPatrolMode('hurry')
 }
 
 // ---- HAMSTER_CLICK ------------------------------------------------------------------------

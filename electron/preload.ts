@@ -160,6 +160,8 @@ export interface DeskBridge {
     debugCwd: string | null
     /** debug/e2e: a blind screenshot run (HAMSTER_CAPTURE) — restores what is stored, writes nothing back */
     debugCapture: boolean
+    /** debug/e2e: the boss's rounds start at once and repeat quickly (HAMSTER_PATROL=1) */
+    debugPatrol: boolean
     /** debug/e2e: the window was shown without focus (HAMSTER_UNFOCUSED) */
     unfocused: boolean
     claudeLanguage: string | null

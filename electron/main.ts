@@ -917,6 +917,9 @@ ipcMain.handle('app:info', () => {
     // debug/e2e: a capture run restores the stored tabs (that is what it photographs) but must
     // never write them back — same rule window-state.ts keeps for the bounds
     debugCapture: !app.isPackaged && !!process.env.HAMSTER_CAPTURE,
+    // debug/e2e: the boss starts its rounds the moment a colleague sits down (src/desk/patrol.ts),
+    // so a capture can photograph the walk and the telling-off at known delays
+    debugPatrol: !app.isPackaged && process.env.HAMSTER_PATROL === '1',
     unfocused: unfocusedStart(),
     claudeLanguage: claudeLanguage(),
     uiPath: uiPath(),

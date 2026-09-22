@@ -405,6 +405,10 @@ body.is-row-resizing * { cursor: row-resize !important; }
 .office-nameplate .np-sub { font-size: 11px; color: var(--overlay-text-2); }
 .office-glyph { position: absolute; top: 0; left: 0; font: 600 13px Consolas, monospace; color: var(--overlay-text); text-shadow: 0 1px 3px var(--overlay-bg-strong), 0 0 6px var(--overlay-bg-strong); pointer-events: none; }
 .office-glyph.is-alert { color: var(--danger); }
+/* the boss's rounds (patrol.ts): the anger mark over the boss and the sweat over whoever it is
+   standing over are the whole telling-off — nothing is said — so they are emoji, which carry
+   their own colour, a size up, and shown at a smaller zoom than the thought glyphs are */
+.office-glyph.is-mark { font-size: 17px; text-shadow: 0 1px 4px var(--overlay-bg-strong); }
 .office-vignette { position: absolute; inset: 0; pointer-events: none; background: linear-gradient(180deg, #17201a14, transparent 26%, transparent 74%, #17201a14); }
 .office-header { position: absolute; inset: 0 0 auto; padding: 16px 20px 26px; display: flex; align-items: flex-start; justify-content: space-between; gap: 16px; background: linear-gradient(var(--overlay-bg-strong), var(--overlay-bg) 55%, transparent); cursor: default; }
 .office-heading { display: flex; flex-direction: column; gap: 5px; min-width: 0; }

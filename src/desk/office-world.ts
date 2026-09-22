@@ -133,6 +133,84 @@ export function walkTo(walker: Walker, goal: Point): void {
   ]
 }
 
+// ---- the boss's rounds: a direct route (src/desk/patrol.ts) --------------------------------
+// The corridor route above is what colleagues take to their seats: in at the door, up the west
+// wall, along the row. From the boss's chair that is the long way round — the first staff row is
+// three tiles south of it with nothing in between but its own desk and the plant either side.
+// So the rounds use the room's free lanes instead: off the seat row past a plant, down to the
+// walkway behind the first row of chairs (the hub every route turns on), along it, and — for a
+// desk in a deeper row — down the gap between two desk columns. Every leg is a straight line
+// along a lane that nothing stands in, and the way back is the same in reverse; a route cut
+// short mid-leg simply turns round on the lane it is on.
+
+/**
+ * How far behind a row's chairs its walkway runs (tiles). A chair reaches 0.25 behind its seat
+ * point and a hamster is 0.17 deep, so 0.65 leaves a clear gap; the boss also stops on this
+ * line when it stands over a colleague.
+ */
+export const WALK_BACK = 0.65
+/** the walkway behind the first staff row: where every direct route changes direction */
+export const HUB_J = ORIGIN.j + SEAT.dj - WALK_BACK
+/**
+ * Down from the seat row, either side of the boss's desk. The plants stand two tiles out from
+ * its chair (vox/world.ts) and are 0.21 wide, so 2.75 out clears them by a hamster's width.
+ */
+export const BOSS_LANES: readonly number[] = [BOSS_SLOT.seat.i - 2.75, BOSS_SLOT.seat.i + 2.75]
+/** the gaps between desk columns (and the strips either side of the grid), by their centre line */
+export const GAP_LANES: readonly number[] = Array.from({ length: DESK_COLS + 1 }, (_, k) => ORIGIN.i + k * PITCH_I - 1.5)
+
+const sameSpot = (a: Point, b: Point): boolean => Math.abs(a.i - b.i) < 1e-6 && Math.abs(a.j - b.j) < 1e-6
+const onLane = (lanes: readonly number[], i: number): number | undefined => lanes.find((l) => Math.abs(l - i) < 1e-6)
+const cheapest = (lanes: readonly number[], cost: (lane: number) => number): number => lanes.reduce((best, l) => (cost(l) < cost(best) ? l : best))
+
+/**
+ * Waypoints from `at` to the hub walkway. `towards` is where the route is ultimately headed: from
+ * the seat row it decides which side of the boss's desk to go round, so the boss never walks the
+ * long way round its own desk.
+ */
+function toHub(at: Point, towards: Point): Point[] {
+  if (Math.abs(at.j - HUB_J) < 1e-6) return []
+  if (at.j < HUB_J) {
+    // north of the hub: the boss's own row. Off the seat row past a plant, then straight down.
+    const lane = onLane(BOSS_LANES, at.i) ?? cheapest(BOSS_LANES, (l) => Math.abs(at.i - l) + Math.abs(l - towards.i))
+    return Math.abs(lane - at.i) < 1e-6 ? [{ i: lane, j: HUB_J }] : [{ i: lane, j: at.j }, { i: lane, j: HUB_J }]
+  }
+  // south of the hub: in a gap between desk columns, on a row's walkway, or a step off one (where
+  // the boss stands over a colleague). Back to the walkway first, along it to the gap, up the gap.
+  const lane = onLane(GAP_LANES, at.i) ?? cheapest(GAP_LANES, (l) => Math.abs(at.i - l))
+  if (Math.abs(lane - at.i) < 1e-6) return [{ i: lane, j: HUB_J }]
+  const walkway = HUB_J + PITCH_J * Math.round((at.j - HUB_J) / PITCH_J)
+  // a step off the hub itself (a first-row spot) goes straight back up onto it
+  if (Math.abs(walkway - HUB_J) < 1e-6) return [{ i: at.i, j: HUB_J }]
+  return [{ i: at.i, j: walkway }, { i: lane, j: walkway }, { i: lane, j: HUB_J }]
+}
+
+/** The lanes from `from` to `to`: up to the hub, along it, down again — minus any retraced leg. */
+export function directRoute(from: Point, to: Point): Point[] {
+  if (sameSpot(from, to)) return []
+  const up = toHub(from, to)
+  const down = toHub(to, from)
+  // both halves reach the hub on some lane; where they would walk the same lane there and back, cut the loop
+  while (up.length && down.length && sameSpot(up[up.length - 1], down[down.length - 1])) {
+    up.pop()
+    down.pop()
+  }
+  const out: Point[] = []
+  let prev = from
+  for (const p of [...up, ...down.reverse(), { ...to }]) {
+    if (!sameSpot(p, prev)) out.push(p)
+    prev = p
+  }
+  return out
+}
+
+/** `walkTo` for the boss's rounds: the same contract, the direct route instead of the corridor. */
+export function walkDirect(walker: Walker, goal: Point): void {
+  if (walker.target.i === goal.i && walker.target.j === goal.j) return
+  walker.target = { ...goal }
+  walker.path = directRoute(walker, goal)
+}
+
 export function advanceWalker(walker: Walker, dt: number): void {
   let distance = Math.min(Math.max(dt, 0), 0.1) * 4.5
   walker.moving = false

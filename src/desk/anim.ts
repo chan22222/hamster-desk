@@ -1,7 +1,11 @@
 import type { HamsterState } from '../store'
 
-/** The pose a hamster plays. The studio maps each one onto the rig's procedural animation. */
-export type IsoAnim = 'idle' | 'blink' | 'type' | 'read' | 'think' | 'talk' | 'wave' | 'walk' | 'phone' | 'sleep' | 'run'
+/**
+ * The pose a hamster plays. The studio maps each one onto the rig's procedural animation.
+ * `scold` and `flinch` are the two halves of the boss's rounds (src/desk/patrol.ts): the boss
+ * standing over a colleague, and the colleague being told off. No hamster *state* maps to them.
+ */
+export type IsoAnim = 'idle' | 'blink' | 'type' | 'read' | 'think' | 'talk' | 'wave' | 'walk' | 'phone' | 'sleep' | 'run' | 'scold' | 'flinch'
 
 export function animFor(state: HamsterState, sinceMs: number): IsoAnim {
   switch (state) {

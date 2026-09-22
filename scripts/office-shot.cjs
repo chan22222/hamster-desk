@@ -38,10 +38,14 @@ app.whenReady().then(async () => {
   const studio = expr => evaluate(`window.__studio.${expr}`)
 
   try {
-    await win.loadURL('http://127.0.0.1:5186/?studio-demo=8')
+    // STUDIO_URL: a preview on another port (`npx vite --config scripts/vite.studio.mjs --port 5187`)
+    await win.loadURL(process.env.STUDIO_URL || 'http://127.0.0.1:5186/?studio-demo=8')
     await wait(2400)
     if (!(await evaluate('return !!window.__studio'))) throw new Error('window.__studio missing — is this the ?studio-demo preview?')
     if (await evaluate("return !!document.querySelector('.office-nogl')")) throw new Error('WebGL context could not be created')
+    // the boss stays at its desk for every scene but the last: with seven colleagues working it
+    // would otherwise get up for its rounds in the middle of the framing shots
+    await studio("patrol('off')")
 
     // 1. the boss's desk at 250% — where ⌂ lands when only the main hamster is in
     await studio("focus('main')")
@@ -154,8 +158,24 @@ app.whenReady().then(async () => {
     await wait(1800)
     await shot('feed-700', 400)
     await deskHeight(520)
-    await studio('feedLife({ act: 3000, say: 9000, warn: 12000 })')
 
+    // 11. the boss's rounds (src/desk/patrol.ts). Two colleagues walk in and sit; `hurry` then
+    // gets the boss up at once, on fixed dice. Caught on the way — round its own desk and down
+    // the lane past the plant, the anger mark over its head — then standing beside and behind the
+    // colleague it picked, with the sweat mark and the flinch. Nothing is said: the colleague's
+    // own rows stay exactly as they were.
+    await clearFeeds()
+    await studio("addArriving('patrol-0', 'claude-haiku-4-5', 'Explore')")
+    await studio("addArriving('patrol-1', 'claude-opus-5', 'Plan')")
+    await studio("say('patrol-1', '좌석 배정부터 볼게요')")
+    await wait(3600) // through the door and into the chairs
+    await studio("patrol('hurry')")
+    await wait(900)
+    await shot('patrol-walk', 0)
+    await wait(2200) // the rest of the walk; the telling-off has just begun
+    await shot('patrol-scold', 0)
+    await studio("patrol('off')")
+    await studio('feedLife({ act: 3000, say: 9000, warn: 12000 })')
 
     if (errors.length) {
       console.error('renderer errors:')

@@ -3,6 +3,7 @@ import * as THREE from 'three'
 import { feedLife, runInTerminal, setFeedLife, useDesk, type Hamster, type HamsterState, type SessionState } from '../store'
 import { animFor, screenColor, statusDot, tintFor, type IsoAnim } from './anim'
 import { modelSkin } from './skins'
+import { makePatrol, patrolGoal, setPatrolMode, stepPatrol, type Patrol, type PatrolMode } from './patrol'
 import { IconHome, IconMap, IconMinus, IconPlus, IconTarget } from '../widgets/icons'
 import {
   OFFICE,
@@ -13,6 +14,7 @@ import {
   makeWalker,
   reconcileSeats,
   tileToWorld,
+  walkDirect,
   walkTo,
   type Walker,
 } from './office-world'
@@ -43,6 +45,10 @@ const STATE_LABEL: Record<Hamster['state'], string> = {
   running: '실행 중', hiring: '동료 호출', browsing: '조사 중', talking: '이야기 중', waiting: '확인 필요', arriving: '출근 중', leaving: '퇴근 중',
 }
 const GLYPH: Partial<Record<IsoAnim, string>> = { think: '···', wave: '!', sleep: 'z', phone: '♪' }
+/** states in which a colleague counts as working — and so as fair game for the boss's rounds */
+const WORKING = new Set<HamsterState>(['thinking', 'reading', 'searching', 'writing', 'running', 'hiring', 'browsing', 'talking'])
+/** the boss is out of its chair: on the way to a colleague, standing over one, or on the way back */
+const bossAway = (p: Patrol, w: Walker): boolean => p.phase === 'going' || p.phase === 'scolding' || (p.phase === 'returning' && w.path.length > 0)
 
 const FOG = 0xcfe3f2
 /** how fast the automatic camera eases towards its target (the room it leaves is FRAME_PAD) */
@@ -67,6 +73,8 @@ export interface StudioDebug {
   feedLife(p: { act?: number; say?: number; warn?: number }): void
   /** turn the automatic framing on or off (the `자동` button) */
   autoFrame(on: boolean): void
+  /** the boss's rounds (src/desk/patrol.ts): `off` keeps it at its desk, `hurry` starts one at once */
+  patrol(mode: PatrolMode): void
 }
 declare global {
   interface Window { __studio?: StudioDebug }
@@ -92,6 +100,8 @@ interface AutoFrame {
 interface Scene {
   seats: Map<string, number>
   walkers: Map<string, Walker>
+  /** the boss's rounds: whether it is out of its chair, and where in a round it is (patrol.ts) */
+  patrol: Patrol
   camera: Camera
   rigs: Map<string, RigState>
   auto: AutoFrame
@@ -101,6 +111,7 @@ interface Scene {
 const makeScene = (): Scene => ({
   seats: new Map(),
   walkers: new Map(),
+  patrol: makePatrol(),
   camera: createCamera(),
   rigs: new Map(),
   // a scene that has never been opened starts with whatever the saved preference says
@@ -409,6 +420,33 @@ function poseRig(st: RigState, anim: IsoAnim, seated: boolean, t: number): void 
       legs[0].rotation.x = 0
       legs[1].rotation.x = 0
       break
+    case 'scold': {
+      // The boss standing over a colleague (patrol.ts): the near arm out and jabbing on every
+      // beat, a little hop on every other one, the head thrust forward. A cartoon telling-off —
+      // it has to read as a joke from across the room, so everything is a beat too big.
+      const beat = t * 9
+      const hop = Math.max(0, Math.sin(beat / 2)) * 3
+      for (const part of [bodyM, headG, tailG, ...legs]) part.position.y += hop
+      legs[0].rotation.x = -2.5 + Math.sin(beat) * 0.35
+      legs[1].rotation.x = -0.7
+      headG.rotation.x += 0.16
+      headG.rotation.z = Math.sin(beat) * 0.05
+      tieG.position.y = bodyM.position.y - bodyY
+      break
+    }
+    case 'flinch': {
+      // being told off (patrol.ts): both paws up over the head, sunk a little deeper into the
+      // chair, and a tremble the sweat mark above finishes off
+      const shake = Math.sin(t * 26)
+      legs[0].rotation.x = -2.9 + shake * 0.08
+      legs[1].rotation.x = -2.9 - shake * 0.08
+      bodyM.position.y -= 2
+      headG.position.y -= 3
+      headG.rotation.x += 0.2
+      headG.rotation.z = shake * 0.05
+      tieG.position.y = bodyM.position.y - bodyY
+      break
+    }
     default:
       legs[0].rotation.x = -1.0
       legs[1].rotation.x = -1.0
@@ -581,6 +619,9 @@ export function DeskStudio({ session, height }: { session: SessionState | null; 
       autoFrame(on) {
         if (on) home()
         else manual()
+      },
+      patrol(mode) {
+        setPatrolMode(mode)
       },
       setStates(map) {
         const id = sessionId()
@@ -769,6 +810,30 @@ export function DeskStudio({ session, height }: { session: SessionState | null; 
     }
     for (const [gk, gv] of st.sessionGroups) gv.visible = gk === key
 
+    // ---- the boss's rounds (patrol.ts) ------------------------------------------------------
+    // Decided from last frame's walkers, before anybody moves this frame: who is seated and
+    // working, where the boss stands, and whether it has said something real since the round
+    // began. The machine only ever reads the store; what it decides is applied to the rigs below.
+    {
+      const boss = s?.hamsters.main
+      const bw = world.walkers.get('main')
+      if (boss && bw) {
+        const workers: { id: string; seat: { i: number; j: number } }[] = []
+        for (const h of hams) {
+          if (h.id === 'main' || !WORKING.has(h.state)) continue
+          const k = world.seats.get(h.id)
+          const w = world.walkers.get(h.id)
+          if (k !== undefined && w && w.path.length === 0) workers.push({ id: h.id, seat: OFFICE.slots[k].seat })
+        }
+        let said = ''
+        for (let k = boss.feed.length - 1; k >= 0; k--) if (boss.feed[k].kind === 'say') { said = boss.feed[k].id; break }
+        stepPatrol(world.patrol, { now: Date.now(), workers, boss: { state: boss.state, at: { i: bw.i, j: bw.j }, said } })
+      } else if (world.patrol.phase !== 'idle' || world.patrol.at) {
+        world.patrol = makePatrol() // no boss on screen: whatever round was on is over
+      }
+    }
+    const patrol = world.patrol
+
     const seen = new Set<string>()
     hams.forEach((h) => {
       seen.add(h.id)
@@ -793,7 +858,10 @@ export function DeskStudio({ session, height }: { session: SessionState | null; 
         walker = makeWalker(h.state === 'arriving' ? OFFICE.door : slot.seat)
         world.walkers.set(h.id, walker)
       }
-      walkTo(walker, h.state === 'leaving' ? OFFICE.door : slot.seat)
+      // The boss may be out on its rounds, and for those it takes the direct lanes rather than
+      // the door corridor; everybody else only ever walks the corridor to a seat or the door.
+      if (h.id === 'main' && patrol.phase !== 'idle') walkDirect(walker, patrolGoal(patrol) ?? slot.seat)
+      else walkTo(walker, h.state === 'leaving' ? OFFICE.door : slot.seat)
       advanceWalker(walker, dt)
 
       const skin = modelSkin(h.model)
@@ -808,9 +876,14 @@ export function DeskStudio({ session, height }: { session: SessionState | null; 
       }
       rs.rig.group.visible = true
 
-      // Arriving/leaving are lifecycle states. Only an actual path plays the walk cycle.
-      const seated = !walker.path.length && h.state !== 'leaving'
-      const anim: IsoAnim = walker.moving ? 'walk' : ['arriving', 'leaving'].includes(h.state) ? 'idle' : animFor(h.state, Date.now() - h.since)
+      // Arriving/leaving are lifecycle states. Only an actual path plays the walk cycle. The boss
+      // on its rounds is out of its chair until it is back at the desk.
+      const away = h.id === 'main' && bossAway(patrol, walker)
+      const seated = !walker.path.length && h.state !== 'leaving' && !away
+      // the two halves of a telling-off override whatever the states would otherwise play
+      const part: IsoAnim | null =
+        h.id === 'main' ? (patrol.phase === 'scolding' ? 'scold' : null) : patrol.phase === 'scolding' && patrol.target === h.id ? 'flinch' : null
+      const anim: IsoAnim = walker.moving ? 'walk' : part ?? (['arriving', 'leaving'].includes(h.state) ? 'idle' : animFor(h.state, Date.now() - h.since))
       const pos = tileToWorld(walker.i, walker.j)
       // Sitting lays the folded legs (8.4 thick, pinned at rig y 4) across the chair seat and
       // still lifts the short-legged hamster's head and arms clear of the desk top (y 40). SEAT_LIFT
@@ -820,8 +893,12 @@ export function DeskStudio({ session, height }: { session: SessionState | null; 
       const scaleF = h.id === 'main' ? MAIN_SCALE : 1
       rs.rig.group.position.set(pos.x, groundY, pos.z)
       // face the way we are walking; standing still we face +z, across the desk and at the camera
+      // — unless we are the boss standing over somebody, in which case we face them
       const next = walker.path[0]
-      const targetYaw = walker.moving && next ? Math.atan2(next.i - walker.i, next.j - walker.j) : 0
+      const victim = part === 'scold' && patrol.target !== null ? world.walkers.get(patrol.target) : undefined
+      const targetYaw = walker.moving && next
+        ? Math.atan2(next.i - walker.i, next.j - walker.j)
+        : victim ? Math.atan2(victim.i - walker.i, victim.j - walker.j) : 0
       let d = targetYaw - rs.yaw
       while (d > Math.PI) d -= Math.PI * 2
       while (d < -Math.PI) d += Math.PI * 2
@@ -840,16 +917,25 @@ export function DeskStudio({ session, height }: { session: SessionState | null; 
         const p = worldToScreen(c, plateWorld, W, H)
         const show = scale >= PLATE_MIN_SCALE && !p.behind && p.x > -60 && p.x < W + 60 && p.y > -20 && p.y < H + 20
         plate.style.display = show ? '' : 'none'
-        if (show) plate.style.transform = `translate(${Math.round(p.x)}px, ${Math.round(p.y)}px) translate(-50%, 0)`
+        // The boss on its rounds ends up standing just behind and beside a colleague, and a plate
+        // centred under its feet lands squarely on that colleague's head — the one thing the
+        // telling-off is about. Out of its chair the plate hangs off to the far side instead.
+        if (show) plate.style.transform = away ? `translate(${Math.round(p.x - 6)}px, ${Math.round(p.y)}px) translate(-100%, 0)` : `translate(${Math.round(p.x)}px, ${Math.round(p.y)}px) translate(-50%, 0)`
       }
       if (glyph) {
-        const symbol = GLYPH[anim]
-        const p = worldToScreen(c, { x: pos.x + 14, y: headTop + 14, z: pos.z }, W, H)
-        const show = !!symbol && !walker.moving && scale >= 1.5 && !p.behind && p.x > 0 && p.x < W && p.y > 0 && p.y < H
+        // The rounds are told entirely in marks: anger over the boss from the moment it gets up,
+        // sweat over whoever it is standing over (with the flinch pose). Emoji, so they read at
+        // a wider zoom than the thought glyphs, and the boss keeps its mark while it walks.
+        const mark = h.id === 'main' ? (patrol.phase === 'going' || patrol.phase === 'scolding' ? '💢' : null) : part === 'flinch' ? '💦' : null
+        const symbol = mark ?? GLYPH[anim]
+        // the boss's mark goes on the far side of its head: the near side is where the colleague
+        // it is standing over keeps its own feed rows
+        const p = worldToScreen(c, { x: pos.x + (mark && h.id === 'main' ? -14 : 14), y: headTop + 14, z: pos.z }, W, H)
+        const show = !!symbol && (mark ? scale >= 0.8 : !walker.moving && scale >= 1.5) && !p.behind && p.x > 0 && p.x < W && p.y > 0 && p.y < H
         glyph.style.display = show ? '' : 'none'
         if (show) {
           glyph.textContent = symbol as string
-          glyph.className = `office-glyph${anim === 'wave' ? ' is-alert' : ''}`
+          glyph.className = `office-glyph${anim === 'wave' ? ' is-alert' : ''}${mark ? ' is-mark' : ''}`
           // the little hop makes the glyph read as a thought rather than a label
           glyph.style.transform = `translate(${Math.round(p.x)}px, ${Math.round(p.y - (Math.floor(t / 600) % 2) * 3)}px) translate(-50%, -100%)`
         }
@@ -901,13 +987,18 @@ export function DeskStudio({ session, height }: { session: SessionState | null; 
       const pts: { x: number; z: number }[] = []
       const ids: string[] = []
       let moving = false
+      let out = false
       for (const h of hams) {
         const k = world.seats.get(h.id)
         const walker = world.walkers.get(h.id)
         if (k === undefined || !walker) continue
         ids.push(h.id)
-        if (walker.path.length) {
-          moving = true
+        // the boss out on its rounds is framed where it stands, not where its chair is — the same
+        // way a colleague walking in is, so the view follows it over and back
+        const away = h.id === 'main' && bossAway(patrol, walker)
+        if (walker.path.length || away) {
+          if (walker.path.length) moving = true
+          if (away) out = true
           pts.push(tileToWorld(walker.i, walker.j))
         } else {
           const seat = OFFICE.slots[k].seat
@@ -919,7 +1010,8 @@ export function DeskStudio({ session, height }: { session: SessionState | null; 
       // because the framing is measured in pixels — how much sky a feed row needs is the same 26px
       // in a 420-tall desk as in a 700-tall one, so dragging the splitter really does change the
       // answer. It is quantised to 8px so a drag recomputes a handful of times, not every frame.
-      const sig = `${ids.sort().join(',')}|${Math.round(W / 8)}x${Math.round(H / 8)}${moving ? '|walk' : ''}`
+      // `out` recomputes once when the boss stops beside a colleague and once when it sits back down
+      const sig = `${ids.sort().join(',')}|${Math.round(W / 8)}x${Math.round(H / 8)}${moving ? '|walk' : ''}${out ? '|out' : ''}`
       if (!world.auto.target || moving || sig !== world.auto.key) {
         world.auto.key = sig
         const target: Camera = { ...c }
