@@ -4,6 +4,8 @@ import type {
   BubbleRequest,
   BubbleResult,
   BubbleState,
+  DelegationConfig,
+  DelegationState,
   DeskEvent,
   DirEntry,
   FileEntry,
@@ -77,6 +79,13 @@ export interface DeskBridge {
     summarize(req: BubbleRequest): Promise<BubbleResult>
     state(): Promise<BubbleState>
     resetStats(): Promise<BubbleState>
+  }
+  /** "명령 하달": the sub-agent instruction block in every account's CLAUDE.md (electron/delegation.ts) */
+  delegation: {
+    /** the stored config and what each account's file says — reads only */
+    get(): Promise<DelegationState>
+    /** store the config and bring every account's file in line with it */
+    set(config: DelegationConfig): Promise<DelegationState>
   }
   /** per account: one tiny `claude -p` right after each 5-hour reset, so the next window starts then (electron/five-hour.ts) */
   fiveHour: {
@@ -203,6 +212,10 @@ const bridge: DeskBridge = {
     summarize: (req) => ipcRenderer.invoke('bubble:summarize', req),
     state: () => ipcRenderer.invoke('bubble:state'),
     resetStats: () => ipcRenderer.invoke('bubble:resetStats'),
+  },
+  delegation: {
+    get: () => ipcRenderer.invoke('delegation:get'),
+    set: (config) => ipcRenderer.invoke('delegation:set', config),
   },
   fiveHour: {
     state: () => ipcRenderer.invoke('fiveHour:state'),

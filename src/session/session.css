@@ -41,6 +41,14 @@
 /* the menu's rows: a radio list, so no gap between them — the 8px of `.pop-body` is for sections */
 .sb-model-list { display: flex; flex-direction: column; gap: 1px; margin: 0 -2px; }
 
+/* "명령 하달": a switch drawn as a pill with a small box on its left, so it reads as on/off and not
+   as one more command button. Next to it the preset opens a menu, shaped like the model pill. */
+.pill.sb-btn.sb-deleg { gap: 6px; }
+.sb-deleg-mark { display: inline-flex; align-items: center; justify-content: center; width: 13px; height: 13px; border-radius: 3px; border: 1px solid var(--line-strong); color: var(--on-accent); }
+.pill.sb-btn.sb-deleg.on .sb-deleg-mark { background: var(--accent); border-color: transparent; }
+.sb-deleg-custom { width: 100%; min-height: 64px; resize: vertical; padding: 6px 8px; border: 1px solid var(--line); border-radius: var(--radius); background: var(--surface); color: var(--text); font: inherit; font-size: 12px; line-height: 1.5; }
+.sb-deleg-custom:focus { outline: none; border-color: var(--line-strong); }
+
 .seg.sb-effort { flex: none; padding: 1px; }
 .seg.sb-effort .seg-btn { padding: 2px 6px; font-size: 11px; }
 .seg.sb-effort .seg-btn:disabled { opacity: 0.45; cursor: default; }

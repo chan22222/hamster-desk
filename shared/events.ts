@@ -100,6 +100,35 @@ export interface FiveHourAccount {
 /** profile id → its FiveHourAccount, for every account on the list */
 export type FiveHourState = Record<string, FiveHourAccount>
 
+/**
+ * "명령 하달" — a standing instruction block the app keeps in each account's CLAUDE.md that tells
+ * Claude when to split work across sub-agents (electron/delegation.ts). `preset` picks the harness
+ * text, `cap` limits the agents run at once (0 = no line about it), `custom` is the user's own text.
+ */
+export type DelegationPreset = 'when-needed' | 'eager' | 'plan-review' | 'custom'
+/** the harnesses on offer, in menu order (the texts themselves live in electron/delegation.ts) */
+export const DELEGATION_PRESETS: { id: DelegationPreset; label: string; hint: string }[] = [
+  { id: 'when-needed', label: '필요할 때만', hint: '독립적인 부분으로 나뉠 때만 병렬로' },
+  { id: 'eager', label: '적극 분담', hint: '부분이 둘 이상이면 언제나 나눠서' },
+  { id: 'plan-review', label: '계획 → 분담 → 검토', hint: '나눠 맡긴 뒤 검토 에이전트가 확인' },
+  { id: 'custom', label: '직접 입력', hint: '내가 쓴 지시문 그대로' },
+]
+/** how many sub-agents at once; 0 = no limit line */
+export const DELEGATION_CAPS = [0, 2, 3, 4, 6] as const
+export interface DelegationConfig {
+  on: boolean
+  preset: DelegationPreset
+  cap: number
+  custom: string
+}
+/** 'installed' = this config's block is in the file; 'stale' = a block is there but says something else */
+export type DelegationFileState = 'installed' | 'stale' | 'none' | 'error'
+export interface DelegationState {
+  config: DelegationConfig
+  /** profile id → the state of that account's CLAUDE.md, and why when it could not be written */
+  accounts: Record<string, { state: DelegationFileState; file: string; error: string | null }>
+}
+
 export type EffortLevel = 'low' | 'medium' | 'high' | 'xhigh' | 'max'
 export const EFFORT_LEVELS: EffortLevel[] = ['low', 'medium', 'high', 'xhigh', 'max']
 

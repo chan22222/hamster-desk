@@ -12,13 +12,14 @@
 //      bar goes disabled for as long as it lasts.
 
 import type { ReactNode } from 'react'
-import { EFFORT_LEVELS, type EffortLevel } from '@shared/events'
+import { DEFAULT_PROFILE_ID, EFFORT_LEVELS, type EffortLevel } from '@shared/events'
 import { modelSkin } from '../desk/skins'
 import { runInTerminal, useDesk, type SessionState, type Workspace } from '../store'
 import { IconCheck, IconChevron } from '../widgets/icons'
 import { Popover } from '../widgets/Popover'
 import { termLog } from '../term/search'
 import { ContextMeter, contextPct } from './ContextMeter'
+import { DelegationControl } from './Delegation'
 import { MODEL_CHOICES, modelAliasOf } from './models'
 import { TranscriptList } from './TranscriptList'
 import './session.css'
@@ -153,6 +154,11 @@ export function SessionBar({ ws, session }: { ws: Workspace | null; session: Ses
           </button>
         ))}
       </span>
+
+      <span className="sb-sep" />
+
+      {/* not a slash command: it edits the account's CLAUDE.md, so it stays live while a prompt waits */}
+      <DelegationControl profileId={ws.profileId ?? DEFAULT_PROFILE_ID} />
 
       {waiting && <span className="sb-note">{WAITING}</span>}
 

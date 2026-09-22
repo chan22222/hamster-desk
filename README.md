@@ -20,7 +20,7 @@ Claude Code CLI 를 그대로 쓰면서, 지금 누가(메인·서브에이전�
   - `.../<sessionId>/subagents/agent-*.jsonl` + `.meta.json` — 서브에이전트별 기록(종류·설명)
   - `~/.hamster-desk/status/<sessionId>.json` — (선택) 상태줄 스크립트가 남기는 사용량·컨텍스트 스냅샷
 - Max/Pro 구독 로그인 그대로. 앱은 모델을 직접 호출하지 않는다(Claude Code 자체가 돈다).
-- 앱은 Claude Code 의 설정(`~/.claude`)을 바꾸지 않는다. 예외는 사용자가 직접 켜는 사용량 연동(statusLine)뿐이다. **단, 세션 컨트롤 바의 `/effort` 는 터미널에 그 명령을 대신 쳐 주는 것인데, 그 명령을 받은 Claude Code 가 스스로 값을 `~/.claude/settings.json` 의 새 세션 기본값으로도 저장한다** — 앱이 쓰는 파일이 아니라 CLI 의 동작이지만, 버튼 한 번에 그 파일이 바뀐다는 사실은 같으므로 여기 적어 둔다. 바의 **모델 드롭다운**이 쳐 주는 `/model <alias>` 도 같다 — CLI 가 `saved as your default for new sessions` 라고 답하며 저장된 기본 모델을 덮어쓴다(툴팁과 메뉴에 적혀 있다).
+- 앱은 Claude Code 의 설정(`~/.claude`)을 바꾸지 않는다. 예외는 둘이다: 사용자가 직접 켜는 사용량 연동(statusLine)과, **기본으로 켜져 있는 `명령 하달`**(세션 컨트롤 바) — 계정의 `CLAUDE.md` 끝에 표시된 블록 하나를 넣고, 끄면 그 블록만 지운다(아래 "명령 하달"). **단, 세션 컨트롤 바의 `/effort` 는 터미널에 그 명령을 대신 쳐 주는 것인데, 그 명령을 받은 Claude Code 가 스스로 값을 `~/.claude/settings.json` 의 새 세션 기본값으로도 저장한다** — 앱이 쓰는 파일이 아니라 CLI 의 동작이지만, 버튼 한 번에 그 파일이 바뀐다는 사실은 같으므로 여기 적어 둔다. 바의 **모델 드롭다운**이 쳐 주는 `/model <alias>` 도 같다 — CLI 가 `saved as your default for new sessions` 라고 답하며 저장된 기본 모델을 덮어쓴다(툴팁과 메뉴에 적혀 있다).
 - 읽는 범위도 좁게 잡았다: 지난 대화 목록은 **트랜스크립트 파일만**(파일마다 앞 64KB + 꼬리 512KB), git 은 **읽기 전용 명령만**, `~/.claude/history.jsonl` 은 읽지 않는다.
 
 ## 실행
@@ -158,7 +158,8 @@ npm run release            # 검사만: npm run release -- --check
 - **두 테마 모두 어두운 패널**이다(라이트 `--term-bg #121814` / 전경 `#dfe6da` / 커서 `#7fd4a3`, 다크 `#0e1310` / `#e3eade` / `#8fdcb0`). Claude Code 가 자기 테마 색으로 출력하므로 여기만 밝게 하면 글자가 안 보인다.
 
 **세션 컨트롤 바** (터미널 바로 위 한 줄. 그 탭에 `claude` 세션이 붙어 있을 때만 나온다)
-- 왼쪽부터 **모델 드롭다운**(`Fable 5.1 ▾`) · **effort 세그먼트**(`low·medium·high·xhigh·max`) · 여백 · **컨텍스트 미터** · `/compact` · `/clear`(한 번 묻는다) · `지난 대화`.
+- 왼쪽부터 **모델 드롭다운**(`Fable 5.1 ▾`) · **effort 세그먼트**(`low·medium·high·xhigh·max`) · **명령 하달**(`☑ 명령 하달` 스위치 + `필요할 때만 ▾` 방식 메뉴, 아래) · 여백 · **컨텍스트 미터** · `/compact` · `/clear`(한 번 묻는다) · `지난 대화`.
+- **명령 하달**(`electron/delegation.ts`, `src/session/Delegation.tsx`)은 바에서 유일하게 터미널에 아무것도 치지 않는다. 하네스가 하는 방식대로 **상시 지시**를 시스템 층에 두는 것이다: 켜 두면 그 계정의 `CLAUDE.md`(`~/.claude/CLAUDE.md`, 다른 계정은 그 폴더의 `CLAUDE.md`) 끝에 `<!-- hamster-desk:delegation start -->` … `end` 로 감싼 블록 하나가 들어가고, Claude Code 가 세션을 시작할 때 이 파일을 읽어 시스템 프롬프트에 넣는다. 끄면 블록만 지우고 나머지는 한 글자도 건드리지 않는다(블록 첫 줄이 누가 관리하는지 말한다; 원자적 쓰기, 파일의 줄바꿈 유지, 블록을 빼서 빈 파일이 되면 파일을 지운다). **기본값은 켜짐** — 앱을 켤 때 모든 계정의 파일을 설정에 맞춘다(계정을 추가해도). 방식은 넷: `필요할 때만`(독립적인 부분으로 나뉠 때만 서브에이전트에 병렬로, 아니면 혼자) · `적극 분담`(부분이 둘 이상이면 언제나 나눠서, 메인은 조율·통합만) · `계획 → 분담 → 검토`(계획 → 나눠 맡기기 → 별도 검토 에이전트) · `직접 입력`(쓴 줄이 그대로 불릿으로). 거기에 `동시 에이전트` 상한(제한 없음 · 2 · 3 · 4 · 6). 설정은 `ui.json` 의 `delegation: { on, preset, cap, custom }`, 계정마다 같은 블록. **적용은 다음에 여는 `claude` 부터**다 — CLI 는 메모리 파일을 세션 시작 때 읽고 세션 동안 캐시한다(터미널의 `/memory` 가 그 캐시를 비운다). 파일에 쓰지 못하면(잠김 등) 스위치 툴팁과 메뉴 아래에 이유가 나온다. 캡처 실행(`HAMSTER_CAPTURE`)은 이 파일에 쓰지 않는다 — 그 실행의 `HAMSTER_HOME` 이 바뀌어도 `~/.claude` 는 진짜다.
 - 버튼 뒤에 API 는 없다. **이미 떠 있는 TUI 에 슬래시 명령을 대신 쳐 주는 것**이 전부다. 입력줄에 쓰다 만 글이 있을 수 있으므로 명령 앞에 `\x15`(Ctrl+U, 입력줄 비우기)를 같은 청크로 붙이고 Enter(`\r`)는 따로 보낸다. Claude Code 가 권한 요청·질문을 띄운 동안에는 입력줄이 앱의 것이 아니므로 바 전체가 비활성이고 `프롬프트에 답한 뒤 쓸 수 있어요.` 가 뜬다. 다른 터미널에서 도는 세션(기울임체 탭)은 읽기만 하므로 명령 버튼이 꺼져 있다.
 - **`/effort` 는 그 세션만 바꾸지 않는다.** Claude Code 가 그 값을 `~/.claude/settings.json` 의 새 세션 기본값으로도 저장한다(CLI 의 동작이고, 세그먼트 툴팁에도 적혀 있다). 작업 중에 누르면 다음 턴부터 적용된다.
 - **모델 드롭다운**은 이름(`Fable 5.1 ▾`)을 누르면 열린다. 항목은 CLI 가 받는 네 가족 별칭 `fable · opus · sonnet · haiku` 인데, 이름은 그 별칭이 지금 가리키는 모델(`Fable 5.1 · Opus 5 · Sonnet 5 · Haiku 4.5`)이고 오른쪽에 CLI 의 한 줄 설명이 붙는다. 지금 모델의 가족에 체크가 있다(날짜 붙은 id 나 옛 세대도 가족으로 맞춘다). 고르면 effort 와 똑같이 `/model <alias>` 를 쳐 준다. **이것도 그 세션만 바꾸지 않는다** — CLI 가 `Model set to … and saved as your default for new sessions` 라고 답하며 `~/.claude/settings.json` 의 기본 모델을 덮어쓴다(툴팁과 메뉴 아래 줄에 적혀 있다). 0.1.13 까지는 이 이유로 이름만 보여 줬는데, effort 가 이미 같은 일을 하고 있어 숨길 이유가 되지 못했다. 작업 중에 누르면 다음 턴부터다. 바는 고른 별칭이 가리키는 모델을 바로 보여 주고(햄스터 스킨도 같이), 트랜스크립트나 상태줄이 실제 모델을 알려 오면 그것으로 바뀐다 — 조직 제한으로 CLI 가 거절하면 다음 답변에서 되돌아온다.
@@ -252,6 +253,7 @@ npm run smoke:ui                   # ~/.hamster-desk/ui.json: 병합·null 삭�
 | `model-choices.test.ts` | 모델 드롭다운의 별칭이 `fable·opus·sonnet·haiku` 넷뿐인지, 각 별칭이 가리키는 id 를 스킨이 알아 `Fable 5.1·Opus 5·Sonnet 5·Haiku 4.5` 로 이름 붙는지, 날짜 붙은 id·옛 세대는 가족으로 체크되고 `mythos`·없음은 체크되지 않는지 |
 | `ui-store.test.ts` | 못 읽는 파일은 덮어쓰지 않음, 첫 실행, 깨진 파일 → `ui.bak.json`, **다른 프로세스가 파일에 더한 키·목록이 이쪽의 쓰기에 살아남음**(목록은 차이만 적용, 지운 것은 지워짐, 같은 폴더의 다른 표기는 하나), 캡처 실행은 읽기 전용, 쓰는 순간 못 읽는 파일은 나중에 씀 |
 | `recent.test.ts` | `explorerDir`(탐색이 따라가는 폴더: 활성 탭 → `lastCwd` → 홈, 프로세스 작업 폴더는 아님), `baseName`·`dirKey` |
+| `delegation.test.ts` | 명령 하달 블록: 사용자의 글은 한 글자도 안 바뀜, 켜기/끄기/프리셋 바꾸기가 블록 하나만 넣고 빼고 바꿈, CRLF 유지, 빈 파일은 지움, 캡처 실행(읽기 전용)은 쓰지 않음 |
 
 스모크 테스트(창을 보지 않고 스크린샷만). `HAMSTER_TYPE` 은 첫 셸에 자동 입력할 텍스트(`\r` = Enter, `|` 로 단계 구분, 단계 간격 `HAMSTER_TYPE_DELAY` ms), `HAMSTER_CWD` 는 셸 시작 폴더. 긴 문장은 Claude 입력창이 붙여넣기로 보므로 Enter(`
 `)를 별도 단계로 보낸다:
@@ -334,6 +336,7 @@ electron/prompt.ts      "답을 기다린다" 감지: 화면 문구(공백 무�
 electron/env.ts         cleanEnv(환경 정리) · findClaude(claude 실행 파일 탐색, .cmd 는 cmd.exe 경유) — node-pty 를 안 물어서 tsx 로도 돈다
 electron/summarize.ts   말풍선 요약: headless `claude -p --model haiku` 의 큐·캐시·회로 차단
 electron/five-hour.ts   5시간 창 자동 시작: 계정별 예약 · stream-json 의 rate_limit_event 파싱 · 재시도 — electron 의존 없음
+electron/delegation.ts  명령 하달: 계정별 CLAUDE.md 의 표시된 블록 넣기/빼기 · 프리셋 문안 — electron 의존 없음
 electron/watcher/       sessions(세션 파일·pty 소유 판별) · project(프로젝트 폴더 재귀 감시) · tail(증분 읽기) · parse(JSONL → 이벤트)
 electron/legacy.ts      예전 협업 모드가 남긴 파일 정리(첫 실행 1회)
 electron/statusline.ts  상태줄 스크립트 설치/해제, 스냅샷 감시

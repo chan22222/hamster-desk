@@ -2,7 +2,7 @@ import { app, BrowserWindow, clipboard, dialog, ipcMain, Menu, nativeTheme, powe
 import { appendFileSync, readdirSync, readFileSync, rmSync } from 'node:fs'
 import { basename, join } from 'node:path'
 import { DeskWatcher } from './watcher'
-import { DEFAULT_PROFILE_ID, type BubbleRequest, type DeskEvent, type FileEntry, type NotifyRequest, type Profile, type SessionInfo, type StatusSnapshot, type UiState, type AppUpdateInfo } from '../shared/events'
+import { DEFAULT_PROFILE_ID, type BubbleRequest, type DelegationState, type DeskEvent, type FileEntry, type NotifyRequest, type Profile, type SessionInfo, type StatusSnapshot, type UiState, type AppUpdateInfo } from '../shared/events'
 import { spawnPty, PromptDetector, type PtyHandle } from './pty'
 import { WaitingGate } from './prompt'
 import { HAMSTER_HOME, StatusWatcher, installStatusLine, uninstallStatusLine, statusLineState, refreshStatusScripts } from './statusline'
@@ -11,6 +11,7 @@ import { flushUi, loadUi, saveUi, setUiReadOnly, uiPath } from './ui-store'
 import { checkVersion } from './version'
 import { BubbleSummarizer } from './summarize'
 import { FiveHourStarter } from './five-hour'
+import { sanitizeConfig as sanitizeDelegation, storeConfig as storeDelegation, syncDelegation } from './delegation'
 import { cleanupLegacyHarness } from './legacy'
 import { claudeDir } from './watcher/paths'
 import { AUMID_VARIANTS, appUserModelId, aumidFor, showNotification } from './notify'
@@ -403,6 +404,9 @@ function startWatchers(): void {
   if (adopted.length) console.log(`[profiles] recovered: ${adopted.map((p) => p.id).join(', ')}`)
   for (const p of loadProfiles().list) watchProfile(p)
 
+  // every account's CLAUDE.md carries the "명령 하달" block the stored config asks for (on by default)
+  delegationSync(true)
+
   // before the status watcher: its first scan is what tells this when each account's window ends
   fiveHour = new FiveHourStarter({ accounts: () => loadProfiles().list.map((p) => ({ id: p.id, dir: p.dir })) })
   fiveHour.on('change', (s) => send('fiveHour:changed', s))
@@ -564,6 +568,7 @@ ipcMain.handle('profiles:list', () => withEmails(loadProfiles()))
 ipcMain.handle('profiles:add', (_e, name: string) => {
   const { state, added } = addProfile(String(name ?? ''))
   watchProfile(added)
+  delegationSync(true) // the new account's CLAUDE.md gets the block too
   return withEmails(state)
 })
 ipcMain.handle('profiles:rename', (_e, id: string, name: string) => withEmails(renameProfile(String(id ?? ''), String(name ?? ''))))
@@ -589,6 +594,7 @@ ipcMain.handle('profiles:showDefault', () => {
   const state = showDefaultProfile()
   const cli = state.list.find((p) => p.id === DEFAULT_PROFILE_ID)
   if (cli) watchProfile(cli)
+  delegationSync(true)
   return withEmails(state)
 })
 ipcMain.handle('profiles:openFolder', (_e, id: string) => shell.openPath(baseDirOf(String(id ?? ''))))
@@ -802,6 +808,23 @@ function summarizer(): BubbleSummarizer {
 ipcMain.handle('bubble:summarize', (_e, req: BubbleRequest) => summarizer().summarize(req))
 ipcMain.handle('bubble:state', () => summarizer().state())
 ipcMain.handle('bubble:resetStats', () => summarizer().reset())
+
+// ---- IPC: "명령 하달" — the sub-agent instruction block in every account's CLAUDE.md (electron/delegation.ts)
+
+/**
+ * `write` brings each account's file in line with the stored config; without it this only reports.
+ * A capture run never writes: its throw-away HAMSTER_HOME does not move the CLI's own ~/.claude.
+ */
+function delegationSync(write: boolean): DelegationState {
+  const accounts = loadProfiles().list.map((p) => ({ id: p.id, dir: p.dir }))
+  return syncDelegation(accounts, !write || !!process.env.HAMSTER_CAPTURE)
+}
+
+ipcMain.handle('delegation:get', () => delegationSync(false))
+ipcMain.handle('delegation:set', (_e, config: unknown) => {
+  storeDelegation(sanitizeDelegation(config))
+  return delegationSync(true)
+})
 
 // ---- IPC: start the next 5-hour window as soon as the last one ends (electron/five-hour.ts, per account)
 
