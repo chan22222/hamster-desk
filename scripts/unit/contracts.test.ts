@@ -11,6 +11,18 @@ test('DEFAULT_PREFS carries the keys the new features read', () => {
   assert.deepEqual([DEFAULT_PREFS.sideChangedH, DEFAULT_PREFS.sideFeedH], [null, null])
   // the app starts on the empty start card: no terminal is opened that nobody asked for
   assert.equal(DEFAULT_PREFS.restoreTabs, false)
+  // every summary is a Haiku call on the user's subscription: off until asked for
+  assert.equal(DEFAULT_PREFS.bubbleSummary, false)
+})
+
+test('adoptPrefs: a file from before v3 takes the new summary default once; a later choice is kept', () => {
+  // written while the default was on — the stored true is the old default, not a choice
+  assert.equal(adoptPrefs({ v: 2, bubbleSummary: true, theme: 'dark' }).bubbleSummary, false)
+  assert.equal(adoptPrefs({ bubbleSummary: true }).bubbleSummary, false)
+  assert.equal(adoptPrefs({ v: 2, bubbleSummary: true, theme: 'dark' }).theme, 'dark', 'nothing else is touched')
+  // switched on since: stays on
+  assert.equal(adoptPrefs({ v: 3, bubbleSummary: true }).bubbleSummary, true)
+  assert.equal(adoptPrefs({ v: 3, bubbleSummary: false }).bubbleSummary, false)
 })
 
 test('adoptPrefs keeps a dragged sidebar height and gives an older file the automatic layout', () => {

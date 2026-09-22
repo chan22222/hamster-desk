@@ -200,7 +200,8 @@ export const DEFAULT_PREFS: Prefs = {
   showExplorer: true,
   onTop: false,
   folded: false,
-  bubbleSummary: true,
+  // off until asked for: every summary is a Haiku call on the user's subscription
+  bubbleSummary: false,
   lang: 'auto',
   theme: 'light',
   autoCam: true,
@@ -344,8 +345,11 @@ export function freezePrefs(): void {
  * 2 — `showLog` used to mean "show the right-hand file panel" (default off) and now means "the
  *     sidebar's 바뀐 파일 section is expanded" (default on), so a stored `false` would greet a
  *     user of the new layout with that section already folded.
+ * 3 — `bubbleSummary` went from on to off by default. Every file so far was written while it was
+ *     on, so a stored `true` says what the default was, not what the user chose: it takes the new
+ *     default once, and whatever is switched on after that is kept.
  */
-const PREFS_VERSION = 2
+const PREFS_VERSION = 3
 
 /** which version wrote this bag; anything without a stamp predates the field */
 const prefsVersionOf = (raw: unknown): number => {
@@ -365,6 +369,7 @@ const storedPrefs = (p: Prefs): UiBag => ({ ...p, v: PREFS_VERSION })
 export function adoptPrefs(raw: unknown): Prefs {
   const { showFolders, v: _v, ...rest } = (raw && typeof raw === 'object' ? raw : {}) as Partial<Prefs> & { showFolders?: boolean; v?: number }
   if (prefsVersionOf(raw) < 2) delete rest.showLog // meaning changed: take the new default instead
+  if (prefsVersionOf(raw) < 3) delete rest.bubbleSummary // the default changed: see PREFS_VERSION
   const prefs: Prefs = { ...DEFAULT_PREFS, ...rest }
   // `notify` is the one nested group: a spread would replace it wholesale, so a file written
   // before a toggle existed would come back missing that key instead of taking its default.

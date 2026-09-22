@@ -67,13 +67,14 @@ npm run release            # 검사만: npm run release -- --check
 
 **이 파일을 앱이 스스로 날리지 않게 한다.** `ui.json` 에는 계정 목록과 저장된 탭도 들어 있는데, 예전에는 세 가지 경로로 통째로 사라질 수 있었다. (1) 읽기가 실패하면 — 재부팅 직후 백신이나 동기화 프로그램이 파일을 잠깐 쥐고 있을 때 — "파일 없음"과 똑같이 빈 설정으로 취급했고, 곧이은 저장(창을 옮기기만 해도)이 그 빈 설정으로 전체를 덮어썼다. 이제 **있는데 못 읽은 파일**은 60ms 간격으로 8번 다시 읽고, 그래도 안 되면 읽힐 때까지 **아무것도 쓰지 않는다**. (2) 쓰기는 원자적이었지만 내구적이지 않았다: fsync 없는 rename 은 정전 뒤에 0 으로 채워진 파일을 남길 수 있다. 이제 rename 전에 fsync 한다. (3) 깨진 파일은 곧 빈 설정이었다. 이제 직전의 온전한 파일을 `ui.bak.json` 으로 남겨 두고, 깨졌을 때 그것을 읽는다(깨진 파일은 전처럼 `ui.corrupt.json` 으로). 그리고 목록은 잃었어도 **계정 폴더와 그 안의 로그인은 남아 있으므로**, 시작할 때 `~/.hamster-desk/profiles/acc-N` 가운데 목록에 없고 CLI 가 쓴 흔적(`.credentials.json`·`.claude.json`)이 있는 폴더를 목록에 되돌린다(`adoptOrphanProfiles`; 이름은 로그인 이메일의 앞부분). 일부러 지웠는데 파일이 잠겨 다 못 지운 폴더는 `.hamster-deleted` 표식이 있어 되살아나지 않고, 그때 다시 지운다.
 
-기능 확장으로 늘어난 키는 전부 **추가**라 `PREFS_VERSION` 은 2 그대로다.
+기능 확장으로 늘어난 키는 전부 **추가**라 버전을 올리지 않았다. `PREFS_VERSION` 3 은 `bubbleSummary` 의 기본값이 켜짐 → 꺼짐으로 바뀐 것: 그전 파일의 `true` 는 사용자가 고른 값이 아니라 옛 기본값이라 한 번 버리고 새 기본값을 쓴다(그 뒤에 켠 것은 남는다).
 
 | 키 | 모양 | 쓰는 쪽 |
 |---|---|---|
 | `workspaces` | `{ tabs: [{ cwd, title }], active }` | 마지막 터미널 탭들과 활성 탭. 렌더러가 400ms 디바운스로 쓴다(`src/workspaces-persist.ts`). 업데이트 탭은 빠진다. **저장은 늘 하지만 되살리는 것은 `prefs.restoreTabs` 가 켜져 있을 때뿐이다** |
 | `window` | `{ x, y, width, height, maximized }` | 창 위치. 메인이 resize/move 500ms 디바운스 + 닫는 순간에 쓴다(`electron/window-state.ts`) |
 | `prefs.notify` | `{ permission, question, turnEnd, sound }` | 알림 종류별 on/off. 기본 `true, true, true, false`. 옛 파일에 일부만 있어도 기본값과 깊은 병합 |
+| `prefs.bubbleSummary` | 기본 `false` | `⋯ > 말풍선 > 요약해서 말하기`. 요약 한 번이 구독으로 Haiku 를 한 번 부르는 것이라 켤 때만 돈다 |
 | `prefs.termFont` | 10~24, 기본 14 | 터미널 글꼴 크기 |
 | `prefs.showFeedLog` | 기본 `true` | 사이드바 `말풍선 로그` 섹션 펼침 |
 | `prefs.restoreTabs` | 기본 `false` | `⋯ > 시작할 때 지난 탭 다시 열기`. 꺼져 있으면 앱은 **아무 터미널도 열지 않고** 시작 카드(최근 프로젝트·활성 계정·폴더 찾아보기)로 뜬다 — 스스로 터미널을 여는 앱은 아무도 고르지 않은 폴더에서, 아무도 고르지 않은 계정으로 연다. 켜면 지난 실행의 탭들이 각자의 계정으로 되돌아온다 |
