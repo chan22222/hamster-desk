@@ -108,7 +108,7 @@ function RunMenu({ project, onRun }: { project: ProjectInfo; onRun: (command: st
           <p className="pop-note run-badge">{badge}</p>
           {groups.map((g) => (
             <div key={g.id} className="run-group">
-              <div className="pop-head">{g.label}</div>
+              <div className="run-head">{g.label}</div>
               {g.rows.map((a) => {
                 const [step, cmd] = splitCommand(a.command)
                 return (

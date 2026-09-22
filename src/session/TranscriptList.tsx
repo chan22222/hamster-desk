@@ -36,8 +36,12 @@ function sameText(subtitle: string, title: string): boolean {
   return t.length > 1 && t.endsWith('…') && s.startsWith(t.slice(0, -1).trimEnd())
 }
 
-/** `profileId`: each account keeps its own conversations, and a resumed one has to open under the same account. */
-export function TranscriptList({ cwd, profileId, onPick }: { cwd: string; profileId: string; onPick: () => void }) {
+/**
+ * `profileId`: each account keeps its own conversations, and a resumed one has to open under the
+ * same account. `run`, when given, types the command into a terminal of the caller's choosing (the
+ * studio's welcome card: the idle shell under it) instead of opening a new tab for it.
+ */
+export function TranscriptList({ cwd, profileId, onPick, run }: { cwd: string; profileId: string; onPick: () => void; run?: (cmd: string) => void }) {
   const addWorkspace = useDesk((s) => s.addWorkspace)
   const [rows, setRows] = useState<TranscriptEntry[] | null>(null)
   const [filter, setFilter] = useState('')
@@ -83,18 +87,22 @@ export function TranscriptList({ cwd, profileId, onPick }: { cwd: string; profil
   const q = filter.trim().toLowerCase()
   const shown = q && rows ? rows.filter((r) => r.title.toLowerCase().includes(q) || r.subtitle.toLowerCase().includes(q)) : rows
 
-  /** Carry a conversation on in a terminal of its own; the shell types the command itself. */
+  /** Carry a conversation on: in the caller's terminal, or in a new one that types the command itself. */
   const resume = (e: TranscriptEntry): void => {
     if (e.live) return
     termLog(`[history] resume ${e.sessionId}`)
-    addWorkspace(cwd, e.title, `claude --resume ${e.sessionId}`, profileId)
+    const cmd = `claude --resume ${e.sessionId}`
+    if (run) run(cmd)
+    else addWorkspace(cwd, e.title, cmd, profileId)
     onPick()
   }
 
   const continueLast = (): void => {
-    addWorkspace(cwd, '이어서', 'claude --continue', profileId)
+    if (run) run('claude --continue')
+    else addWorkspace(cwd, '이어서', 'claude --continue', profileId)
     onPick()
   }
+  const where = run ? '이 터미널에서' : '새 터미널에서'
 
   return (
     <div className="pop-body tl">
@@ -114,7 +122,7 @@ export function TranscriptList({ cwd, profileId, onPick }: { cwd: string; profil
             className={`tl-row ${e.live ? 'is-live' : ''}`}
             data-debug-click={`history-${i}`}
             disabled={e.live}
-            title={e.live ? LIVE : `${e.title}\n${e.path}\n클릭: 새 터미널에서 이어서`}
+            title={e.live ? LIVE : `${e.title}\n${e.path}\n클릭: ${where} 이어서`}
             onClick={() => resume(e)}
           >
             <span className="tl-title">{e.title}</span>

@@ -20,7 +20,7 @@ import { restoreWorkspaces } from './workspaces-persist'
 import { SessionBar } from './session/SessionBar'
 import { TabContext } from './session/ContextMeter'
 import { TabGit } from './git/GitChip'
-import { AccountBadge, useAccountsRefresh } from './accounts/Accounts'
+import { AccountBadge, AccountGate, useAccountsRefresh } from './accounts/Accounts'
 import { TurnToast } from './log/TurnToast'
 import { Banner } from './notify/Banner'
 import { MiniShell } from './mini/MiniShell'
@@ -94,6 +94,8 @@ export default function App() {
   const [booting, setBooting] = useState(() => !!window.desk)
   const colRef = useRef<HTMLDivElement>(null)
   const [colH, setColH] = useState(0)
+  // a capture run (src/dev/debug.ts) has nobody to answer a dialog: the account question stays away
+  const [captureRun, setCaptureRun] = useState(false)
 
   // event stream (with backlog replay) or browser-only replay
   useEffect(() => {
@@ -127,6 +129,7 @@ export default function App() {
         if (!info) return
         setLang(useDesk.getState().prefs.lang, info.claudeLanguage)
         setDebugClick(info.debugClick)
+        if (info.debugClick || info.debugPrefs || info.debugClicks.length) setCaptureRun(true)
         if (info.debugPrefs) {
           // forced prefs are for this run only: freeze the store so nothing reaches ~/.hamster-desk/ui.json
           const { demoAgents, ...rest } = info.debugPrefs as { demoAgents?: number } & Partial<typeof prefs>
@@ -349,6 +352,8 @@ export default function App() {
       </div>
       {/* asks once per start as soon as the check finds a newer version; the mini window has no room for it */}
       {!mini && !booting && <AppUpdatePrompt />}
+      {/* after the update dialog in the DOM, so it paints over it: the account is answered first */}
+      {!mini && !booting && !captureRun && <AccountGate />}
     </div>
   )
 }

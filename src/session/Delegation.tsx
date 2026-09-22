@@ -59,7 +59,9 @@ export function DelegationControl({ profileId }: { profileId: string }) {
         }
         title="어떤 방식으로 나눠 맡길지"
         ariaLabel="멀티 에이전트 방식"
-        width={332}
+        // wide enough that every preset's label and hint share one line (`계획 → 분담 → 검토` with
+        // `나눠 맡긴 뒤 검토 에이전트가 확인` is the longest pair); at 332 the hints wrapped under the labels
+        width={400}
         disabled={!c.on}
         debugClick="bar-delegate-preset"
       >

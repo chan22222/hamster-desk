@@ -1,4 +1,5 @@
 import { useEffect, useLayoutEffect, useRef, useState, type ReactNode } from 'react'
+import { createPortal } from 'react-dom'
 
 interface PopoverProps {
   /** what the trigger button shows */
@@ -19,6 +20,11 @@ interface PopoverProps {
  * The one popover in the app: opens under its trigger, closes on Esc or an outside click,
  * and flips to right-aligned when it would run off the window. It never flips upward, so what does
  * not fit under the trigger scrolls inside the panel instead of being cut off by the window edge.
+ *
+ * The panel is portalled to `<body>`: it is `position: fixed` and positioned in viewport pixels,
+ * and a trigger inside a container-query box (`.desk-studio`) or under styles that reach every
+ * descendant button (the studio's welcome card) would otherwise displace or restyle it. The theme
+ * lives on `<html data-theme>`, so the panel keeps its tokens wherever it renders.
  */
 export function Popover({ label, className = '', title, ariaLabel, disabled, width, debugClick, children }: PopoverProps) {
   const [open, setOpen] = useState(false)
@@ -82,7 +88,7 @@ export function Popover({ label, className = '', title, ariaLabel, disabled, wid
       >
         {label}
       </button>
-      {open && (
+      {open && createPortal(
         <div
           ref={panelRef}
           className="pop"
@@ -92,6 +98,8 @@ export function Popover({ label, className = '', title, ariaLabel, disabled, wid
             left: pos?.left ?? 0,
             top: pos?.top ?? 0,
             width,
+            // an explicit width wins over the stylesheet's 320px cap, but never the window
+            maxWidth: width === undefined ? undefined : `min(${width}px, calc(100vw - 16px))`,
             visibility: pos ? 'visible' : 'hidden',
             maxHeight: `calc(100vh - ${pos?.top ?? 0}px - 8px)`,
             overflowX: 'hidden',
@@ -99,7 +107,8 @@ export function Popover({ label, className = '', title, ariaLabel, disabled, wid
           }}
         >
           {typeof children === 'function' ? children(close) : children}
-        </div>
+        </div>,
+        document.body,
       )}
     </>
   )

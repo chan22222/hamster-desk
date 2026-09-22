@@ -93,6 +93,28 @@ export function parseColor(value: string | undefined, fallback: number): number 
   return fallback
 }
 
+/**
+ * A different individual of the same model: the newcomer that walks in after a hamster has been
+ * thrown into the sea (src/desk/grab.ts) wears the family's fur a shade off, so it reads as
+ * somebody else and not the same one climbing back out. Four steps, cycling — a darker, a lighter,
+ * a duller and a warmer coat — each far enough from the last that consecutive newcomers differ too.
+ */
+const VARIANTS: { h: number; l: number }[] = [
+  { h: 0, l: -0.11 },
+  { h: 0.02, l: 0.09 },
+  { h: -0.05, l: -0.04 },
+  { h: 0.06, l: 0.03 },
+]
+export function varyColor(color: number, variant: number): number {
+  if (!variant) return color
+  const v = VARIANTS[(variant - 1) % VARIANTS.length]
+  const c = new THREE.Color(color)
+  const hsl = { h: 0, s: 0, l: 0 }
+  c.getHSL(hsl)
+  c.setHSL((hsl.h + v.h + 1) % 1, hsl.s, Math.max(0.12, Math.min(0.94, hsl.l + v.l)))
+  return c.getHex()
+}
+
 /** Multiply a hex colour towards black (used for the tip of the tie). */
 export function darken(color: number, k: number): number {
   const r = Math.round(((color >> 16) & 0xff) * k)
@@ -116,13 +138,13 @@ const cache = new Map<string, Geos>()
 
 // Overlapping boxes are always offset by ~0.4 so two faces never land on the exact same plane —
 // coplanar faces z-fight and flicker as the camera moves (the same rule the game follows).
-function buildGeos(skin: Skin, tint: string, key: string, main: boolean): Geos {
+function buildGeos(skin: Skin, tint: string, key: string, main: boolean, variant: number): Geos {
   const hit = cache.get(key)
   if (hit) return hit
   const P: Palette = {
     ...BASE,
-    fur: parseColor(skin.colors.f, BASE.fur),
-    dark: parseColor(skin.colors.d, BASE.dark),
+    fur: varyColor(parseColor(skin.colors.f, BASE.fur), variant),
+    dark: varyColor(parseColor(skin.colors.d, BASE.dark), variant),
   }
   const tintC = parseColor(tint, 0xc98a45)
 
@@ -194,10 +216,15 @@ function suitGeo(): THREE.BufferGeometry {
   const lapel = 0x3d4a6b
   for (const sx of [-1, 1]) {
     b.box(sx * 11.0, 31, 10.9, 6.4, 26, 1.4, cloth) // front panel, x 7.8..14.2 — clear of the belly panel's ±7.5
-    b.box(sx * 14.4, 31, -0.4, 1.2, 26, 21.4, cloth) // side
+    b.box(sx * 14.4, 31, -2.35, 1.2, 26, 25.3, cloth) // side, z -15.0..10.3: the whole flank, back into the back slab
     b.box(sx * 4.7, 40.4, 11.9, 3.2, 6.4, 1.0, lapel) // lapel beside the knot (tie is x ±2)
   }
-  b.box(0, 31, -14.6, 29.6, 26, 1.2, cloth) // back, just behind the two dark bands
+  // The back is a slab, not a panel: from inside the torso's back face (-11.5) out past the two
+  // dark bands (which reach -13.7) to where the sides end, so the coat is one shell round the body.
+  // A 1.2 panel hung behind the bands left the fur and the band ends showing at both rear corners,
+  // and from a rear three-quarter view — the boss walking away on its rounds — the coat read as
+  // two side flaps with nothing behind. 25.6 tall, 0.2 short of the sides, so no top face is shared.
+  b.box(0, 31, -13.2, 29.6, 25.6, 4.2, cloth) // back, z -15.3..-11.1
   b.box(0, 44.3, 11.2, 15.4, 2.2, 1.4, lapel) // collar under the chin
   return b.build()
 }
@@ -268,11 +295,13 @@ export interface HamsterOptions {
   tint: string
   /** the session's main hamster gets a slightly bigger frame */
   main: boolean
+  /** which individual this is (0 = the first); each one after a sea throw wears the fur a shade off */
+  variant?: number
 }
 
-export function buildHamster({ skin, tint, main }: HamsterOptions, material: THREE.Material): HamsterRig {
-  const key = `${skin.family}|${skin.accessory}|${tint}|${main}`
-  const geos = buildGeos(skin, tint, key, main)
+export function buildHamster({ skin, tint, main, variant = 0 }: HamsterOptions, material: THREE.Material): HamsterRig {
+  const key = `${skin.family}|${skin.accessory}|${tint}|${main}|${variant}`
+  const geos = buildGeos(skin, tint, key, main, variant)
 
   const group = new THREE.Group()
   const mk = (geo: THREE.BufferGeometry): THREE.Mesh => {

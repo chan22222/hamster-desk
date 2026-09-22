@@ -14,6 +14,20 @@
 .acct-pill:hover { color: var(--text); border-color: var(--line-strong); }
 .acct-pill.is-on { background: var(--accent-soft); border-color: var(--accent); color: var(--text); font-weight: 500; }
 
+/* ---- the question at start: which account to work as ------------------------------------- */
+/* over the update dialog's veil, so both open at once still means this one is answered first */
+.acct-veil { z-index: 910; }
+.acct-gate { gap: 8px; }
+.acct-gate-list { display: flex; flex-direction: column; gap: 2px; }
+.acct-gate-row {
+  display: flex; align-items: center; gap: 8px; min-height: 40px; padding: 4px 8px;
+  border: 1px solid var(--line); border-radius: var(--radius); background: var(--surface);
+  text-align: left; color: var(--text-2);
+}
+.acct-gate-row:hover { background: var(--surface-2); border-color: var(--line-strong); color: var(--text); }
+.acct-gate-row:focus-visible { outline: none; border-color: var(--accent); box-shadow: 0 0 0 3px var(--accent-soft); }
+.acct-gate-row.is-on { border-color: var(--accent); }
+
 /* ---- the badge on a tab ---------------------------------------------------------------------- */
 .acct-badge {
   flex: none; max-width: 64px; padding: 0 5px; border-radius: 4px;

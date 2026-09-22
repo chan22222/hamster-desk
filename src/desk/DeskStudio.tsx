@@ -5,11 +5,14 @@ import { animFor, screenColor, statusDot, tintFor, type IsoAnim } from './anim'
 import { modelSkin } from './skins'
 import { makePatrol, patrolGoal, setPatrolMode, stepPatrol, type Patrol, type PatrolMode } from './patrol'
 import { IconHome, IconMap, IconMinus, IconPlus, IconTarget } from '../widgets/icons'
+import { Popover } from '../widgets/Popover'
+import { TranscriptList } from '../session/TranscriptList'
 import {
   OFFICE,
   FEED_RISE,
   H_OFFICE,
   SEAT_LIFT,
+  T,
   advanceWalker,
   makeWalker,
   reconcileSeats,
@@ -28,6 +31,7 @@ import {
   orbitCamera,
   overviewCamera,
   panCamera,
+  planeHit,
   PLATE_MIN_SCALE,
   viewportGroundPolygon,
   worldToScreen,
@@ -39,6 +43,8 @@ import { buildHamster, FEED_ANCHOR, MAIN_SCALE, type HamsterRig } from './vox/ha
 import { buildStudioWorld, COLS, ROWS, WATER_Y, WORLD_D, WORLD_W, type StudioWorld } from './vox/world'
 import { BOSS_DESK_W, DESK_W } from './vox/props'
 import { hangSign, setSignHot, SIGN_TIP, tickSignHover, type HungSign } from './signs'
+import { LIFT, SCRUFF, carry, fly, grab, hang, landingSpot, release, returnPath, worldToTile, type Flight, type Ground, type Held } from './grab'
+import { disposeSplash, makeSplash, tickSplash, type Splash } from './splash'
 
 const STATE_LABEL: Record<Hamster['state'], string> = {
   idle: '쉬는 중', thinking: '생각 중', reading: '읽는 중', searching: '찾는 중', writing: '작성 중',
@@ -107,6 +113,12 @@ interface Scene {
   camera: Camera
   rigs: Map<string, RigState>
   auto: AutoFrame
+  /** the hamster in the user's hand, if any (grab.ts) */
+  hold: Held | null
+  /** hamsters in the air, or in the water, after being let go (grab.ts) */
+  flights: Flight[]
+  /** how many times each hamster has gone into the sea: the one that walks in after is a different individual */
+  variants: Map<string, number>
   width: number
   height: number
 }
@@ -116,6 +128,9 @@ const makeScene = (): Scene => ({
   patrol: makePatrol(),
   camera: createCamera(),
   rigs: new Map(),
+  hold: null,
+  flights: [],
+  variants: new Map(),
   // a scene that has never been opened starts with whatever the saved preference says
   auto: { on: useDesk.getState().prefs.autoCam, key: '', target: null },
   width: 0,
@@ -139,8 +154,10 @@ interface Studio {
   /** per-session groups of hamster rigs; only the active session's group is visible */
   sessionGroups: Map<string, THREE.Group>
   deskDynamic: { screen: THREE.Mesh; keys: THREE.Mesh; lamp: THREE.Mesh; spill: THREE.Mesh }[]
-  /** the framed prints on the walls — the one thing in the room a click does something with */
+  /** the framed prints on the walls — a click on one opens its site (the hamsters are the other thing the pointer can take hold of: grab.ts) */
   signs: HungSign[]
+  /** splashes on the water (splash.ts) — ticked every frame and removed when they are over */
+  splashes: Splash[]
   minimapUrl: string
 }
 let studio: Studio | null = null
@@ -310,6 +327,7 @@ function createStudio(): Studio | null {
     sessionGroups: new Map(),
     deskDynamic,
     signs,
+    splashes: [],
     minimapUrl: minimapDataUrl(world),
   }
 }
@@ -449,6 +467,21 @@ function poseRig(st: RigState, anim: IsoAnim, seated: boolean, t: number): void 
       tieG.position.y = bodyM.position.y - bodyY
       break
     }
+    case 'struggle': {
+      // in the hand (grab.ts): held by the scruff, all four paws pedalling, the tail whipping and
+      // the head shaking — too big to be dignified, which is the point
+      const k = t * 17
+      legs[0].rotation.x = -1.6 + Math.sin(k) * 1.0
+      legs[1].rotation.x = -1.6 - Math.sin(k) * 1.0
+      legs[0].rotation.z = 0.45
+      legs[1].rotation.z = -0.45
+      legs[2].rotation.x = Math.sin(k + 1) * 0.9
+      legs[3].rotation.x = -Math.sin(k + 1) * 0.9
+      headG.rotation.x = -0.1
+      headG.rotation.z = Math.sin(t * 9) * 0.12
+      tailG.rotation.z = Math.sin(t * 14) * 0.5
+      break
+    }
     default:
       legs[0].rotation.x = -1.0
       legs[1].rotation.x = -1.0
@@ -487,7 +520,8 @@ export function DeskStudio({ session, height }: { session: SessionState | null; 
   // an external session's tab has no pty of ours to type into.
   const activeTab = useDesk((s) => s.activeTab)
   const workspaces = useDesk((s) => s.workspaces)
-  const welcomePty = workspaces.find((w) => `ws:${w.id}` === activeTab)?.ptyId ?? null
+  const welcomeWs = workspaces.find((w) => `ws:${w.id}` === activeTab) ?? null
+  const welcomePty = welcomeWs?.ptyId ?? null
   const runInShell = (cmd: string): void => {
     if (welcomePty !== null) runInTerminal(welcomePty, cmd)
   }
@@ -686,8 +720,36 @@ export function DeskStudio({ session, height }: { session: SessionState | null; 
     // `x0, y0` is where the button went down: a release within a few pixels of it is a click, and
     // the only thing in the scene a click means anything to is a print on the wall
     let drag: { id: number; x: number; y: number; x0: number; y0: number; orbit: boolean } | null = null
+    // A hamster in the hand (grab.ts): which pointer holds it, and the scene it belongs to — a tab
+    // switch mid-drag must let go of the one that was picked up, not of the new scene's nothing.
+    let grabbing: { pointer: number; scene: Scene } | null = null
     const raycaster = new THREE.Raycaster()
     const overUi = (e: Event): boolean => !!(e.target as HTMLElement).closest('[data-office-ui]')
+    const aim = (e: { clientX: number; clientY: number }, st: Studio): void => {
+      const rect = el.getBoundingClientRect()
+      const nx = ((e.clientX - rect.left) / Math.max(1, rect.width)) * 2 - 1
+      const ny = 1 - ((e.clientY - rect.top) / Math.max(1, rect.height)) * 2
+      raycaster.setFromCamera(new THREE.Vector2(nx, ny), st.camera)
+    }
+    /** the hamster under the pointer, if any: one of the rigs' meshes hit by the ray, and not one already in the air */
+    const hamsterUnder = (e: { clientX: number; clientY: number }): string | null => {
+      const st = getStudio()
+      if (!st) return null
+      const world = sceneFor()
+      const owners = new Map<THREE.Object3D, string>()
+      for (const [id, rs] of world.rigs) if (rs.rig.group.visible && !world.flights.some((f) => f.id === id)) owners.set(rs.rig.group, id)
+      if (!owners.size) return null
+      aim(e, st)
+      const hit = raycaster.intersectObjects([...owners.keys()], true)[0]
+      let o: THREE.Object3D | null = hit ? hit.object : null
+      while (o && !owners.has(o)) o = o.parent
+      return o ? owners.get(o) ?? null : null
+    }
+    /** where the pointer is on the plane the hand carries at: the scruff of a hamster hanging at LIFT */
+    const handAt = (e: { clientX: number; clientY: number }): { x: number; z: number } | null => {
+      const rect = el.getBoundingClientRect()
+      return planeHit(sceneFor().camera, e.clientX - rect.left, e.clientY - rect.top, size.current.w, size.current.h, H_OFFICE + LIFT + SCRUFF)
+    }
     /**
      * The wall print under the pointer, if any — a plane is one-sided, so nothing hits from
      * behind the wall. A name plate over it wins: plates let the pointer through (so the canvas
@@ -723,7 +785,30 @@ export function DeskStudio({ session, height }: { session: SessionState | null; 
       updateZoom()
     }
     const down = (e: PointerEvent): void => {
-      if ((e.button !== 0 && e.button !== 2) || overUi(e)) return
+      if ((e.button !== 0 && e.button !== 2) || overUi(e) || grabbing) return
+      // the left button on a hamster picks it up instead of panning (grab.ts); shift keeps the orbit
+      if (e.button === 0 && !e.shiftKey) {
+        const id = hamsterUnder(e)
+        const world = sceneFor()
+        const rs = id ? world.rigs.get(id) : undefined
+        const hand = id ? handAt(e) : null
+        if (id && rs && hand) {
+          const p = rs.rig.group.position
+          world.hold = grab(id, { x: p.x, y: p.y, z: p.z }, hand, performance.now())
+          const walker = world.walkers.get(id)
+          if (walker) {
+            walker.path = []
+            walker.moving = false
+          }
+          // the boss lifted off its rounds is not on them any more
+          if (id === 'main') world.patrol = makePatrol()
+          grabbing = { pointer: e.pointerId, scene: world }
+          hover(null)
+          el.setPointerCapture(e.pointerId)
+          setDragging(true)
+          return
+        }
+      }
       drag = { id: e.pointerId, x: e.clientX, y: e.clientY, x0: e.clientX, y0: e.clientY, orbit: e.button === 2 || e.shiftKey }
       el.style.cursor = '' // the class's grab/grabbing takes over for the drag
       hover(null)
@@ -731,6 +816,10 @@ export function DeskStudio({ session, height }: { session: SessionState | null; 
       setDragging(true)
     }
     const move = (e: PointerEvent): void => {
+      if (grabbing) {
+        if (e.pointerId === grabbing.pointer && grabbing.scene.hold) carry(grabbing.scene.hold, handAt(e), performance.now())
+        return
+      }
       if (!drag) {
         // the prints on the walls are links: the cursor says so, and the print itself answers
         // like a button — lifted, lit, captioned (signs.ts) — for as long as the pointer stays
@@ -751,6 +840,18 @@ export function DeskStudio({ session, height }: { session: SessionState | null; 
       drag.y = e.clientY
     }
     const up = (e: PointerEvent): void => {
+      if (grabbing) {
+        if (e.pointerId !== grabbing.pointer) return
+        const sc = grabbing.scene
+        grabbing = null
+        setDragging(false)
+        // let go: a drop or a throw, from wherever the hand is — grab.ts decides which
+        if (sc.hold) {
+          sc.flights.push(release(sc.hold, performance.now()))
+          sc.hold = null
+        }
+        return
+      }
       const d = drag
       drag = null
       setDragging(false)
@@ -763,7 +864,7 @@ export function DeskStudio({ session, height }: { session: SessionState | null; 
       }
     }
     const dbl = (e: MouseEvent): void => {
-      if (!overUi(e) && !signUnder(e)) focus()
+      if (!overUi(e) && !signUnder(e) && !hamsterUnder(e)) focus()
     }
     const leave = (): void => {
       el.style.cursor = ''
@@ -791,6 +892,11 @@ export function DeskStudio({ session, height }: { session: SessionState | null; 
       el.removeEventListener('dblclick', dbl)
       el.removeEventListener('contextmenu', menu)
       leave()
+      // unmounted mid-drag (the desk folded away): let go, or the hamster hangs in the air for good
+      if (grabbing?.scene.hold) {
+        grabbing.scene.flights.push(release(grabbing.scene.hold, performance.now()))
+        grabbing.scene.hold = null
+      }
     }
   }, [])
 
@@ -843,6 +949,65 @@ export function DeskStudio({ session, height }: { session: SessionState | null; 
     }
     for (const [gk, gv] of st.sessionGroups) gv.visible = gk === key
 
+    // ---- the hamster in the hand, and the ones in the air (grab.ts) -------------------------
+    // A held one eases up to carrying height; a thrown one flies until it lands (and walks home
+    // from there) or hits the water (a splash, a short sink, and a newcomer at the door). Both
+    // are pantomime: the store never hears of it. A hamster the session has since dropped is
+    // simply forgotten mid-air.
+    if (world.hold && !hams.some((h) => h.id === world.hold!.id)) world.hold = null
+    if (world.hold) hang(world.hold, dt)
+    if (world.flights.length) {
+      const ground: Ground = (x, z) => {
+        const tx = Math.floor(x / T)
+        const ty = Math.floor(z / T)
+        return st.world.land[ty]?.[tx] ? st.world.heights[ty][tx] : null
+      }
+      world.flights = world.flights.filter((f) => {
+        if (!hams.some((h) => h.id === f.id)) return false
+        const ev = fly(f, dt, ground, WATER_Y)
+        if (ev === 'splash') {
+          const splash = makeSplash(f.x, WATER_Y, f.z)
+          st.scene.add(splash.group)
+          st.splashes.push(splash)
+        } else if (ev === 'landed') {
+          // on its feet: from here it walks back to its desk (out of the furniture, if it fell on some)
+          const walker = world.walkers.get(f.id)
+          const k = world.seats.get(f.id)
+          if (walker && k !== undefined) {
+            const spot = landingSpot(worldToTile(f))
+            walker.i = spot.i
+            walker.j = spot.j
+            walker.moving = false
+            const seat = OFFICE.slots[k].seat
+            walker.target = { ...seat }
+            walker.path = returnPath(spot, seat)
+          }
+          return false
+        } else if (ev === 'gone') {
+          // in the sea: a different hamster (vox/hamster.ts `variant`) walks in through the door
+          const rs = world.rigs.get(f.id)
+          if (rs) {
+            group!.remove(rs.rig.group)
+            world.rigs.delete(f.id)
+          }
+          world.variants.set(f.id, (world.variants.get(f.id) ?? 0) + 1)
+          world.walkers.set(f.id, makeWalker(OFFICE.door))
+          return false
+        }
+        return true
+      })
+    }
+    /** hamsters not on the floor this frame: in the hand or in the air */
+    const carried = new Set<string>(world.flights.map((f) => f.id))
+    if (world.hold) carried.add(world.hold.id)
+    for (let k = st.splashes.length - 1; k >= 0; k--) {
+      const sp = st.splashes[k]
+      if (tickSplash(sp, dt)) continue
+      st.scene.remove(sp.group)
+      disposeSplash(sp)
+      st.splashes.splice(k, 1)
+    }
+
     // ---- the boss's rounds (patrol.ts) ------------------------------------------------------
     // Decided from last frame's walkers, before anybody moves this frame: who is seated and
     // working, where the boss stands, and whether it has said something real since the round
@@ -850,10 +1015,11 @@ export function DeskStudio({ session, height }: { session: SessionState | null; 
     {
       const boss = s?.hamsters.main
       const bw = world.walkers.get('main')
-      if (boss && bw) {
+      if (boss && bw && !carried.has('main')) {
         const workers: { id: string; seat: { i: number; j: number } }[] = []
         for (const h of hams) {
-          if (h.id === 'main' || !WORKING.has(h.state)) continue
+          // a colleague in the user's hand is off its chair, so a round on it is cut short
+          if (h.id === 'main' || !WORKING.has(h.state) || carried.has(h.id)) continue
           const k = world.seats.get(h.id)
           const w = world.walkers.get(h.id)
           if (k !== undefined && w && w.path.length === 0) workers.push({ id: h.id, seat: OFFICE.slots[k].seat })
@@ -891,18 +1057,26 @@ export function DeskStudio({ session, height }: { session: SessionState | null; 
         walker = makeWalker(h.state === 'arriving' ? OFFICE.door : slot.seat)
         world.walkers.set(h.id, walker)
       }
+      const held = world.hold?.id === h.id ? world.hold : null
+      const flight = held ? null : world.flights.find((f) => f.id === h.id) ?? null
+      const inHand = !!(held || flight)
       // The boss may be out on its rounds, and for those it takes the direct lanes rather than
       // the door corridor; everybody else only ever walks the corridor to a seat or the door.
-      if (h.id === 'main' && patrol.phase !== 'idle') walkDirect(walker, patrolGoal(patrol) ?? slot.seat)
-      else walkTo(walker, h.state === 'leaving' ? OFFICE.door : slot.seat)
-      advanceWalker(walker, dt)
+      // In the hand or in the air it walks nowhere: the walker waits where it was picked up until
+      // it lands, and the landing sets it down and gives it the way home (above).
+      if (!inHand) {
+        if (h.id === 'main' && patrol.phase !== 'idle') walkDirect(walker, patrolGoal(patrol) ?? slot.seat)
+        else walkTo(walker, h.state === 'leaving' ? OFFICE.door : slot.seat)
+        advanceWalker(walker, dt)
+      }
 
       const skin = modelSkin(h.model)
-      const rigKey = `${skin.family}|${skin.accessory}|${tintFor(h.agentType)}|${h.id === 'main'}`
+      const variant = world.variants.get(h.id) ?? 0
+      const rigKey = `${skin.family}|${skin.accessory}|${tintFor(h.agentType)}|${h.id === 'main'}|${variant}`
       let rs = world.rigs.get(h.id)
       if (!rs || rs.key !== rigKey) {
         if (rs) group!.remove(rs.rig.group)
-        const rig = buildHamster({ skin, tint: tintFor(h.agentType), main: h.id === 'main' }, st.hamsterMat)
+        const rig = buildHamster({ skin, tint: tintFor(h.agentType), main: h.id === 'main', variant }, st.hamsterMat)
         rs = { rig, key: rigKey, yaw: 0 }
         group!.add(rig.group)
         world.rigs.set(h.id, rs)
@@ -912,24 +1086,28 @@ export function DeskStudio({ session, height }: { session: SessionState | null; 
       // Arriving/leaving are lifecycle states. Only an actual path plays the walk cycle. The boss
       // on its rounds is out of its chair until it is back at the desk.
       const away = h.id === 'main' && bossAway(patrol, walker)
-      const seated = !walker.path.length && h.state !== 'leaving' && !away
+      const seated = !inHand && !walker.path.length && h.state !== 'leaving' && !away
       // the two halves of a telling-off override whatever the states would otherwise play
       const part: IsoAnim | null =
         h.id === 'main' ? (patrol.phase === 'scolding' ? 'scold' : null) : patrol.phase === 'scolding' && patrol.target === h.id ? 'flinch' : null
-      const anim: IsoAnim = walker.moving ? 'walk' : part ?? (['arriving', 'leaving'].includes(h.state) ? 'idle' : animFor(h.state, Date.now() - h.since))
-      const pos = tileToWorld(walker.i, walker.j)
+      const anim: IsoAnim = inHand ? 'struggle' : walker.moving ? 'walk' : part ?? (['arriving', 'leaving'].includes(h.state) ? 'idle' : animFor(h.state, Date.now() - h.since))
+      const lifted = held ?? flight
+      const pos = lifted ? { x: lifted.x, z: lifted.z } : tileToWorld(walker.i, walker.j)
       // Sitting lays the folded legs (8.4 thick, pinned at rig y 4) across the chair seat and
       // still lifts the short-legged hamster's head and arms clear of the desk top (y 40). SEAT_LIFT
       // is the most the torso can rise and still stay in the cushion through the breathing bob: its
       // underside lands at y 16.5, and ±0.8 of breath never takes it past the seat's own 18.
-      const groundY = H_OFFICE + (seated ? SEAT_LIFT : 0)
+      const groundY = lifted ? lifted.y : H_OFFICE + (seated ? SEAT_LIFT : 0)
       const scaleF = h.id === 'main' ? MAIN_SCALE : 1
       rs.rig.group.position.set(pos.x, groundY, pos.z)
       // face the way we are walking; standing still we face +z, across the desk and at the camera
-      // — unless we are the boss standing over somebody, in which case we face them
+      // — unless we are the boss standing over somebody, in which case we face them. In the hand
+      // it faces the camera squarely whatever the view: the struggle is for whoever is holding it.
       const next = walker.path[0]
       const victim = part === 'scold' && patrol.target !== null ? world.walkers.get(patrol.target) : undefined
-      const targetYaw = walker.moving && next
+      const targetYaw = inHand
+        ? c.yaw
+        : walker.moving && next
         ? Math.atan2(next.i - walker.i, next.j - walker.j)
         : victim ? Math.atan2(victim.i - walker.i, victim.j - walker.j) : 0
       let d = targetYaw - rs.yaw
@@ -937,6 +1115,14 @@ export function DeskStudio({ session, height }: { session: SessionState | null; 
       while (d < -Math.PI) d += Math.PI * 2
       rs.yaw += d * Math.min(1, dt * 8)
       rs.rig.group.rotation.y = rs.yaw
+      // dangling from the hand it swings a little; thrown hard it cartwheels the way it is going
+      // (the roll is about its own forward axis, which points at the camera); otherwise upright
+      const side = flight ? flight.vx * Math.cos(rs.yaw) - flight.vz * Math.sin(rs.yaw) : 0
+      rs.rig.group.rotation.z = held
+        ? Math.sin((t / 1000) * 5) * 0.12
+        : flight && flight.phase === 'air' && Math.hypot(flight.vx, flight.vz) > 200
+        ? Math.sign(side || 1) * flight.age * 7
+        : 0
       poseRig(rs, anim, seated && !walker.moving, t / 1000)
 
       // ---- DOM overlays ---------------------------------------------------------------------
@@ -959,7 +1145,7 @@ export function DeskStudio({ session, height }: { session: SessionState | null; 
         // The rounds are told entirely in marks: anger over the boss from the moment it gets up,
         // sweat over whoever it is standing over (with the flinch pose). Emoji, so they read at
         // a wider zoom than the thought glyphs, and the boss keeps its mark while it walks.
-        const mark = h.id === 'main' ? (patrol.phase === 'going' || patrol.phase === 'scolding' ? '💢' : null) : part === 'flinch' ? '💦' : null
+        const mark = inHand ? '💦' : h.id === 'main' ? (patrol.phase === 'going' || patrol.phase === 'scolding' ? '💢' : null) : part === 'flinch' ? '💦' : null
         const symbol = mark ?? GLYPH[anim]
         // the boss's mark goes on the far side of its head: the near side is where the colleague
         // it is standing over keeps its own feed rows
@@ -1016,7 +1202,9 @@ export function DeskStudio({ session, height }: { session: SessionState | null; 
     for (const id of world.walkers.keys()) if (!seen.has(id)) world.walkers.delete(id)
 
     // ---- automatic framing: only the hamsters that are actually here ------------------------
-    if (world.auto.on) {
+    // Not while a hamster is in the hand: the hand is a point under the pointer, so a camera easing
+    // away under it would carry off the hamster the pointer is holding still.
+    if (world.auto.on && !world.hold) {
       const pts: { x: number; z: number }[] = []
       const ids: string[] = []
       let moving = false
@@ -1026,6 +1214,13 @@ export function DeskStudio({ session, height }: { session: SessionState | null; 
         const walker = world.walkers.get(h.id)
         if (k === undefined || !walker) continue
         ids.push(h.id)
+        // a thrown one is followed through the air the way a walker is, so the splash is seen
+        const flight = world.flights.find((f) => f.id === h.id)
+        if (flight) {
+          moving = true
+          pts.push({ x: flight.x, z: flight.z })
+          continue
+        }
         // the boss out on its rounds is framed where it stands, not where its chair is — the same
         // way a colleague walking in is, so the view follows it over and back
         const away = h.id === 'main' && bossAway(patrol, walker)
@@ -1196,14 +1391,16 @@ export function DeskStudio({ session, height }: { session: SessionState | null; 
           <p>
             터미널에서 <code>claude</code>를 실행하거나<br />아래 버튼을 누르세요.
           </p>
-          {welcomePty !== null && (
+          {welcomeWs && welcomePty !== null && (
             <div className="office-welcome-actions">
               <button className="owa-run" data-debug-click="welcome-run" onClick={() => runInShell('claude')} title="이 터미널에서 claude 시작">
                 claude 실행
               </button>
-              <button onClick={() => runInShell('claude --continue')} title="이 폴더의 마지막 대화를 이어서 시작">
-                이어서 실행 <code>--continue</code>
-              </button>
+              {/* the list the session bar's `지난 대화` opens, but a pick runs in this idle terminal
+                  rather than a new tab — there is no claude here yet to keep out of the way */}
+              <Popover label="지난 대화" title="이 폴더에서 나눈 지난 대화를 이 터미널에서 이어서" ariaLabel="지난 대화" width={320} debugClick="welcome-history">
+                {(close) => <TranscriptList cwd={welcomeWs.cwd} profileId={welcomeWs.profileId} onPick={close} run={runInShell} />}
+              </Popover>
             </div>
           )}
         </div>

@@ -72,13 +72,18 @@ function rayThrough(c: Camera, sx: number, sy: number, w: number, h: number): { 
   return { pos, dir }
 }
 
-/** Where the pixel's ray meets the office deck plane, or null when it points at the sky. */
-export function groundHit(c: Camera, sx: number, sy: number, w: number, h: number): { x: number; z: number } | null {
+/** Where the pixel's ray meets the horizontal plane at height `y`, or null when it points at the sky. */
+export function planeHit(c: Camera, sx: number, sy: number, w: number, h: number, y: number): { x: number; z: number } | null {
   const { pos, dir } = rayThrough(c, sx, sy, w, h)
   if (Math.abs(dir.y) < 1e-6) return null
-  const t = (H_OFFICE - pos.y) / dir.y
+  const t = (y - pos.y) / dir.y
   if (t <= 0) return null
   return { x: pos.x + dir.x * t, z: pos.z + dir.z * t }
+}
+
+/** Where the pixel's ray meets the office deck plane, or null when it points at the sky. */
+export function groundHit(c: Camera, sx: number, sy: number, w: number, h: number): { x: number; z: number } | null {
+  return planeHit(c, sx, sy, w, h, H_OFFICE)
 }
 
 /** World point → viewport pixel. `behind` is true when the point is out of the frustum's front. */

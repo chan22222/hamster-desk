@@ -230,7 +230,10 @@ button:focus-visible, select:focus-visible, input:focus-visible { outline: 2px s
 /* where the settings actually live: quiet, but the one line that answers "where did it save?" */
 .pop-path { display: block; width: 100%; padding: 2px 6px 0; text-align: left; font-size: 11px; color: var(--text-3); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .pop-path:hover { color: var(--text-2); text-decoration: underline; }
-.pop-check { display: flex; align-items: center; gap: 8px; width: 100%; height: 32px; padding: 0 6px; border-radius: var(--radius); font-size: 13px; text-align: left; color: var(--text-2); }
+/* min-height, not height: a hint that has to wrap in a narrow window makes its row taller instead of
+   spilling over the next one (the menus are sized so that it never has to at a normal width) */
+.pop-check { display: flex; align-items: center; gap: 8px; width: 100%; min-height: 32px; padding: 3px 6px; border-radius: var(--radius); font-size: 13px; text-align: left; color: var(--text-2); }
+.pop-check .dim { text-align: right; }
 .pop-check:hover:not(:disabled) { background: var(--surface-2); color: var(--text); }
 .pop-check:disabled { opacity: 0.45; cursor: default; }
 .pop-check.is-on { color: var(--text); }
@@ -364,9 +367,14 @@ body.is-row-resizing * { cursor: row-resize !important; }
 .run-menu { gap: 6px; }
 .run-badge { padding: 0 6px 2px; }
 .run-group { display: flex; flex-direction: column; gap: 1px; }
-.run-group .pop-head { padding: 4px 6px 3px; }
-.run-row { justify-content: space-between; gap: 10px; min-height: 30px; padding: 4px 6px; }
-.run-label { flex: none; max-width: 55%; color: var(--text); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.run-group + .run-group { margin-top: 3px; padding-top: 5px; border-top: 1px solid var(--line); }
+/* A group's heading is nothing like a row: small, spaced, dim, with an accent tick in front, a
+   hairline above the next group, and the rows indented under it. Set as `.pop-head` it was 12px
+   grey over 13px black — `개발` over `개발 서버` read as two rows of one list. */
+.run-head { display: flex; align-items: center; gap: 6px; padding: 4px 6px 3px; font-size: 10.5px; font-weight: 700; letter-spacing: 0.08em; color: var(--text-3); }
+.run-head::before { content: ''; flex: none; width: 3px; height: 10px; border-radius: 2px; background: var(--accent); }
+.run-row { justify-content: space-between; gap: 10px; min-height: 30px; padding: 4px 6px 4px 15px; }
+.run-label { flex: none; max-width: 55%; color: var(--text); font-weight: 500; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .run-cmd { display: inline-flex; justify-content: flex-end; flex: 1; min-width: 0; font-family: ui-monospace, Consolas, monospace; font-size: 11px; white-space: nowrap; }
 /* a venv row's activation step is the same on every row: it gives way first, the command after it last */
 .run-cmd-step { flex: 0 100 auto; min-width: 2.5em; overflow: hidden; text-overflow: ellipsis; white-space: pre; /* keeps the space before the command */ }
@@ -484,8 +492,7 @@ body.is-row-resizing * { cursor: row-resize !important; }
 /* The card itself ignores the pointer so the canvas can be dragged through it; the buttons opt back in. */
 .office-welcome-actions { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 12px; pointer-events: auto; }
 .office-welcome-actions button { flex: 1 1 auto; min-width: 0; height: 28px; padding: 0 10px; border-radius: var(--radius); border: 1px solid var(--line-strong); background: var(--surface); color: var(--text-2); font-size: 12px; font-weight: 500; white-space: nowrap; }
-.office-welcome-actions button:hover { background: var(--surface-2); color: var(--text); }
-.office-welcome-actions button code { padding: 0 2px; background: none; color: inherit; font-size: 11px; opacity: .7; }
+.office-welcome-actions button:hover, .office-welcome-actions button.is-open { background: var(--surface-2); color: var(--text); }
 /* `--on-accent`, not #fff: the dark accent is a light orange and white on it is 2.6:1 */
 .office-welcome-actions .owa-run { background: var(--accent); border-color: transparent; color: var(--on-accent); }
 .office-welcome-actions .owa-run:hover { background: var(--accent-hover); color: var(--on-accent); }
@@ -545,6 +552,5 @@ body.is-row-resizing * { cursor: row-resize !important; }
   .office-welcome { top: 85px; width: 172px; left: 14px; padding: 13px; }
   .office-welcome-actions { gap: 5px; margin-top: 9px; }
   .office-welcome-actions button { flex-basis: 100%; height: 26px; padding: 0 8px; font-size: 11px; }
-  .office-welcome-actions button code { display: none; } /* '이어서 실행' alone still fits; the title explains --continue */
 }
 .desk-studio { container-type: inline-size; container-name: office; }

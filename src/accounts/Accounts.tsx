@@ -10,6 +10,7 @@
 //   AccountPicker   — "which account is active", at the top of the `+` menu
 //   AccountBadge    — the account's name on a tab, so two tabs of one folder can be told apart
 //   AccountsSection — add / rename / delete, in the `⋯` menu (the only one that shows with one account)
+//   AccountGate     — once per start: which account to work as, before anything else
 //
 // A tab keeps the account it was opened under for as long as it lives: the shell was started with
 // that `CLAUDE_CONFIG_DIR`, and nothing can change it afterwards. That is why adding an account
@@ -53,13 +54,21 @@ export function setCurrentAccount(id: string): void {
 const WINDOWS = typeof navigator !== 'undefined' && /Windows/i.test(navigator.userAgent)
 const LOGIN_COMMAND = WINDOWS ? 'claude auth login; if ($?) { claude }' : 'claude auth login && claude'
 
-/** A terminal of this account's own, with the login already running in it. */
-export function openLogin(profileId: string): void {
+/** the folder a terminal opened for an account goes to: the front tab's, else any tab's, else the last one used (main falls back to home when there is none) */
+function frontCwd(): string {
   const s = useDesk.getState()
   const front = s.activeTab?.startsWith('ws:') ? s.workspaces.find((w) => `ws:${w.id}` === s.activeTab) : undefined
-  // no folder at all → main falls back to the home folder
-  const cwd = front?.cwd || s.workspaces[0]?.cwd || lastCwd()
-  s.addWorkspace(cwd, undefined, undefined, profileId, LOGIN_COMMAND)
+  return front?.cwd || s.workspaces[0]?.cwd || lastCwd()
+}
+
+/** A terminal of this account's own, with the login already running in it. */
+export function openLogin(profileId: string): void {
+  useDesk.getState().addWorkspace(frontCwd(), undefined, undefined, profileId, LOGIN_COMMAND)
+}
+
+/** A plain terminal of this account's own, in the folder the front tab is in. */
+export function openTerminalUnder(profileId: string): void {
+  useDesk.getState().addWorkspace(frontCwd(), undefined, undefined, profileId)
 }
 
 /**
@@ -105,6 +114,53 @@ export function AccountPicker() {
           </button>
         ))}
       </span>
+    </div>
+  )
+}
+
+/**
+ * Once per start, over everything, when there is more than one account: which one to work as. A
+ * choice is required — there is no "later" — because a terminal opened under the wrong account is
+ * a login to the wrong place, and the pills in the `+` menu were easy to never notice. The tabs
+ * that came back from the last run are not touched: each keeps the account it was opened under.
+ */
+export function AccountGate() {
+  const profiles = useDesk((s) => s.profiles)
+  const current = useDesk((s) => s.currentProfileId)
+  // decided at mount (the list is read before the stored tabs come back): one account means no
+  // question, and an account added later in the run must not raise it then
+  const [done, setDone] = useState(() => useDesk.getState().profiles.length < 2)
+  if (done) return null
+  const pick = (id: string): void => {
+    setCurrentAccount(id)
+    setDone(true)
+  }
+  return (
+    <div className="upd-veil acct-veil">
+      <div className="upd-dialog acct-gate" role="dialog" aria-modal="true" aria-label="계정 고르기">
+        <div className="upd-title">어느 계정으로 시작할까요?</div>
+        <p className="pop-note">새 터미널이 이 계정으로 열려요. 돌아온 탭은 각자 열 때의 계정 그대로이고, 나중에 ⋯ › 계정에서 바꿀 수 있어요.</p>
+        <div className="acct-gate-list" role="group" aria-label="계정">
+          {profiles.map((p) => (
+            <button
+              key={p.id}
+              className={`acct-gate-row ${p.id === current ? 'is-on' : ''}`}
+              autoFocus={p.id === current}
+              title={p.email ? `${p.name} · ${p.email}` : p.name}
+              onClick={() => pick(p.id)}
+            >
+              <span className="pop-tick">{p.id === current && <IconCheck size={14} />}</span>
+              <span className="acct-text">
+                <span className="acct-name">
+                  <span className="acct-name-text">{p.name}</span>
+                  {p.id === current && <span className="acct-active">지난번</span>}
+                </span>
+                <span className="acct-sub">{p.email ?? '로그인 전'}</span>
+              </span>
+            </button>
+          ))}
+        </div>
+      </div>
     </div>
   )
 }
@@ -207,8 +263,14 @@ function Row({ p, current, only, onDone }: { p: Profile; current: boolean; only:
           className="acct-main"
           role="menuitemradio"
           aria-checked={current}
-          title={current ? '활성 계정: 새 터미널이 이 계정으로 열립니다' : '이 계정을 활성으로: 새 터미널이 이 계정으로 열립니다'}
-          onClick={() => setCurrentAccount(p.id)}
+          title={current ? '활성 계정 · 누르면 이 계정의 새 터미널을 엽니다' : '이 계정을 활성으로 하고, 이 계정의 새 터미널을 엽니다'}
+          onClick={() => {
+            // switching is for working as that account, so the terminal comes with it — picking the
+            // account and then finding `+` was two steps for one intention
+            setCurrentAccount(p.id)
+            openTerminalUnder(p.id)
+            onDone()
+          }}
         >
           <span className="pop-tick">{current && <IconCheck size={14} />}</span>
           <span className="acct-text">
@@ -306,7 +368,7 @@ export function AccountsSection({ onDone }: { onDone: () => void }) {
   return (
     <>
       <div className="pop-head">계정</div>
-      <p className="pop-note">새 터미널은 활성 계정으로 열려요. 이미 열린 탭은 열 때의 계정 그대로예요.</p>
+      <p className="pop-note">계정을 누르면 활성 계정이 되고 그 계정의 새 터미널이 열려요. 이미 열린 탭은 열 때의 계정 그대로예요.</p>
       {profiles.map((p) => (
         <Row key={p.id} p={p} current={p.id === current} only={profiles.length === 1} onDone={onDone} />
       ))}
