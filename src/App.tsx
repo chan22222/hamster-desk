@@ -1,10 +1,10 @@
-import { useEffect, useMemo, useRef, useState } from 'react'
+import { useEffect, useRef, useState, type ReactNode } from 'react'
 import { externalSessions, freezePrefs, hydrateUi, sessionForTab, setDebugClick, useDesk } from './store'
 import { setLang } from './i18n'
 import { DeskStudio } from './desk/DeskStudio'
 import { TerminalPane } from './Terminal'
 import { Sidebar } from './sidebar/Sidebar'
-import { rememberRecent, setLastCwd } from './sidebar/recent'
+import { baseName, rememberRecent, setLastCwd } from './sidebar/recent'
 import { UsageMeters } from './widgets/Usage'
 import { UpdatePill } from './widgets/Version'
 import { AppUpdatePill, AppUpdatePrompt } from './widgets/AppUpdate'
@@ -28,6 +28,25 @@ import { MiniShell } from './mini/MiniShell'
 /** studio size limits, shared by the splitters and their double-click reset */
 const DESK_H = { min: 220, max: 700, def: 420 }
 const DESK_W = { min: 320, max: 900, def: 520 }
+
+/**
+ * What a tab says, on two lines. The conversation title has the upper line to itself — the chips
+ * used to sit beside it and squeezed it to `예약메시지 및 5시…` on every tab. The lower line is the
+ * folder (only while a title has taken the upper line; before that the folder *is* the title) and
+ * the chips: account, context %, git, sub-agent count. Empty until there is something to say, and
+ * then the title sits alone in the middle.
+ */
+function TabText({ title, folder, children }: { title: string; folder: string | null; children: ReactNode }) {
+  return (
+    <span className="tab-text">
+      <span className="tab-label">{title}</span>
+      <span className="tab-meta">
+        {folder && <span className="tab-folder">{folder}</span>}
+        {children}
+      </span>
+    </span>
+  )
+}
 
 /** The × on a tab. A terminal with a live claude session asks first, in a popover. */
 function TabClose({ busy, onClose }: { busy: boolean; onClose: () => void }) {
@@ -164,7 +183,6 @@ export default function App() {
   // browser replay has no terminals: show the replayed session instead of an empty desk
   const active = sessionForTab(st, activeTab) ?? (!window.desk && !activeTab ? externals[0] ?? null : null)
   const activeWs = activeTab?.startsWith('ws:') ? workspaces.find((w) => `ws:${w.id}` === activeTab) ?? null : null
-  const changed = useMemo(() => new Set((active?.edits ?? []).map((e) => e.file)).size, [active?.edits])
 
   const openTerminal = (dir: string): void => {
     setLastCwd(dir)
@@ -247,11 +265,12 @@ export default function App() {
               <div key={id} className={`tab ${activeTab === id ? 'active' : ''}`}>
                 <button className="tab-main" onClick={() => setActiveTab(id)} title={w.cwd}>
                   <span className={`dot ${s ? (busy ? 'busy' : 'idle') : ''} ${waiting ? 'wait' : ''}`} />
-                  <span className="tab-label">{s?.title || w.title}</span>
-                  <AccountBadge profileId={w.profileId} />
-                  <TabContext session={s ?? null} />
-                  <TabGit cwd={w.cwd} />
-                  {n > 1 && <span className="count">🐹×{n}</span>}
+                  <TabText title={s?.title || w.title} folder={s?.title ? w.title : null}>
+                    <AccountBadge profileId={w.profileId} />
+                    <TabContext session={s ?? null} />
+                    <TabGit cwd={w.cwd} />
+                    {n > 1 && <span className="count">🐹×{n}</span>}
+                  </TabText>
                 </button>
                 <TabClose busy={!!s} onClose={() => removeWorkspace(w.id)} />
               </div>
@@ -265,10 +284,11 @@ export default function App() {
               <div key={id} className={`tab ext ${activeTab === id ? 'active' : ''}`}>
                 <button className="tab-main" onClick={() => setActiveTab(id)} title={`${s.info.cwd} (다른 터미널에서 실행 중)`}>
                   <span className={`dot ${s.info.status === 'busy' ? 'busy' : 'idle'}`} />
-                  <span className="tab-label">{s.title || s.info.name || s.info.sessionId.slice(0, 8)}</span>
-                  <AccountBadge profileId={s.info.profileId} />
-                  <TabContext session={s} />
-                  {s.order.length > 1 && <span className="count">🐹×{s.order.length}</span>}
+                  <TabText title={s.title || s.info.name || s.info.sessionId.slice(0, 8)} folder={baseName(s.info.cwd) || null}>
+                    <AccountBadge profileId={s.info.profileId} />
+                    <TabContext session={s} />
+                    {s.order.length > 1 && <span className="count">🐹×{s.order.length}</span>}
+                  </TabText>
                 </button>
               </div>
             )
@@ -276,15 +296,6 @@ export default function App() {
         </div>
         <div className="status">
           <UsageMeters />
-          {changed > 0 && (
-            <button
-              className={`pill ${prefs.showSidebar && prefs.showLog ? 'on' : ''}`}
-              onClick={() => (prefs.showSidebar && prefs.showLog ? setPrefs({ showLog: false }) : setPrefs({ showSidebar: true, showLog: true }))}
-              title="사이드바의 '바뀐 파일' 열기"
-            >
-              바뀐 파일 {changed}
-            </button>
-          )}
           <UpdatePill onUpdate={runUpdate} />
           <AppUpdatePill />
           <MoreMenu onUpdate={runUpdate} />
