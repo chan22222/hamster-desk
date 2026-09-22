@@ -1,10 +1,10 @@
 import { useEffect, useRef, useState, type ReactNode } from 'react'
-import { externalSessions, freezePrefs, hydrateUi, sessionForTab, setDebugClick, useDesk } from './store'
+import { externalSessions, freezePrefs, hydrateUi, runInTerminal, sessionForTab, setDebugClick, useDesk } from './store'
 import { setLang } from './i18n'
 import { DeskStudio } from './desk/DeskStudio'
 import { TerminalPane } from './Terminal'
 import { Sidebar } from './sidebar/Sidebar'
-import { baseName, rememberRecent, setLastCwd } from './sidebar/recent'
+import { baseName, cdCommand, rememberRecent, setLastCwd } from './sidebar/recent'
 import { UsageMeters } from './widgets/Usage'
 import { UpdatePill } from './widgets/Version'
 import { AppUpdatePill, AppUpdatePrompt } from './widgets/AppUpdate'
@@ -83,6 +83,7 @@ export default function App() {
   const activeTab = useDesk((s) => s.activeTab)
   const setActiveTab = useDesk((s) => s.setActiveTab)
   const addWorkspace = useDesk((s) => s.addWorkspace)
+  const moveWorkspace = useDesk((s) => s.moveWorkspace)
   const removeWorkspace = useDesk((s) => s.removeWorkspace)
   const ptyWaiting = useDesk((s) => s.ptyWaiting)
   const prefs = useDesk((s) => s.prefs)
@@ -191,6 +192,21 @@ export default function App() {
     setLastCwd(dir)
     rememberRecent(dir)
     addWorkspace(dir)
+  }
+
+  /**
+   * The sidebar's `터미널 이동`: the terminal in front changes to that folder — a `cd` typed into
+   * it, and the tab moved with it (its name, its git chip, the explorer following). Only a shell
+   * with no claude in it: typed into claude, the `cd` would be a prompt. A session is dropped the
+   * moment claude exits (`session_gone`), so "there is a session for this tab" is exactly that.
+   */
+  const moveWhy = !activeWs || activeWs.ptyId === null ? '앞에 열린 터미널이 없어요' : active ? 'claude 가 실행 중인 터미널은 옮길 수 없어요. 새 탭으로 여세요.' : null
+  const moveTerminal = (dir: string): void => {
+    if (!activeWs || activeWs.ptyId === null || active) return
+    setLastCwd(dir)
+    rememberRecent(dir)
+    runInTerminal(activeWs.ptyId, cdCommand(dir))
+    moveWorkspace(activeWs.id, dir)
   }
 
   /**
@@ -317,7 +333,7 @@ export default function App() {
         </div>
       </header>
       <div className="body">
-        {prefs.showSidebar && <Sidebar start={activeWs?.cwd ?? workspaces[0]?.cwd ?? ''} session={active} onOpen={openTerminal} onRun={runInFolder} />}
+        {prefs.showSidebar && <Sidebar start={activeWs?.cwd ?? workspaces[0]?.cwd ?? ''} session={active} onOpen={openTerminal} onMove={moveTerminal} moveWhy={moveWhy} onRun={runInFolder} />}
         <div ref={colRef} className={`column ${beside ? 'is-beside' : ''}`} style={{ ['--desk-w' as string]: `${prefs.deskW}px` }}>
           <Banner />
           {!mini && !prefs.folded && !beside && (

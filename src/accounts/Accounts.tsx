@@ -72,6 +72,75 @@ export function openTerminalUnder(profileId: string): void {
 }
 
 /**
+ * Add an account by name: it becomes current and its login terminal opens. False when main did
+ * not add one (the list on screen is then whatever main last confirmed).
+ */
+export async function addAccount(name: string): Promise<boolean> {
+  const bridge = window.desk
+  if (!bridge) return false
+  try {
+    const before = new Set(useDesk.getState().profiles.map((p) => p.id))
+    const state = await bridge.profiles.add(name)
+    const added = state.list.find((p) => !before.has(p.id))
+    if (!added) {
+      useDesk.getState().setProfiles(state)
+      return false
+    }
+    useDesk.getState().setProfiles(await bridge.profiles.setCurrent(added.id))
+    openLogin(added.id)
+    return true
+  } catch {
+    return false
+  }
+}
+
+/** `계정 추가`: a name, and the rest happens by itself (`addAccount`); `onAdded` runs once it has. */
+function AddAccount({ onAdded }: { onAdded: () => void }) {
+  const [adding, setAdding] = useState(false)
+  const [name, setName] = useState('')
+  const add = (): void => {
+    const n = name.trim()
+    setAdding(false)
+    setName('')
+    void addAccount(n).then((ok) => ok && onAdded())
+  }
+  if (!adding) {
+    return (
+      <button className="pop-item" onClick={() => setAdding(true)}>
+        <span className="pop-item-ico">
+          <IconPlus size={14} />
+        </span>
+        <span className="pop-item-text">계정 추가</span>
+      </button>
+    )
+  }
+  return (
+    <div className="acct-add">
+      <input
+        className="acct-name-input"
+        value={name}
+        autoFocus
+        maxLength={24}
+        placeholder="계정 이름 (예: 회사)"
+        aria-label="새 계정 이름"
+        onChange={(e) => setName(e.target.value)}
+        onKeyDown={(e) => {
+          e.stopPropagation()
+          if (e.key === 'Enter') add()
+          if (e.key === 'Escape') {
+            setAdding(false)
+            setName('')
+          }
+        }}
+      />
+      <button className="acct-btn is-primary" onClick={add}>
+        추가 후 로그인
+      </button>
+    </div>
+  )
+}
+
+/**
  * Keep the emails honest without polling: an account that shows no login yet is looked up again
  * whenever one of its sessions appears or changes — which is exactly what a finished login leads to.
  */
@@ -119,47 +188,74 @@ export function AccountPicker() {
 }
 
 /**
- * Once per start, over everything, when there is more than one account: which one to work as. A
- * choice is required — there is no "later" — because a terminal opened under the wrong account is
- * a login to the wrong place, and the pills in the `+` menu were easy to never notice. The tabs
- * that came back from the last run are not touched: each keeps the account it was opened under.
+ * Once per start, over everything: which account to work as. It asks when there is more than one
+ * account, and when the only one has no login yet (a fresh install) — the way in is then the
+ * `로그인` button, or `계정 추가`, or starting as is. A choice is required — there is no "later" —
+ * because a terminal opened under the wrong account is a login to the wrong place, and the pills
+ * in the `+` menu were easy to never notice. The tabs that came back from the last run are not
+ * touched: each keeps the account it was opened under. The rows are the accounts list's own.
  */
 export function AccountGate() {
   const profiles = useDesk((s) => s.profiles)
   const current = useDesk((s) => s.currentProfileId)
-  // decided at mount (the list is read before the stored tabs come back): one account means no
-  // question, and an account added later in the run must not raise it then
-  const [done, setDone] = useState(() => useDesk.getState().profiles.length < 2)
+  // decided at mount (the list is read before the stored tabs come back): one logged-in account
+  // means no question, and an account added later in the run must not raise it then
+  const [done, setDone] = useState(() => {
+    const p = useDesk.getState().profiles
+    return p.length < 2 && !!p[0]?.email
+  })
   if (done) return null
+  /** the only account, and it has no login: the question is whether to log in first */
+  const fresh = profiles.length < 2
   const pick = (id: string): void => {
     setCurrentAccount(id)
+    setDone(true)
+  }
+  const login = (id: string): void => {
+    setCurrentAccount(id)
+    openLogin(id)
     setDone(true)
   }
   return (
     <div className="upd-veil acct-veil">
       <div className="upd-dialog acct-gate" role="dialog" aria-modal="true" aria-label="계정 고르기">
-        <div className="upd-title">어느 계정으로 시작할까요?</div>
-        <p className="pop-note">새 터미널이 이 계정으로 열려요. 돌아온 탭은 각자 열 때의 계정 그대로이고, 나중에 ⋯ › 계정에서 바꿀 수 있어요.</p>
+        <div className="upd-title">{fresh ? '먼저 로그인할까요?' : '어느 계정으로 시작할까요?'}</div>
+        <p className="pop-note">
+          {fresh
+            ? '아직 로그인한 계정이 없어요. 로그인을 누르면 이 계정의 터미널에서 브라우저 로그인이 열리고, 끝나면 claude 가 이어서 떠요. 그냥 시작해도 돼요.'
+            : '새 터미널이 이 계정으로 열려요. 돌아온 탭은 각자 열 때의 계정 그대로이고, 나중에 ⋯ › 계정에서 바꿀 수 있어요.'}
+        </p>
         <div className="acct-gate-list" role="group" aria-label="계정">
-          {profiles.map((p) => (
-            <button
-              key={p.id}
-              className={`acct-gate-row ${p.id === current ? 'is-on' : ''}`}
-              autoFocus={p.id === current}
-              title={p.email ? `${p.name} · ${p.email}` : p.name}
-              onClick={() => pick(p.id)}
-            >
-              <span className="pop-tick">{p.id === current && <IconCheck size={14} />}</span>
-              <span className="acct-text">
-                <span className="acct-name">
-                  <span className="acct-name-text">{p.name}</span>
-                  {p.id === current && <span className="acct-active">지난번</span>}
-                </span>
-                <span className="acct-sub">{p.email ?? '로그인 전'}</span>
-              </span>
-            </button>
-          ))}
+          {profiles.map((p) => {
+            const on = p.id === current
+            return (
+              <div key={p.id} className={`acct-row ${on ? 'is-on' : ''}`}>
+                <button
+                  className="acct-main"
+                  // Enter goes to the login when the remembered account has none, to the account otherwise
+                  autoFocus={on && !!p.email}
+                  title={p.email ? `${p.name} · ${p.email}` : `${p.name} · 로그인 전 — 이대로 시작`}
+                  onClick={() => pick(p.id)}
+                >
+                  <span className="pop-tick">{on && <IconCheck size={14} />}</span>
+                  <span className="acct-text">
+                    <span className="acct-name">
+                      <span className="acct-name-text">{p.name}</span>
+                      {on && !fresh && <span className="acct-active">지난번</span>}
+                    </span>
+                    <span className="acct-sub">{p.email ?? '로그인 전'}</span>
+                  </span>
+                </button>
+                {!p.email && (
+                  <button className="acct-btn is-primary acct-login" autoFocus={on} title="이 계정의 터미널을 열고 로그인을 시작합니다" onClick={() => login(p.id)}>
+                    로그인
+                  </button>
+                )}
+              </div>
+            )
+          })}
         </div>
+        <AddAccount onAdded={() => setDone(true)} />
       </div>
     </div>
   )
@@ -335,35 +431,8 @@ export function AccountsSection({ onDone }: { onDone: () => void }) {
   const profiles = useDesk((s) => s.profiles)
   const current = useDesk((s) => s.currentProfileId)
   const cliHidden = useDesk((s) => s.cliAccountHidden)
-  const [adding, setAdding] = useState(false)
-  const [name, setName] = useState('')
   // a login that finished since the list was last read shows up as soon as the menu opens
   useEffect(refreshAccounts, [])
-
-  /** Name it, and the rest happens by itself: the account becomes current and its login opens. */
-  const add = (): void => {
-    const n = name.trim()
-    setAdding(false)
-    setName('')
-    const bridge = window.desk
-    if (!bridge) return
-    void (async () => {
-      try {
-        const before = new Set(useDesk.getState().profiles.map((p) => p.id))
-        const state = await bridge.profiles.add(n)
-        const added = state.list.find((p) => !before.has(p.id))
-        if (!added) {
-          useDesk.getState().setProfiles(state)
-          return
-        }
-        useDesk.getState().setProfiles(await bridge.profiles.setCurrent(added.id))
-        openLogin(added.id)
-        onDone()
-      } catch {
-        /* the list on screen is still the last one main confirmed */
-      }
-    })()
-  }
 
   return (
     <>
@@ -372,38 +441,9 @@ export function AccountsSection({ onDone }: { onDone: () => void }) {
       {profiles.map((p) => (
         <Row key={p.id} p={p} current={p.id === current} only={profiles.length === 1} onDone={onDone} />
       ))}
-      {adding ? (
-        <div className="acct-add">
-          <input
-            className="acct-name-input"
-            value={name}
-            autoFocus
-            maxLength={24}
-            placeholder="계정 이름 (예: 회사)"
-            aria-label="새 계정 이름"
-            onChange={(e) => setName(e.target.value)}
-            onKeyDown={(e) => {
-              e.stopPropagation()
-              if (e.key === 'Enter') add()
-              if (e.key === 'Escape') {
-                setAdding(false)
-                setName('')
-              }
-            }}
-          />
-          <button className="acct-btn is-primary" onClick={add}>
-            추가 후 로그인
-          </button>
-        </div>
-      ) : (
-        <button className="pop-item" onClick={() => setAdding(true)}>
-          <span className="pop-item-ico">
-            <IconPlus size={14} />
-          </span>
-          <span className="pop-item-text">계정 추가</span>
-        </button>
-      )}
-      {cliHidden && !adding && (
+      {/* name it, and the rest happens by itself: the account becomes current and its login opens */}
+      <AddAccount onAdded={onDone} />
+      {cliHidden && (
         <button className="pop-item" title="목록에서 뺐던 ~/.claude 계정을 다시 보이게 합니다" onClick={() => void change((b) => b.showDefault())}>
           <span className="pop-item-ico">
             <IconFolder size={14} />

@@ -273,6 +273,8 @@ interface DeskStore {
   cliAccountHidden: boolean
   setProfiles(state: ProfilesState): void
   bindWorkspacePty(id: number, ptyId: number, cwd: string): void
+  /** the terminal was sent to another folder (a `cd` typed into it): the tab follows — folder, name, git chip, the explorer */
+  moveWorkspace(id: number, cwd: string): void
   removeWorkspace(id: number): void
   setPrefs(p: Partial<Prefs>): void
   /** the user clicked one row of a hamster's feed: drop just that row */
@@ -823,6 +825,12 @@ export const useDesk = create<DeskStore>((set, get) => {
     bindWorkspacePty(id, ptyId, cwd) {
       set({
         workspaces: get().workspaces.map((w) => (w.id === id ? { ...w, ptyId, cwd, title: w.initialCommand ? w.title : baseName(cwd) || w.title } : w)),
+      })
+    },
+    moveWorkspace(id, cwd) {
+      if (!get().workspaces.some((w) => w.id === id && w.cwd !== cwd)) return // the same folder: nothing to rename or save
+      set({
+        workspaces: get().workspaces.map((w) => (w.id === id ? { ...w, cwd, title: w.initialCommand ? w.title : baseName(cwd) || w.title } : w)),
       })
     },
     removeWorkspace(id) {

@@ -104,6 +104,19 @@ export function explorerDir(activeCwd: string | null | undefined, last: string, 
 }
 
 /** Favourites first, then newest. Starred folders that were never opened here still show up. */
+/** whether the shells the terminals run are Windows ones (pwsh / powershell): the quoting differs */
+const WINDOWS_SHELL = typeof navigator !== 'undefined' && /Windows/i.test(navigator.userAgent)
+
+/**
+ * The line the sidebar's `터미널 이동` types into the terminal in front. Single-quoted, so spaces
+ * and `$` are literal in either shell; a quote inside the path is doubled for PowerShell and
+ * closed-escaped-reopened for a POSIX shell. `-LiteralPath`, because Set-Location would otherwise
+ * read `[` and `]` in a folder name as a wildcard.
+ */
+export function cdCommand(dir: string, windows = WINDOWS_SHELL): string {
+  return windows ? `Set-Location -LiteralPath '${dir.replace(/'/g, "''")}'` : `cd '${dir.replace(/'/g, "'\\''")}'`
+}
+
 export function recentEntries(limit = MAX_RECENT): RecentEntry[] {
   const favs = favDirs()
   const byKey = new Map<string, RecentEntry>()

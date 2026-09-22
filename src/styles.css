@@ -203,8 +203,10 @@ button:focus-visible, select:focus-visible, input:focus-visible { outline: 2px s
 .pop-usage button { flex: none; padding: 3px 7px; border-radius: var(--radius); border: 1px solid var(--line-strong); color: var(--text-2); font-size: 11px; }
 .pop-usage button:hover { color: var(--text); background: var(--surface-2); }
 .pop-line { font-size: 13px; color: var(--text); }
-/* the update dialog: once per start, over everything, because a pill in a corner is easy to never see */
-.upd-veil { position: fixed; inset: 0; z-index: 900; display: flex; align-items: flex-start; justify-content: center; padding-top: 12vh; background: rgba(0, 0, 0, 0.32); }
+/* the update dialog: once per start, over everything, because a pill in a corner is easy to never
+   see. Centred, like the account question that shares this frame (accounts.css) — it used to sit
+   12vh from the top, which read as off-centre rather than as a deliberate place */
+.upd-veil { position: fixed; inset: 0; z-index: 900; display: flex; align-items: center; justify-content: center; background: rgba(0, 0, 0, 0.32); }
 .upd-dialog { width: 340px; max-width: calc(100vw - 32px); padding: 14px; display: flex; flex-direction: column; gap: 10px; background: var(--surface); border: 1px solid var(--line-strong); border-radius: var(--radius-lg); box-shadow: 0 18px 48px rgba(0, 0, 0, 0.28); }
 .upd-title { font-size: 15px; font-weight: 700; color: var(--text); }
 .upd-later { align-self: stretch; }
@@ -348,8 +350,12 @@ body.is-row-resizing * { cursor: row-resize !important; }
 .crumb { padding: 2px 4px; border-radius: 4px; color: var(--text-2); font-size: 11px; }
 .crumb:hover { background: var(--surface-2); color: var(--text); }
 .side-actions { display: flex; gap: 4px; padding: 6px 8px 10px; }
-.side-primary { flex: 1; min-width: 0; height: 30px; padding: 0 9px; border-radius: var(--radius); background: var(--accent); color: var(--on-accent); font-size: 12px; font-weight: 500; text-align: left; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.side-primary:hover { background: var(--accent-hover); }
+.side-primary { flex: 1; min-width: 0; height: 30px; padding: 0 8px; border-radius: var(--radius); background: var(--accent); color: var(--on-accent); font-size: 12px; font-weight: 500; text-align: center; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.side-primary:hover:not(:disabled) { background: var(--accent-hover); }
+.side-primary:disabled { opacity: 0.45; cursor: default; }
+/* `터미널 새 탭` beside it: the same shape in the icon buttons' quiet colours */
+.side-second { flex: 1; min-width: 0; height: 30px; padding: 0 8px; border-radius: var(--radius); border: 1px solid var(--line); background: var(--surface); color: var(--text-2); font-size: 12px; font-weight: 500; text-align: center; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.side-second:hover { background: var(--surface-2); border-color: var(--line-strong); color: var(--text); }
 .side-mini { display: inline-flex; align-items: center; justify-content: center; width: 28px; height: 30px; flex: none; border-radius: var(--radius); border: 1px solid var(--line); background: var(--surface); color: var(--text-2); }
 .side-mini:hover:not(:disabled) { background: var(--surface-2); border-color: var(--line-strong); color: var(--text); }
 .side-mini:disabled { opacity: 0.4; cursor: default; }

@@ -81,7 +81,8 @@ function splitCommand(command: string): [string, string] {
 /**
  * `실행 ▾`: the commands the current folder takes, by what it is (electron/project-actions.ts). One
  * pill under the actions row rather than a fourth button in it — at the default sidebar width the
- * row has 16px to spare, and `여기서 터미널 열기` would have lost its tail. The pill names what was
+ * row has nothing to spare (two text buttons and three icons), and `터미널 새 탭` would have lost
+ * its tail. The pill names what was
  * found (`Node · pnpm · Vite`), so a folder's kind shows without opening anything; the menu repeats
  * it above the groups, and each row is the label with the exact command to be typed on the right.
  */
@@ -239,8 +240,9 @@ function Section({
  * used to sit on top; they moved to the `+` menu, where you are actually starting something.
  *
  * `start` is the folder of the terminal in front ('' while there is none), and the browser follows
- * it: a terminal opened through the folder picker, a recent project, a favourite, `여기서 터미널
- * 열기` or a double-clicked folder moves the browser there, and so does switching to a tab of
+ * it: a terminal opened through the folder picker, a recent project, a favourite, `터미널 새 탭`
+ * or a double-clicked folder moves the browser there — `터미널 이동` too, since it changes the
+ * tab's folder — and so does switching to a tab of
  * another folder. It used to read `start` once, when it mounted — and it mounts with the start
  * card, before any tab exists, so `start` was '' and the listing of '' is the process's working
  * directory: the install folder of the packaged app, the repository of `npx electron .`. The
@@ -252,11 +254,18 @@ export function Sidebar({
   start,
   session,
   onOpen,
+  onMove,
+  moveWhy,
   onRun,
 }: {
   start: string
   session: SessionState | null
+  /** `터미널 새 탭`: a terminal of the folder's own */
   onOpen: (dir: string) => void
+  /** `터미널 이동`: the terminal in front goes to the folder (App types the `cd` and moves the tab with it) */
+  onMove: (dir: string) => void
+  /** why the move is not possible right now (no terminal in front, claude running in it), or null */
+  moveWhy: string | null
   onRun?: (dir: string, command: string) => void
 }) {
   const prefs = useDesk((s) => s.prefs)
@@ -426,8 +435,15 @@ export function Sidebar({
         </div>
 
         <div className="side-actions">
-          <button className="side-primary" onClick={() => onOpen(cur)} title={cur}>
-            여기서 터미널 열기
+          {/* `터미널 이동`: the terminal in front goes to this folder (a `cd`, and the tab follows);
+              `터미널 새 탭`: a terminal of the folder's own. The move is the accent one — it is what
+              the browser is mostly for — and the one that is sometimes not possible (a shell with
+              claude running in it), which its title then says. */}
+          <button className="side-primary" onClick={() => onMove(cur)} disabled={!!moveWhy} title={moveWhy ?? `${cur}\n앞에 있는 터미널을 이 폴더로 옮겨요 (cd)`}>
+            터미널 이동
+          </button>
+          <button className="side-second" onClick={() => onOpen(cur)} title={`${cur}\n이 폴더의 터미널을 새 탭으로 열어요`}>
+            터미널 새 탭
           </button>
           <button className="side-mini" onClick={() => listing?.parent && void go(listing.parent)} disabled={!listing?.parent} title="상위 폴더" aria-label="상위 폴더">
             <IconChevron dir="up" size={14} />
