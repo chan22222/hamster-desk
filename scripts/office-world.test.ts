@@ -6,7 +6,7 @@ import { FEED_LINE_PX, FRAME_MAX_SCALE, FRAME_MIN_SCALE, FRAME_PAD, HEADER_PAD, 
 import { HAMSTER_H, LEG_Y, buildHamster } from '../src/desk/vox/hamster'
 import { voxMaterial } from '../src/desk/vox/material'
 import { WHITEBOARDS, WINDOWS, buildStudioWorld, COLS, ROWS } from '../src/desk/vox/world'
-import { SIGN_H, SIGN_W } from '../src/desk/vox/props'
+import { SIGN_H, SIGN_L_H, SIGN_L_W, SIGN_W } from '../src/desk/vox/props'
 import { modelSkin } from '../src/desk/skins'
 import { tintFor } from '../src/desk/anim'
 
@@ -413,31 +413,65 @@ test('the island is deterministic, keeps the office on its deck and the trees ou
   assert.equal(a.mapColors[0].length, COLS)
 })
 
-test('the Spritfy print hangs on the north wall, in a bay of its own, clear of the windows and whiteboards', () => {
+test('the Spritfy prints hang on the north and west walls, each in a bay of its own, clear of everything else on the wall', () => {
   const world = buildStudioWorld()
-  assert.equal(world.signs.length, 1)
-  const s = world.signs[0]
-  assert.equal(s.id, 'spritfy')
-  assert.equal(s.rot, 0, 'a north-wall piece faces +z')
-  assert.deepEqual([s.w, s.h], [SIGN_W, SIGN_H])
-  // just in front of the plaster's inner face (OZ0 + 12), like every other wall piece
-  const wallFace = OFFICE_TILE.j * T + 12
-  assert.ok(s.z > wallFace && s.z < wallFace + 3, `the print floats ${s.z - wallFace} in front of the wall`)
-  // inside the room's width, above the wainscot (deck + 40) and under the trim (deck + 114)
+  assert.equal(world.signs.length, 2)
   const x0 = OFFICE_TILE.i * T, x1 = (OFFICE_TILE.i + OFFICE.W) * T
-  assert.ok(s.x - s.w / 2 > x0 + 12 && s.x + s.w / 2 < x1, `the print leaves the wall: ${s.x} ± ${s.w / 2}`)
-  assert.ok(s.y - s.h / 2 - 3 > H_OFFICE + 40, `the frame reaches into the wainscot: bottom at ${s.y - s.h / 2 - 3}`)
-  assert.ok(s.y + s.h / 2 + 3 <= H_OFFICE + 114, `the frame reaches into the trim: top at ${s.y + s.h / 2 + 3}`)
+  const z0 = OFFICE_TILE.j * T, z1 = (OFFICE_TILE.j + OFFICE.D) * T
+  const deck = H_OFFICE
+  for (const s of world.signs) {
+    // under the trim (deck + 114), and hung on a wall — just in front of the plaster's inner face
+    // (12 in from the deck's edge), like every other wall piece: never standing in the room, so
+    // never on a seat, a lane or the corridor
+    assert.ok(s.y + s.h / 2 + 3 <= deck + 114, `${s.id}: the frame reaches into the trim, top at ${s.y + s.h / 2 + 3}`)
+    if (s.rot === 0) assert.ok(s.z > z0 + 12 && s.z < z0 + 15, `${s.id}: floats ${s.z - z0 - 12} in front of the north wall`)
+    else if (s.rot === 1) assert.ok(s.x > x0 + 12 && s.x < x0 + 15, `${s.id}: floats ${s.x - x0 - 12} in front of the west wall`)
+    else assert.fail(`${s.id}: the room has only a north and a west wall (rot ${s.rot})`)
+  }
+
+  // ---- north: between the second window and the second whiteboard, east of the boss ----------
+  const n = world.signs.find((s) => s.id === 'spritfy-north')!
+  assert.ok(n)
+  assert.equal(n.rot, 0, 'a north-wall piece faces +z')
+  assert.deepEqual([n.w, n.h], [SIGN_W, SIGN_H])
+  // inside the room's width and above the wainscot (deck + 40)
+  assert.ok(n.x - n.w / 2 > x0 + 12 && n.x + n.w / 2 < x1, `the print leaves the wall: ${n.x} ± ${n.w / 2}`)
+  assert.ok(n.y - n.h / 2 - 3 > deck + 40, `the frame reaches into the wainscot: bottom at ${n.y - n.h / 2 - 3}`)
   // and its frame (3 wide) shares no wall with a window (frame 130 wide) or a whiteboard (122 wide)
-  const left = s.x - s.w / 2 - 3, right = s.x + s.w / 2 + 3
-  const fixtures = [
+  const nLeft = n.x - n.w / 2 - 3, nRight = n.x + n.w / 2 + 3
+  const northFixtures = [
     ...WINDOWS.map((i) => ({ at: (OFFICE_TILE.i + i + 1) * T, half: 65, what: 'window' })),
     ...WHITEBOARDS.map((i) => ({ at: (OFFICE_TILE.i + i + 1) * T, half: 61, what: 'whiteboard' })),
   ]
-  for (const f of fixtures) {
-    assert.ok(right < f.at - f.half || left > f.at + f.half, `the print overlaps the ${f.what} at ${f.at}`)
+  for (const f of northFixtures) {
+    assert.ok(nRight < f.at - f.half || nLeft > f.at + f.half, `the print overlaps the ${f.what} at ${f.at}`)
   }
   // east of the boss's desk, not behind it: that bay is where the main hamster's bubbles stack
   const boss = tileToWorld(OFFICE.slots[0].seat.i, OFFICE.slots[0].seat.j)
-  assert.ok(left > boss.x + 80, `the print hangs over the boss's desk (left edge ${left}, seat ${boss.x})`)
+  assert.ok(nLeft > boss.x + 80, `the print hangs over the boss's desk (left edge ${nLeft}, seat ${boss.x})`)
+
+  // ---- west: the bigger one, between the door and the poster below it ------------------------
+  const w = world.signs.find((s) => s.id === 'spritfy-west')!
+  assert.ok(w)
+  assert.equal(w.rot, 1, 'a west-wall piece faces +x')
+  assert.deepEqual([w.w, w.h], [SIGN_L_W, SIGN_L_H])
+  assert.ok(w.w > n.w && w.h > n.h, 'the west print is the larger of the two')
+  assert.ok(w.z - w.w / 2 > z0 + 12 && w.z + w.w / 2 < z1, `the print leaves the wall: ${w.z} ± ${w.w / 2}`)
+  assert.ok(w.y - w.h / 2 - 3 > deck + 12, `the frame reaches the floor: bottom at ${w.y - w.h / 2 - 3}`)
+  // its frame shares no wall with the door (jambs 80 apart), the posters (44 wide), the clock
+  // (30) or the bookshelf (120 deep, 96 tall, against this wall) — the wall's other fixtures
+  const wLeft = w.z - w.w / 2 - 3, wRight = w.z + w.w / 2 + 3
+  const westFixtures = [
+    { at: tileToWorld(0, OFFICE.door.j).z, half: 40, what: 'door' },
+    ...[4.8, 12, 16].map((j) => ({ at: tileToWorld(0, j).z, half: 22, what: `poster at ${j}` })),
+    { at: tileToWorld(0, 2.6).z, half: 15, what: 'clock' },
+    { at: tileToWorld(0, 1.8).z, half: 60, what: 'bookshelf' },
+  ]
+  for (const f of westFixtures) {
+    assert.ok(wRight < f.at - f.half || wLeft > f.at + f.half, `the print overlaps the ${f.what} at ${f.at}`)
+  }
+  // on the wall, it is a clear tile away from the corridor (i 0.5) that every colleague walks in
+  // along and from the lobby where the ones without a desk wait
+  const corridor = tileToWorld(0.5, 0).x
+  assert.ok(w.x + 3 < corridor - 20, `the print reaches into the corridor: front at ${w.x + 3}, lane at ${corridor}`)
 })

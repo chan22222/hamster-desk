@@ -177,6 +177,17 @@ app.whenReady().then(async () => {
     await studio("patrol('off')")
     await studio('feedLife({ act: 3000, say: 9000, warn: 12000 })')
 
+    // 12. the west-wall Spritfy print, the larger of the two, seen from the corridor a colleague
+    // walks in along — and with the pointer held over it: the picture lifted out of its frame,
+    // lit from within, with the caption under it. `hoverSign` stands in for the pointer, which an
+    // offscreen window cannot move.
+    await studio('focus({ i: 1.6, j: 8.6 }, 2.2)')
+    await shot('sign-west')
+    await studio('hoverSign(1)')
+    await wait(200) // the 120 ms ease, and a little
+    await shot('sign-hover')
+    await studio('hoverSign(null)')
+
     if (errors.length) {
       console.error('renderer errors:')
       for (const e of errors) console.error('  ' + e)

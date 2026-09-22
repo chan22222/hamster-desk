@@ -7,7 +7,7 @@
 // the DOM, so the node test can build the whole world and measure it.
 import * as THREE from 'three'
 import { VoxBuilder, W1, S3, type BoxOpt, type BoxSink, type HideFaces } from './builder'
-import { PROPS, DESK_PARTS, BOSS_DESK_PARTS, SIGN_H, SIGN_W, type LocalBox } from './props'
+import { PROPS, DESK_PARTS, BOSS_DESK_PARTS, SIGN_H, SIGN_L_H, SIGN_L_W, SIGN_W, type LocalBox } from './props'
 import { OFFICE, OFFICE_TILE, H_OFFICE, T, tileToWorld } from '../office-world'
 
 export const COLS = 40
@@ -31,7 +31,7 @@ export type WorldBox = LocalBox
  * the room the world builder cannot make, because it needs an Image and a Material.
  */
 export interface WallSign {
-  id: 'spritfy'
+  id: 'spritfy-north' | 'spritfy-west'
   /** centre of the picture surface, already offset in front of the frame's backing */
   x: number
   y: number
@@ -333,7 +333,20 @@ export function buildStudioWorld(): StudioWorld {
   const signX = (OFFICE_TILE.i + 14) * T
   const signY = deck + 78
   put('signFrame', signX, WALL_IN_Z, signY, 0)
-  const signs: WallSign[] = [{ id: 'spritfy', x: signX, y: signY, z: WALL_IN_Z + 0.85, w: SIGN_W, h: SIGN_H, rot: 0 }]
+  // The second print, larger, on the west wall between the door and the poster at j 12 — the
+  // one stretch of that wall with nothing hung on it. The close-up on a lone boss never shows the
+  // west wall at all, but every wider framing does, on the left: colleagues at 117 % and 84 %, and
+  // the corridor a new colleague walks in along. Seen from further away than the north print, it
+  // is a size up (1.4×), with its top on the same line as the window heads; the cooler and the
+  // plant standing in front of this bay only ever cover the wainscot below it from this camera,
+  // and the corridor and the lobby are a tile out from the wall.
+  const signWZ = tileToWorld(0, 9.4).z
+  const signWY = deck + 111 - 3 - SIGN_L_H / 2
+  put('signFrameL', WALL_IN_X, signWZ, signWY, 1)
+  const signs: WallSign[] = [
+    { id: 'spritfy-north', x: signX, y: signY, z: WALL_IN_Z + 0.85, w: SIGN_W, h: SIGN_H, rot: 0 },
+    { id: 'spritfy-west', x: WALL_IN_X + 0.85, y: signWY, z: signWZ, w: SIGN_L_W, h: SIGN_L_H, rot: 1 },
+  ]
 
   // desks, chairs, rugs — slot 0 is the boss's set along the north wall, the rest the staff grid
   const deskParts: DeskParts[] = []

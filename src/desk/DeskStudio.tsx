@@ -38,7 +38,7 @@ import { skyDome, swayDepthMaterial, voxMaterial, waterMaterial } from './vox/ma
 import { buildHamster, FEED_ANCHOR, MAIN_SCALE, type HamsterRig } from './vox/hamster'
 import { buildStudioWorld, COLS, ROWS, WATER_Y, WORLD_D, WORLD_W, type StudioWorld } from './vox/world'
 import { BOSS_DESK_W, DESK_W } from './vox/props'
-import { hangSign, type HungSign } from './signs'
+import { hangSign, setSignHot, SIGN_TIP, tickSignHover, type HungSign } from './signs'
 
 const STATE_LABEL: Record<Hamster['state'], string> = {
   idle: '쉬는 중', thinking: '생각 중', reading: '읽는 중', searching: '찾는 중', writing: '작성 중',
@@ -75,6 +75,8 @@ export interface StudioDebug {
   autoFrame(on: boolean): void
   /** the boss's rounds (src/desk/patrol.ts): `off` keeps it at its desk, `hurry` starts one at once */
   patrol(mode: PatrolMode): void
+  /** hold the pointer over the k-th wall print (`StudioWorld.signs` order), or over none */
+  hoverSign(index: number | null): void
 }
 declare global {
   interface Window { __studio?: StudioDebug }
@@ -460,6 +462,8 @@ export function DeskStudio({ session, height }: { session: SessionState | null; 
   const plates = useRef(new Map<string, HTMLDivElement>())
   const glyphs = useRef(new Map<string, HTMLDivElement>())
   const viewportPolygon = useRef<SVGPolygonElement>(null)
+  /** the caption under a wall print while the pointer is over it */
+  const signTip = useRef<HTMLDivElement>(null)
   const [zoom, setZoom] = useState(250)
   const [selected, setSelected] = useState('main')
   const [showMap, setShowMap] = useState(false)
@@ -623,6 +627,10 @@ export function DeskStudio({ session, height }: { session: SessionState | null; 
       patrol(mode) {
         setPatrolMode(mode)
       },
+      hoverSign(index) {
+        const st = getStudio()
+        if (st) setSignHot(st.signs, index === null ? null : st.signs[index] ?? null)
+      },
       setStates(map) {
         const id = sessionId()
         if (!id) return
@@ -680,16 +688,30 @@ export function DeskStudio({ session, height }: { session: SessionState | null; 
     let drag: { id: number; x: number; y: number; x0: number; y0: number; orbit: boolean } | null = null
     const raycaster = new THREE.Raycaster()
     const overUi = (e: Event): boolean => !!(e.target as HTMLElement).closest('[data-office-ui]')
-    /** the wall print under the pointer, if any — a plane is one-sided, so nothing hits from behind the wall */
+    /**
+     * The wall print under the pointer, if any — a plane is one-sided, so nothing hits from
+     * behind the wall. A name plate over it wins: plates let the pointer through (so the canvas
+     * can be dragged across them), but a label on top of a print is what the eye is on.
+     */
     const signUnder = (e: { clientX: number; clientY: number }): HungSign | null => {
       const st = getStudio()
       if (!st || !st.signs.length) return null
+      for (const plate of plates.current.values()) {
+        if (plate.style.display === 'none') continue
+        const r = plate.getBoundingClientRect()
+        if (e.clientX >= r.left && e.clientX <= r.right && e.clientY >= r.top && e.clientY <= r.bottom) return null
+      }
       const rect = el.getBoundingClientRect()
       const nx = ((e.clientX - rect.left) / Math.max(1, rect.width)) * 2 - 1
       const ny = 1 - ((e.clientY - rect.top) / Math.max(1, rect.height)) * 2
       raycaster.setFromCamera(new THREE.Vector2(nx, ny), st.camera)
       const hit = raycaster.intersectObjects(st.signs.map((s) => s.mesh), false)[0]
       return hit ? st.signs.find((s) => s.mesh === hit.object) ?? null : null
+    }
+    /** the print the pointer is over now (none while dragging: the lift must not fight the pan) */
+    const hover = (sign: HungSign | null): void => {
+      const st = getStudio()
+      if (st) setSignHot(st.signs, sign)
     }
     const wheel = (e: WheelEvent): void => {
       if ((e.target as HTMLElement).closest('[data-office-ui]')) return
@@ -704,13 +726,17 @@ export function DeskStudio({ session, height }: { session: SessionState | null; 
       if ((e.button !== 0 && e.button !== 2) || overUi(e)) return
       drag = { id: e.pointerId, x: e.clientX, y: e.clientY, x0: e.clientX, y0: e.clientY, orbit: e.button === 2 || e.shiftKey }
       el.style.cursor = '' // the class's grab/grabbing takes over for the drag
+      hover(null)
       el.setPointerCapture(e.pointerId)
       setDragging(true)
     }
     const move = (e: PointerEvent): void => {
       if (!drag) {
-        // the print on the wall is a link; the cursor is the only way a canvas can say so
-        el.style.cursor = !overUi(e) && signUnder(e) ? 'pointer' : ''
+        // the prints on the walls are links: the cursor says so, and the print itself answers
+        // like a button — lifted, lit, captioned (signs.ts) — for as long as the pointer stays
+        const sign = overUi(e) ? null : signUnder(e)
+        el.style.cursor = sign ? 'pointer' : ''
+        hover(sign)
         return
       }
       if (e.pointerId !== drag.id) return
@@ -739,6 +765,10 @@ export function DeskStudio({ session, height }: { session: SessionState | null; 
     const dbl = (e: MouseEvent): void => {
       if (!overUi(e) && !signUnder(e)) focus()
     }
+    const leave = (): void => {
+      el.style.cursor = ''
+      hover(null)
+    }
     const menu = (e: Event): void => e.preventDefault()
     el.addEventListener('wheel', wheel, { passive: false })
     el.addEventListener('pointerdown', down)
@@ -746,6 +776,7 @@ export function DeskStudio({ session, height }: { session: SessionState | null; 
     el.addEventListener('pointerup', up)
     el.addEventListener('pointercancel', up)
     el.addEventListener('lostpointercapture', up)
+    el.addEventListener('pointerleave', leave)
     el.addEventListener('dblclick', dbl)
     el.addEventListener('contextmenu', menu)
     return () => {
@@ -756,8 +787,10 @@ export function DeskStudio({ session, height }: { session: SessionState | null; 
       el.removeEventListener('pointerup', up)
       el.removeEventListener('pointercancel', up)
       el.removeEventListener('lostpointercapture', up)
+      el.removeEventListener('pointerleave', leave)
       el.removeEventListener('dblclick', dbl)
       el.removeEventListener('contextmenu', menu)
+      leave()
     }
   }, [])
 
@@ -1040,6 +1073,27 @@ export function DeskStudio({ session, height }: { session: SessionState | null; 
       updateZoom()
     }
 
+    // ---- the wall prints under the pointer (signs.ts) ---------------------------------------
+    // The picture eases up and back on its own clock; the caption sits under the print's bottom
+    // edge, where a button's label would be, and follows the print if the camera moves.
+    let hotSign: HungSign | null = null
+    for (const sg of st.signs) {
+      tickSignHover(sg, dt)
+      if (sg.hot || sg.hover > 0) hotSign = sg
+    }
+    const tip = signTip.current
+    if (tip) {
+      const spot = hotSign?.spot
+      const p = spot ? worldToScreen(c, { x: spot.x, y: spot.y - spot.h / 2 - 6, z: spot.z }, W, H) : null
+      const show = !!hotSign?.hot && !!p && !p.behind && p.x > 0 && p.x < W && p.y > 0 && p.y < H
+      tip.classList.toggle('is-on', show)
+      if (p && !p.behind) {
+        // keep the whole caption on the canvas when the print hangs at its edge
+        const half = tip.offsetWidth / 2 + 8
+        tip.style.transform = `translate(${Math.round(Math.max(half, Math.min(W - half, p.x)))}px, ${Math.round(p.y)}px) translate(-50%, 0)`
+      }
+    }
+
     applyTo(st.camera, c, W, H)
     st.sky.position.copy(st.camera.position)
     if (!document.hidden) st.renderer.render(st.scene, st.camera)
@@ -1127,6 +1181,7 @@ export function DeskStudio({ session, height }: { session: SessionState | null; 
             ))}
           </div>
         ))}
+        <div ref={signTip} className="office-sign-tip" aria-hidden="true">{SIGN_TIP}</div>
       </div>
       <div className="office-header" data-office-ui>
         <div className="office-heading">
@@ -1170,7 +1225,7 @@ export function DeskStudio({ session, height }: { session: SessionState | null; 
           <span className="office-zoom">{zoom}%</span>
           <button onClick={() => zoomBy(1.25)} aria-label="확대" title="확대"><IconPlus size={14} /></button>
           <span className="control-divider" />
-          <button onClick={overview}>전체 보기</button>
+          <button onClick={overview} data-debug-click="overview">전체 보기</button>
           <button className={showMap ? 'is-on' : ''} aria-pressed={showMap} onClick={() => setShowMap(!showMap)}><IconMap className="ctl-ico" size={13} />지도</button>
         </div>
       </div>

@@ -76,15 +76,34 @@ const METAL = 0x455f5a
 const WALNUT = 0x8f6238
 const WALNUT_D = 0x6e4826
 
-// ---- the framed print on the north wall -----------------------------------------------------
+// ---- the framed prints on the walls ---------------------------------------------------------
 // Only the frame and the dark backing are voxels. The picture itself (src/desk/signs.ts) is a
 // textured plane the renderer hangs 0.85 in front of the prop's origin, exactly this size, so it
 // sits in the rebate between the rails like a matted print. The card colour is the print's own
-// background, so the backing's edges read as the print's thickness.
+// background, so the backing's edges read as the print's thickness. Two sizes hang in the office:
+// the print on the north wall, and a larger one (the same 100:60 card, 1.4×) on the west wall,
+// where the wide framings see it from further away.
 export const SIGN_W = 100
 export const SIGN_H = 60
+export const SIGN_L_W = 140
+export const SIGN_L_H = 84
 const SIGN_CARD = 0x110d1c
 const SIGN_RAIL = 0x8a5e33
+
+/** A frame and backing for a print of `w` × `h`, authored like every wall piece: facing +z. */
+function framedPrint(w: number, h: number): PropDef {
+  return {
+    r: 0, h: 0,
+    fn(b) {
+      b.box(0, 0, -1, w, h, 3, SIGN_CARD) // backing, z -2.5..0.5
+      // four rails around it, 3 wide and proud of the backing by 1.5: the print is recessed
+      b.box(0, h / 2 + 1.5, 0.8, w + 6, 3, 2.4, SIGN_RAIL, W1)
+      b.box(0, -h / 2 - 1.5, 0.8, w + 6, 3, 2.4, SIGN_RAIL, W1)
+      b.box(-w / 2 - 1.5, 0, 0.8, 3, h, 2.4, SIGN_RAIL, W1)
+      b.box(w / 2 + 1.5, 0, 0.8, 3, h, 2.4, SIGN_RAIL, W1)
+    },
+  }
+}
 
 /**
  * Monitor foot, neck and bezel — the lit slab and the light bar are dynamic parts. The top trim is
@@ -308,17 +327,8 @@ export const PROPS: Record<string, PropDef> = {
       b.box(8, -14, 1.4, 20, 5, 1.6, 0x64ad5e)
     },
   },
-  signFrame: {
-    r: 0, h: 0,
-    fn(b) {
-      b.box(0, 0, -1, SIGN_W, SIGN_H, 3, SIGN_CARD) // backing, z -2.5..0.5
-      // four rails around it, 3 wide and proud of the backing by 1.5: the print is recessed
-      b.box(0, SIGN_H / 2 + 1.5, 0.8, SIGN_W + 6, 3, 2.4, SIGN_RAIL, W1)
-      b.box(0, -SIGN_H / 2 - 1.5, 0.8, SIGN_W + 6, 3, 2.4, SIGN_RAIL, W1)
-      b.box(-SIGN_W / 2 - 1.5, 0, 0.8, 3, SIGN_H, 2.4, SIGN_RAIL, W1)
-      b.box(SIGN_W / 2 + 1.5, 0, 0.8, 3, SIGN_H, 2.4, SIGN_RAIL, W1)
-    },
-  },
+  signFrame: framedPrint(SIGN_W, SIGN_H),
+  signFrameL: framedPrint(SIGN_L_W, SIGN_L_H),
   door: {
     r: 0, h: 0,
     // authored around y = 0 at mid height: the placement lifts it so the jambs stand on the deck

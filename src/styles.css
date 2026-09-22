@@ -429,6 +429,11 @@ body.is-row-resizing * { cursor: row-resize !important; }
    standing over are the whole telling-off — nothing is said — so they are emoji, which carry
    their own colour, a size up, and shown at a smaller zoom than the thought glyphs are */
 .office-glyph.is-mark { font-size: 17px; text-shadow: 0 1px 4px var(--overlay-bg-strong); }
+/* The caption under a wall print while the pointer is over it — the label of the button the
+   print becomes. Positioned by the render loop like the plates; it fades on the same 120 ms the
+   print itself eases up in. */
+.office-sign-tip { position: absolute; top: 0; left: 0; padding: 4px 10px; border: 1px solid var(--overlay-line); border-radius: 999px; background: var(--overlay-bg-strong); box-shadow: 0 2px 10px var(--overlay-shadow); color: var(--overlay-text); font-size: 11px; font-weight: 600; white-space: nowrap; pointer-events: none; opacity: 0; transition: opacity 120ms ease; }
+.office-sign-tip.is-on { opacity: 1; }
 .office-vignette { position: absolute; inset: 0; pointer-events: none; background: linear-gradient(180deg, #17201a14, transparent 26%, transparent 74%, #17201a14); }
 .office-header { position: absolute; inset: 0 0 auto; padding: 16px 20px 26px; display: flex; align-items: flex-start; justify-content: space-between; gap: 16px; background: linear-gradient(var(--overlay-bg-strong), var(--overlay-bg) 55%, transparent); cursor: default; }
 .office-heading { display: flex; flex-direction: column; gap: 5px; min-width: 0; }

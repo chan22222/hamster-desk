@@ -100,6 +100,7 @@ const blindRun =
     process.env.HAMSTER_EVENTS ||
     process.env.HAMSTER_CLICK ||
     process.env.HAMSTER_KEYS ||
+    process.env.HAMSTER_MOUSE ||
     process.env.HAMSTER_UNFOCUSED
   )
 if (blindRun) app.commandLine.appendSwitch('disable-features', 'CalculateNativeWinOcclusion')
@@ -238,6 +239,30 @@ function scheduleKeys(): void {
   }
 }
 
+/**
+ * `HAMSTER_MOUSE='412,236@6000|…'` — the pointer put at a content-area pixel, as a real
+ * `mousemove`, so whatever answers to hovering (the wall prints in the studio: cursor, lift,
+ * caption) is proven on the path the user's mouse takes rather than through a hook.
+ */
+function scheduleMouse(): void {
+  if (debugOff() || !process.env.HAMSTER_MOUSE) return
+  for (const step of process.env.HAMSTER_MOUSE.split('|')) {
+    const s = step.trim()
+    if (!s) continue
+    const i = s.lastIndexOf('@')
+    const parsed = i < 0 ? NaN : Number(s.slice(i + 1))
+    const at = Number.isFinite(parsed) ? parsed : 5000
+    const [x, y] = (i < 0 ? s : s.slice(0, i)).split(',').map((v) => Number(v.trim()))
+    if (!Number.isFinite(x) || !Number.isFinite(y)) continue
+    setTimeout(() => {
+      const wc = win?.webContents
+      if (!wc) return
+      if (!unfocusedStart()) win?.focus() // same caveat as the keys: input only lands in a focused window
+      wc.sendInputEvent({ type: 'mouseMove', x, y })
+      console.log(`[mouse] ${x},${y}`)
+    }, at)
+  }
+}
 function createWindow(): void {
   // where the window sat last time, once it has been checked against the screens that exist now
   const saved = readWindowState()
@@ -1051,6 +1076,7 @@ if (gotLock) {
     startWatchers()
     scheduleCapture()
     scheduleKeys()
+    scheduleMouse()
     scheduleShortcutRepair()
     // every timer is late after a sleep; a window that ended meanwhile gets its message once the
     // network is back, not up to half a minute later
