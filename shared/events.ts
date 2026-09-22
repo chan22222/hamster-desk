@@ -83,6 +83,23 @@ export interface StatusSnapshot {
   profileId?: string
 }
 
+/** One account's "start the next 5-hour window as soon as the last one ends" (electron/five-hour.ts). */
+export interface FiveHourAccount {
+  on: boolean
+  /** unix ms the account's current 5-hour window ends, as far as the app knows */
+  resetsAt: number | null
+  /** unix ms of the last message the app sent to start one */
+  lastAt: number | null
+  /** unix ms the next one goes out (now or later); null while off */
+  nextAt: number | null
+  /** a message is on its way right now */
+  sending: boolean
+  error: string | null
+}
+
+/** profile id → its FiveHourAccount, for every account on the list */
+export type FiveHourState = Record<string, FiveHourAccount>
+
 export type EffortLevel = 'low' | 'medium' | 'high' | 'xhigh' | 'max'
 export const EFFORT_LEVELS: EffortLevel[] = ['low', 'medium', 'high', 'xhigh', 'max']
 

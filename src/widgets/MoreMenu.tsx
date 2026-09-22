@@ -1,4 +1,5 @@
 import { useEffect, useState } from 'react'
+import type { FiveHourAccount, FiveHourState, Profile } from '@shared/events'
 import { useDesk, type DeskSide, type ThemeMode } from '../store'
 import { LANG_OPTIONS, type PrefLang } from '../i18n'
 import { bubbleAvailability, resetBubbleStats, type BubbleAvailability } from '../bubbles/summarize'
@@ -7,6 +8,7 @@ import { IconCheck, IconMore } from './icons'
 import { VersionSection } from './Version'
 import { AppUpdateSection } from './AppUpdate'
 import { AccountsSection } from '../accounts/Accounts'
+import { fmtReset } from './Usage'
 
 function CheckRow({
   on,
@@ -96,6 +98,73 @@ function UsageRow({ stats, onReset }: { stats: BubbleAvailability['stats']; onRe
   )
 }
 
+/** What main says about every account's 5-hour start, kept current while the menu is open. */
+function useFiveHour(): [FiveHourState | null, (id: string, on: boolean) => void] {
+  const [state, setState] = useState<FiveHourState | null>(null)
+  useEffect(() => {
+    const api = window.desk?.fiveHour
+    if (!api) return
+    let alive = true
+    void api.state().then((s) => alive && setState(s))
+    const off = api.onChange((s) => alive && setState(s))
+    return () => {
+      alive = false
+      off()
+    }
+  }, [])
+  const set = (id: string, on: boolean): void => {
+    void window.desk?.fiveHour.set(id, on).then(setState)
+  }
+  return [state, set]
+}
+
+/** `다음 14:02` — or why not, and when it tries again. Nothing while off. */
+function fiveHourLine(a: FiveHourAccount): string | null {
+  if (!a.on) return null
+  if (a.sending) return '새 5시간을 시작하는 중…'
+  const soon = !a.nextAt || a.nextAt <= Date.now() + 30_000
+  if (a.error) return `${a.error} · ${soon ? '곧' : `${fmtReset(a.nextAt)} 에`} 다시 시도`
+  const last = a.lastAt ? ` · 마지막 ${fmtReset(a.lastAt)}` : ''
+  return `${soon ? '곧 시작' : `다음 시작 ${fmtReset(a.nextAt)}`}${last}`
+}
+
+/**
+ * Per account: a one-word message right after each 5-hour reset, so the next window is already
+ * running when the user comes back (electron/five-hour.ts). Off unless switched on.
+ */
+function FiveHourSection() {
+  const profiles = useDesk((s) => s.profiles)
+  const [state, set] = useFiveHour()
+  if (!state) return null
+  const many = profiles.length > 1
+  const row = (p: Profile) => {
+    const a = state[p.id]
+    if (!a) return null
+    const line = fiveHourLine(a)
+    // no login, no window to start: the CLI would only answer "please /login"
+    const out = !p.email && !a.on
+    return (
+      <div key={p.id}>
+        <CheckRow
+          on={a.on}
+          label={many ? p.name : '초기화되면 바로 다시 시작'}
+          hint={out ? '로그인 전' : undefined}
+          disabled={out}
+          onClick={() => set(p.id, !a.on)}
+        />
+        {line && <p className={`pop-note ${a.error ? 'warn-line' : ''}`}>{line}</p>}
+      </div>
+    )
+  }
+  return (
+    <>
+      <div className="pop-head">5시간 창 자동 시작</div>
+      <p className="pop-note">초기화되자마자 Haiku 에게 한 단어를 보내 다음 5시간을 바로 시작해요. 앱이 켜져 있을 때만, 한 번에 토큰 400개쯤.</p>
+      {profiles.map(row)}
+    </>
+  )
+}
+
 /** `C:\Users\me\.hamster-desk\ui.json` → `~\.hamster-desk\ui.json` */
 function tilde(path: string, home: string): string {
   if (!home || !path.toLowerCase().startsWith(home.toLowerCase())) return path
@@ -147,6 +216,9 @@ function Body({ onUpdate, close }: { onUpdate: () => void; close: () => void }) 
 
       <div className="pop-sep" />
       <AccountsSection onDone={close} />
+
+      <div className="pop-sep" />
+      <FiveHourSection />
 
       <div className="pop-sep" />
       <div className="pop-head">알림</div>

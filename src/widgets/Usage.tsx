@@ -8,7 +8,7 @@ type SLState = 'installed' | 'foreign' | 'none' | 'unknown'
 /** which window a chip stands for; the popover shows them all and highlights this one */
 type Which = string
 
-function fmtReset(ms: number | null): string {
+export function fmtReset(ms: number | null): string {
   if (!ms) return ''
   const d = new Date(ms)
   const now = new Date()

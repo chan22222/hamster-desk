@@ -1,4 +1,4 @@
-import { app, BrowserWindow, clipboard, dialog, ipcMain, Menu, nativeTheme, shell } from 'electron'
+import { app, BrowserWindow, clipboard, dialog, ipcMain, Menu, nativeTheme, powerMonitor, shell } from 'electron'
 import { appendFileSync, readdirSync, readFileSync, rmSync } from 'node:fs'
 import { basename, join } from 'node:path'
 import { DeskWatcher } from './watcher'
@@ -9,6 +9,7 @@ import { addProfile, adoptOrphanProfiles, baseDirOf, configDirOf, deleteProfileD
 import { flushUi, loadUi, saveUi, uiPath } from './ui-store'
 import { checkVersion } from './version'
 import { BubbleSummarizer } from './summarize'
+import { FiveHourStarter } from './five-hour'
 import { cleanupLegacyHarness } from './legacy'
 import { claudeDir } from './watcher/paths'
 import { AUMID_VARIANTS, appUserModelId, aumidFor, showNotification } from './notify'
@@ -120,6 +121,7 @@ let win: BrowserWindow | null = null
 const watchers = new Map<string, DeskWatcher>()
 let status: StatusWatcher | null = null
 let bubbles: BubbleSummarizer | null = null
+let fiveHour: FiveHourStarter | null = null
 
 function send(channel: string, ...args: unknown[]): void {
   if (win && !win.isDestroyed()) win.webContents.send(channel, ...args)
@@ -375,9 +377,19 @@ function startWatchers(): void {
   if (adopted.length) console.log(`[profiles] recovered: ${adopted.map((p) => p.id).join(', ')}`)
   for (const p of loadProfiles().list) watchProfile(p)
 
+  // before the status watcher: its first scan is what tells this when each account's window ends
+  fiveHour = new FiveHourStarter({ accounts: () => loadProfiles().list.map((p) => ({ id: p.id, dir: p.dir })) })
+  fiveHour.on('change', (s) => send('fiveHour:changed', s))
+  // a capture run restores what is stored and writes nothing back — and sends nothing on anyone's account
+  if (!process.env.HAMSTER_CAPTURE) fiveHour.start()
+
   refreshStatusScripts()
   status = new StatusWatcher()
-  status.on('status', (s: StatusSnapshot) => emitDesk({ kind: 'status', ...s, profileId: profileOfSnapshot(s) }))
+  status.on('status', (s: StatusSnapshot) => {
+    const profileId = profileOfSnapshot(s)
+    fiveHour?.observe(profileId, s.fiveHour)
+    emitDesk({ kind: 'status', ...s, profileId })
+  })
   status.start()
 
   const version = (force = false): void => {
@@ -751,6 +763,11 @@ ipcMain.handle('bubble:summarize', (_e, req: BubbleRequest) => summarizer().summ
 ipcMain.handle('bubble:state', () => summarizer().state())
 ipcMain.handle('bubble:resetStats', () => summarizer().reset())
 
+// ---- IPC: start the next 5-hour window as soon as the last one ends (electron/five-hour.ts, per account)
+
+ipcMain.handle('fiveHour:state', () => fiveHour?.state() ?? {})
+ipcMain.handle('fiveHour:set', (_e, profileId: string, on: boolean) => fiveHour?.set(String(profileId ?? ''), on === true) ?? {})
+
 // ---- IPC: UI settings (~/.hamster-desk/ui.json — outside the per-run-mode Electron profile)
 
 ipcMain.handle('ui:load', () => loadUi())
@@ -895,6 +912,8 @@ function shutdown(): void {
   status = null
   bubbles?.dispose()
   bubbles = null
+  fiveHour?.stop()
+  fiveHour = null
 }
 
 /**
@@ -942,6 +961,9 @@ if (gotLock) {
     scheduleKeys()
     scheduleNotifyProbe()
     scheduleShortcutRepair()
+    // every timer is late after a sleep; a window that ended meanwhile gets its message once the
+    // network is back, not up to half a minute later
+    powerMonitor.on('resume', () => setTimeout(() => void fiveHour?.tick(), 20_000))
     app.on('activate', () => {
       if (BrowserWindow.getAllWindows().length === 0) createWindow()
     })

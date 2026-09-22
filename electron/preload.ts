@@ -7,6 +7,7 @@ import type {
   DeskEvent,
   DirEntry,
   FileEntry,
+  FiveHourState,
   GitDiff,
   GitInfo,
   NotifyRequest,
@@ -76,6 +77,13 @@ export interface DeskBridge {
     summarize(req: BubbleRequest): Promise<BubbleResult>
     state(): Promise<BubbleState>
     resetStats(): Promise<BubbleState>
+  }
+  /** per account: one tiny `claude -p` right after each 5-hour reset, so the next window starts then (electron/five-hour.ts) */
+  fiveHour: {
+    state(): Promise<FiveHourState>
+    set(profileId: string, on: boolean): Promise<FiveHourState>
+    /** a message went out, came back or failed */
+    onChange(cb: (s: FiveHourState) => void): () => void
   }
   clipboard: {
     readText(): Promise<string>
@@ -192,6 +200,15 @@ const bridge: DeskBridge = {
     summarize: (req) => ipcRenderer.invoke('bubble:summarize', req),
     state: () => ipcRenderer.invoke('bubble:state'),
     resetStats: () => ipcRenderer.invoke('bubble:resetStats'),
+  },
+  fiveHour: {
+    state: () => ipcRenderer.invoke('fiveHour:state'),
+    set: (profileId, on) => ipcRenderer.invoke('fiveHour:set', profileId, on),
+    onChange(cb) {
+      const h = (_e: unknown, s: FiveHourState): void => cb(s)
+      ipcRenderer.on('fiveHour:changed', h)
+      return () => ipcRenderer.off('fiveHour:changed', h)
+    },
   },
   clipboard: {
     readText: () => ipcRenderer.invoke('clipboard:readText'),
