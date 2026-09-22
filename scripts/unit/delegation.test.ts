@@ -26,7 +26,9 @@ test('the block: markers, an owner line, the preset lines, the cap only when set
   assert.match(blockFor({ ...ON, cap: 3 }), /최대 3개/)
   // a custom text is taken line by line, as bullets; blank = the default preset's first line
   assert.match(blockFor({ ...ON, preset: 'custom', custom: '항상 셋으로 나눠\n- 검토는 넷째가' }), /- 항상 셋으로 나눠\n- 검토는 넷째가/)
-  assert.match(blockFor({ ...ON, preset: 'custom', custom: '  ' }), /독립적인 부분/)
+  assert.match(blockFor({ ...ON, preset: 'custom', custom: '  ' }), /독립적으로 나뉘는/)
+  // one line per preset: the block must stay as short as a sentence the user would type
+  for (const preset of ['when-needed', 'eager', 'plan-review'] as const) assert.equal(blockFor({ ...ON, preset }).split('\n').length, 5)
 })
 
 test('sanitizeConfig: on by default, unknown preset/cap fall back, custom is capped', () => {

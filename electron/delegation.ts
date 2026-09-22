@@ -30,20 +30,13 @@ const CUSTOM_MAX = 2000
 const PRESETS = DELEGATION_PRESETS
 const CAPS: readonly number[] = DELEGATION_CAPS
 
+// One short line each — what the user would type at the end of a prompt, no more. A longer brief
+// (report formats, test discipline, when not to) made Claude over-test and over-report; the model
+// knows how to split work, it only needs to be told to.
 const LINES: Record<Exclude<DelegationPreset, 'custom'>, string[]> = {
-  'when-needed': [
-    '요청이 서로 독립적인 부분으로 나뉘고 각 부분이 혼자 맡길 만한 크기이면, 그 부분들을 서브에이전트(Agent 도구)에게 병렬로 맡기고 결과를 합쳐서 보고해.',
-    '나눌 이유가 없는 작업은 그냥 직접 해. 작은 수정이나 질문 하나에 에이전트를 띄우지 마.',
-  ],
-  eager: [
-    '부분이 둘 이상인 작업은 언제나 서브에이전트(Agent 도구)로 나눠서 병렬로 진행해. 너는 나누고, 조율하고, 합치는 일만 하고 각 부분의 실제 작업은 서브에이전트에게 맡겨.',
-    '부분이 하나뿐인 작은 작업만 직접 해.',
-  ],
-  'plan-review': [
-    '작업을 받으면 먼저 계획을 세워 부분으로 나누고, 각 부분을 서브에이전트(Agent 도구)에게 병렬로 맡겨.',
-    '결과가 다 모이면 별도의 검토 서브에이전트에게 전체를 검토시키고, 지적된 것을 고친 뒤에 보고해.',
-    '한 줄짜리 작업은 이 절차 없이 직접 해.',
-  ],
+  'when-needed': ['독립적으로 나뉘는 작업은 서브에이전트(Agent 도구)로 나눠 병렬로 처리해.'],
+  eager: ['가능하면 언제나 서브에이전트(Agent 도구)로 나눠 병렬로 처리해.'],
+  'plan-review': ['서브에이전트(Agent 도구)로 나눠 병렬로 처리하고, 끝나면 검토 서브에이전트에게 한 번 확인시켜.'],
 }
 
 export const DEFAULT_DELEGATION: DelegationConfig = { on: true, preset: 'when-needed', cap: 0, custom: '' }
