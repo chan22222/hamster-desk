@@ -418,11 +418,12 @@ function startWatchers(): void {
   version()
   setInterval(() => version(), 60 * 60 * 1000)
 
-  // a capture run photographs the window, and a pill that depends on the network is not repeatable
-  if (!process.env.HAMSTER_CAPTURE) {
-    void appUpdate()
-    setInterval(() => void appUpdate(), 60 * 60 * 1000)
-  }
+  // Once, at start — and whenever the user asks (다시 확인). There used to be an hourly check too,
+  // and it did more harm than good: a release found mid-session wanted a restart in the middle of
+  // work, and (in an installed build) its blockmap download kept the disk busy under a running
+  // claude. A version is picked up the next time the app is opened, which is soon enough.
+  // A capture run photographs the window, and a pill that depends on the network is not repeatable.
+  if (!process.env.HAMSTER_CAPTURE) void appUpdate()
 }
 
 /**

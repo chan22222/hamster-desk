@@ -88,7 +88,7 @@ export function attach(autoUpdater: AutoUpdater, onChange: () => void): AutoUpda
   autoUpdater.logger = null // its default writes every step to the console
   autoUpdater.on('update-available', (info) => {
     logUpdate(who, `available ${info.version}`)
-    // the hourly check finds the same release again: a download under way, or done, stays as it is
+    // a later check (다시 확인, or a retry) finds the same release again: a download under way, or done, stays as it is
     if (release?.state === 'downloading' || (release?.state === 'ready' && release.version === info.version)) return
     release = { version: info.version, state: 'available', percent: 0 }
     onChange()
@@ -115,7 +115,7 @@ export function attach(autoUpdater: AutoUpdater, onChange: () => void): AutoUpda
     lastError = reason(e)
     logUpdate(who, `error ${lastError}`)
     // a download that died is handled where it was started (downloadRelease): this event is also a
-    // failed hourly check, and that one does not stop a download under way
+    // failed later check, and that one does not stop a download under way
     onChange()
   })
   updater = autoUpdater
