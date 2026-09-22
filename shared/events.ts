@@ -109,9 +109,10 @@ export interface AppUpdateInfo {
   version?: string
   /**
    * An *installed* build does not follow commits: it follows GitHub Releases (electron/app-release.ts).
-   * A newer release is downloaded in the background; 'ready' means a restart installs it.
+   * 'available': a newer release, not downloaded until the user says so. 'ready': downloaded, and a
+   * restart installs it.
    */
-  release?: { version: string; state: 'downloading' | 'ready'; percent: number } | null
+  release?: { version: string; state: 'available' | 'downloading' | 'ready'; percent: number } | null
 }
 
 export type DeskEvent =

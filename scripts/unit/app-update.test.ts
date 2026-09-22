@@ -7,6 +7,7 @@
 // real ~/.hamster-desk.
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
+import { EventEmitter } from 'node:events'
 import { mkdirSync, mkdtempSync, readFileSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
@@ -15,7 +16,7 @@ const HOME = mkdtempSync(join(tmpdir(), 'hd-update-home-'))
 process.env.HAMSTER_HOME = HOME
 
 import { UPDATE_SCRIPT, buildCommit, checkAppUpdate, parseCompare, parseGitLog, repoDirOf } from '../../electron/app-update'
-import { RELEASE_FEEDS, checkOverFeeds, isInstalled, pickAutoUpdater, releaseInfo, uninstallerOf, type FeedChecker } from '../../electron/app-release'
+import { RELEASE_FEEDS, attach, checkOverFeeds, downloadRelease, installRelease, isInstalled, pickAutoUpdater, releaseInfo, uninstallerOf, type FeedChecker } from '../../electron/app-release'
 
 const commit = (n: number, message: string): unknown => ({ sha: String(n).repeat(40).slice(0, 40), commit: { message } })
 
@@ -180,4 +181,60 @@ test('the update check asks the releases feed, and the latest release itself onl
 
   await checkOverFeeds(feedDown.u, () => undefined)
   assert.deepEqual(feedDown.asked.slice(2), ['github', 'generic']) // every check starts over at the feed: only it allows a partial download
+})
+
+test('a release found is only announced: it is downloaded when "update" is pressed, and installed when it is there', async () => {
+  // Until this, finding a release started the download inside checkForUpdates — the dialog asked,
+  // and "later" did not stop 120 MB from coming down anyway. Last in this file: `release` is module state.
+  let downloads = 0
+  let installs = 0
+  let fail = false
+  const fake = Object.assign(new EventEmitter(), {
+    autoDownload: true, // electron-updater's default
+    autoInstallOnAppQuit: true,
+    logger: console as unknown,
+    downloadUpdate: async (): Promise<string[]> => {
+      downloads++
+      if (!fail) return []
+      const e = new Error('net::ERR_CONNECTION_RESET')
+      fake.emit('error', e) // what electron-updater does before it rejects
+      throw e
+    },
+    quitAndInstall: (): void => void installs++,
+  })
+  const onChange = (): void => undefined
+  const rel = (): unknown => releaseInfo('0.1.0', null).release
+  const settle = (): Promise<void> => new Promise((r) => setImmediate(r))
+
+  attach(fake as unknown as Parameters<typeof attach>[0], onChange)
+  assert.equal(fake.autoDownload, false)
+  assert.equal(fake.autoInstallOnAppQuit, false)
+
+  fake.emit('update-available', { version: '9.0.0' })
+  assert.deepEqual(rel(), { version: '9.0.0', state: 'available', percent: 0 })
+  await settle()
+  assert.equal(downloads, 0, 'nothing is downloaded before the user asks')
+  assert.equal(installRelease(), false, 'and nothing is installed that was not downloaded')
+
+  // a download that dies puts the button back, with the reason
+  fail = true
+  assert.equal(downloadRelease(onChange), true)
+  assert.deepEqual(rel(), { version: '9.0.0', state: 'downloading', percent: 0 })
+  await settle()
+  assert.deepEqual(rel(), { version: '9.0.0', state: 'available', percent: 0 })
+  assert.equal(releaseInfo('0.1.0', null).error, 'net::ERR_CONNECTION_RESET')
+
+  fail = false
+  assert.equal(downloadRelease(onChange), true)
+  assert.equal(downloadRelease(onChange), false, 'one download at a time')
+  fake.emit('update-available', { version: '9.0.0' }) // the hourly check finds it again
+  fake.emit('download-progress', { percent: 47 })
+  assert.deepEqual(rel(), { version: '9.0.0', state: 'downloading', percent: 45 })
+  fake.emit('update-downloaded', { version: '9.0.0' })
+  fake.emit('update-available', { version: '9.0.0' }) // …and again, once it is there
+  assert.deepEqual(rel(), { version: '9.0.0', state: 'ready', percent: 100 })
+  assert.equal(downloads, 2)
+
+  assert.equal(installRelease(), true)
+  assert.equal(installs, 1)
 })

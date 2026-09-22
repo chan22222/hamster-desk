@@ -16,7 +16,7 @@ import { attachWindowStateSaver, isMini, persistWindowState, readWindowState, se
 import { listTranscripts } from './transcripts'
 import { gitDiff, gitInfo } from './git'
 import { COMMITS_URL, buildCommit, checkAppUpdate, repoDirOf, startSelfUpdate } from './app-update'
-import { checkRelease, installRelease, isInstalled, releaseInfo } from './app-release'
+import { checkRelease, downloadRelease, installRelease, isInstalled, releaseInfo } from './app-release'
 import { bootMark, writeBootLog } from './boot-log'
 import { listDir, pathExists, repairShortcuts } from './shortcuts'
 
@@ -590,7 +590,7 @@ const BENIGN_UPDATE_ERRORS = new Set(['no build commit', 'unknown commit'])
  */
 async function appUpdate(force = false, manual = force): Promise<AppUpdateInfo> {
   if (installedBuild()) {
-    await checkRelease(emitRelease, app.getVersion(), manual) // emits and retries by itself, now and as the download moves along
+    await checkRelease(emitRelease, app.getVersion(), manual) // emits and retries by itself, now and as a download moves along
     return releaseInfo(app.getVersion(), buildCommit())
   }
   if (manual) updateRetries = 0
@@ -607,10 +607,18 @@ async function appUpdate(force = false, manual = force): Promise<AppUpdateInfo> 
 
 ipcMain.handle('appUpdate:check', (_e, force?: boolean) => appUpdate(force === true))
 
-/** 'updating': the app is about to quit and come back rebuilt. 'opened': the commits page, to update by hand. */
+/**
+ * 'updating': the app is about to quit and come back rebuilt. 'downloading': the release is on its
+ * way down, and "update" has to be pressed again once it is there. 'opened': the commits page, to
+ * update by hand.
+ */
 ipcMain.handle('appUpdate:run', () => {
-  // installed: the downloaded setup runs silently once we are gone, and reopens the app
-  if (installedBuild() && installRelease()) return 'updating'
+  if (installedBuild()) {
+    // installed: the downloaded setup runs with its progress window once we are gone, and reopens the app
+    if (installRelease()) return 'updating'
+    // …and nothing is downloaded before the user asks for it here
+    if (downloadRelease(emitRelease)) return 'downloading'
+  }
   const repoDir = selfUpdateRepo()
   if (repoDir && startSelfUpdate({ repoDir, exe: process.execPath, pid: process.pid, home: HAMSTER_HOME })) {
     setTimeout(() => app.quit(), 200) // let this reply reach the renderer first

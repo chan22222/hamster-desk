@@ -9,8 +9,11 @@ import { logUpdate } from './update-log'
  *
  * Someone who installed it has no repository to pull, and cannot be asked to run a new setup for
  * every change. So an installed build follows GitHub Releases through electron-updater: a release
- * newer than this version is downloaded in the background (only the changed blocks, thanks to the
- * .blockmap published next to the setup), and installed when the user says so.
+ * newer than this version is announced, downloaded when the user says so (only the changed blocks,
+ * thanks to the .blockmap published next to the setup), and installed when the user says so again.
+ *
+ * Nothing is downloaded by itself (`autoDownload` is off): the dialog that announces a release asks
+ * first, and "later" means later — not 120 MB going down the line behind the user's back.
  *
  * Installing is never invisible. Replacing the app means its exe is gone for half a minute, and an
  * install nobody can see invites exactly one thing: clicking the taskbar icon again, which then
@@ -75,13 +78,19 @@ export function pickAutoUpdater(mod: unknown): AutoUpdater {
 
 async function load(onChange: () => void): Promise<AutoUpdater> {
   if (updater) return updater
-  const autoUpdater = pickAutoUpdater(await import('electron-updater'))
-  autoUpdater.autoDownload = true
+  return attach(pickAutoUpdater(await import('electron-updater')), onChange)
+}
+
+/** set up `autoUpdater` and follow its events; apart from `load`, only a test hands one in */
+export function attach(autoUpdater: AutoUpdater, onChange: () => void): AutoUpdater {
+  autoUpdater.autoDownload = false // see the header: only "update" downloads
   autoUpdater.autoInstallOnAppQuit = false // see the header: an install nobody can see
   autoUpdater.logger = null // its default writes every step to the console
   autoUpdater.on('update-available', (info) => {
     logUpdate(who, `available ${info.version}`)
-    release = { version: info.version, state: 'downloading', percent: 0 }
+    // the hourly check finds the same release again: a download under way, or done, stays as it is
+    if (release?.state === 'downloading' || (release?.state === 'ready' && release.version === info.version)) return
+    release = { version: info.version, state: 'available', percent: 0 }
     onChange()
   })
   autoUpdater.on('update-not-available', (info) => {
@@ -105,8 +114,8 @@ async function load(onChange: () => void): Promise<AutoUpdater> {
   autoUpdater.on('error', (e) => {
     lastError = reason(e)
     logUpdate(who, `error ${lastError}`)
-    // a download that died is not "ready", and not worth a stuck progress line either
-    if (release?.state === 'downloading') release = null
+    // a download that died is handled where it was started (downloadRelease): this event is also a
+    // failed hourly check, and that one does not stop a download under way
     onChange()
   })
   updater = autoUpdater
@@ -187,6 +196,25 @@ export function checkRelease(onChange: () => void, version: string, manual = fal
     }
   })()
   return inflight
+}
+
+/**
+ * true when the release found by the last check starts downloading — what "update" does before
+ * there is anything to install. Progress and the end of it reach the UI through `onChange`.
+ */
+export function downloadRelease(onChange: () => void): boolean {
+  if (!updater || release?.state !== 'available') return false
+  logUpdate(who, `download ${release.version}`)
+  lastError = null
+  release = { ...release, state: 'downloading', percent: 0 }
+  onChange()
+  updater.downloadUpdate().catch(() => {
+    // the 'error' event has told why; a download that died is not "ready", and not worth a stuck
+    // progress line either — the button comes back, and pressing it again starts over
+    if (release?.state === 'downloading') release = { ...release, state: 'available', percent: 0 }
+    onChange()
+  })
+  return true
 }
 
 /**

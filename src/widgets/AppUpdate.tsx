@@ -37,7 +37,10 @@ function UpdateBody({ u, close }: { u: AppUpdateInfo; close: () => void }) {
   }
   const rel = u.release
   if (rel) {
+    // nothing is downloaded before "업데이트 받기": that button starts it, the progress bar follows it,
+    // and only then does the same button restart into the setup
     const ready = rel.state === 'ready'
+    const available = rel.state === 'available'
     return (
       <div className="pop-body">
         <div className="pop-head">
@@ -46,6 +49,8 @@ function UpdateBody({ u, close }: { u: AppUpdateInfo; close: () => void }) {
         </div>
         {ready ? (
           <p>새 버전을 받아 두었어요. 다시 시작하면 설치 창이 잠깐 떴다가 앱이 스스로 다시 열립니다.</p>
+        ) : available ? (
+          <p>누르면 새 버전을 받기 시작해요. 받는 동안에도 앱은 그대로 쓸 수 있고, 다 받으면 다시 시작할지 한 번 더 묻습니다.</p>
         ) : (
           <>
             <p>새 버전을 받는 중이에요. 다 받으면 아래 버튼이 켜집니다.</p>
@@ -54,9 +59,14 @@ function UpdateBody({ u, close }: { u: AppUpdateInfo; close: () => void }) {
             </div>
           </>
         )}
-        <p className="pop-note">열려 있는 터미널과 그 안의 Claude 는 모두 종료됩니다. 설치가 끝날 때까지 작업 표시줄 아이콘은 누르지 마세요.</p>
-        <button className="pop-primary" disabled={busy || !ready} onClick={run}>
-          {ready ? '다시 시작해서 업데이트' : `받는 중 ${rel.percent}%`}
+        {available && u.error && (
+          <p className="pop-note upd-why" title={u.error}>
+            {u.error} — 다시 눌러 보세요. 기록: <code>~/.hamster-desk/update.log</code>
+          </p>
+        )}
+        <p className="pop-note">다시 시작할 때 열려 있는 터미널과 그 안의 Claude 는 모두 종료됩니다. 설치가 끝날 때까지 작업 표시줄 아이콘은 누르지 마세요.</p>
+        <button className="pop-primary" disabled={busy || rel.state === 'downloading'} onClick={run}>
+          {ready ? '다시 시작해서 업데이트' : available ? '업데이트 받기' : `받는 중 ${rel.percent}%`}
         </button>
       </div>
     )
@@ -97,7 +107,7 @@ export function AppUpdatePill() {
       label={
         <>
           <IconDownload size={14} />
-          {rel && rel.state !== 'ready' ? `업데이트 받는 중 ${rel.percent}%` : '앱 업데이트'}
+          {rel?.state === 'downloading' ? `업데이트 받는 중 ${rel.percent}%` : '앱 업데이트'}
         </>
       }
       ariaLabel="Hamster Desk 업데이트"
@@ -170,6 +180,8 @@ export function AppUpdateSection() {
           <span className="dim"> · 확인 중…</span>
         ) : failed ? (
           <span className="dim"> · 확인 실패</span>
+        ) : rel?.state === 'available' ? (
+          <span className="dim"> · 새 버전 {rel.version} 있음</span>
         ) : u?.behind ? (
           <span className="dim"> · 새 변경 {u.behind}개</span>
         ) : u && !u.error ? (

@@ -61,8 +61,12 @@ export interface DeskBridge {
   /** this app against `main` of its repository (electron/app-update.ts) */
   appUpdate: {
     check(force?: boolean): Promise<AppUpdateInfo>
-    /** 'updating': the app quits, rebuilds and reopens. 'opened': the commits page, where self-update is not possible */
-    run(): Promise<'updating' | 'opened'>
+    /**
+     * 'updating': the app quits, rebuilds (or installs) and reopens. 'downloading': an installed build
+     * started downloading the release; progress arrives as app_update events. 'opened': the commits
+     * page, where self-update is not possible
+     */
+    run(): Promise<'updating' | 'downloading' | 'opened'>
   }
   /** the app is on screen and usable: closes this launch's line in ~/.hamster-desk/boot.log */
   bootDone(): void
