@@ -1,5 +1,5 @@
 import { app, BrowserWindow, clipboard, dialog, ipcMain, Menu, nativeTheme, powerMonitor, shell } from 'electron'
-import { appendFileSync, readdirSync, readFileSync, rmSync } from 'node:fs'
+import { appendFileSync, readdirSync, rmSync } from 'node:fs'
 import { basename, join } from 'node:path'
 import { DeskWatcher } from './watcher'
 import { DEFAULT_PROFILE_ID, type BubbleRequest, type DelegationState, type DeskEvent, type FileEntry, type NotifyRequest, type Profile, type SessionInfo, type StatusSnapshot, type UiState, type AppUpdateInfo } from '../shared/events'
@@ -14,7 +14,7 @@ import { FiveHourStarter } from './five-hour'
 import { UsageQuerier } from './usage-query'
 import { sanitizeConfig as sanitizeDelegation, storeConfig as storeDelegation, syncDelegation } from './delegation'
 import { cleanupLegacyHarness } from './legacy'
-import { claudeDir } from './watcher/paths'
+import { claudeLanguage, tr } from './lang'
 import { openFromNotification, showNotification } from './notify'
 import { ToastHost } from './toast-window'
 import { attachWindowStateSaver, isMini, persistWindowState, readWindowState, setMini } from './window-state'
@@ -882,7 +882,7 @@ ipcMain.handle('ui:save', (_e, patch: UiState, base?: UiState) => saveUi(patch, 
 
 ipcMain.handle('dialog:pickFolder', async (_e, defaultPath?: string) => {
   if (!win) return null
-  const r = await dialog.showOpenDialog(win, { properties: ['openDirectory'], defaultPath, title: '터미널을 열 폴더' })
+  const r = await dialog.showOpenDialog(win, { properties: ['openDirectory'], defaultPath, title: tr().main.pickFolder })
   return r.canceled ? null : (r.filePaths[0] ?? null)
 })
 
@@ -913,16 +913,6 @@ ipcMain.handle('transcripts:list', (_e, cwd: string, profileId?: string) =>
 
 ipcMain.handle('git:info', (_e, cwd: string) => gitInfo(String(cwd ?? '')))
 ipcMain.handle('git:diff', (_e, cwd: string, file: string) => gitDiff(String(cwd ?? ''), String(file ?? '')))
-
-/** `language` from ~/.claude/settings.json, verbatim (e.g. "한국어"); the renderer decides what to do with it. */
-function claudeLanguage(): string | null {
-  try {
-    const j = JSON.parse(readFileSync(join(claudeDir(), 'settings.json'), 'utf8')) as { language?: unknown }
-    return typeof j.language === 'string' && j.language ? j.language : null
-  } catch {
-    return null
-  }
-}
 
 ipcMain.handle('app:info', () => {
   let debugPrefs: Record<string, unknown> | null = null

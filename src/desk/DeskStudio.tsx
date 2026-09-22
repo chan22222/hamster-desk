@@ -1,6 +1,8 @@
 import { useEffect, useRef, useState } from 'react'
 import * as THREE from 'three'
 import { feedLife, runInTerminal, setFeedLife, useDesk, type Hamster, type HamsterState, type SessionState } from '../store'
+import { ui, useUi } from '../i18n'
+import { rich } from '../rich'
 import { animFor, screenColor, statusDot, tintFor, type IsoAnim } from './anim'
 import { modelSkin } from './skins'
 import { makePatrol, patrolGoal, setPatrolMode, stepPatrol, type Patrol, type PatrolMode } from './patrol'
@@ -25,6 +27,7 @@ import {
   applyTo,
   autoFrameCamera,
   createCamera,
+  distanceFor,
   feedLines,
   focusCamera,
   FRAME_PAD,
@@ -38,18 +41,17 @@ import {
   zoomCamera,
   type Camera,
 } from './office-camera'
-import { skyDome, swayDepthMaterial, voxMaterial, waterMaterial } from './vox/material'
+import { foldDepthMaterial, skyDome, swayDepthMaterial, VOX_FOLD, voxMaterial, waterMaterial } from './vox/material'
 import { buildHamster, FEED_ANCHOR, MAIN_SCALE, type HamsterRig } from './vox/hamster'
 import { buildStudioWorld, COLS, ROWS, WATER_Y, WORLD_D, WORLD_W, type StudioWorld } from './vox/world'
 import { BOSS_DESK_W, DESK_W } from './vox/props'
-import { hangSign, setSignHot, SIGN_TIP, tickSignHover, type HungSign } from './signs'
+import { hangSign, setSignHot, tickSignHover, type HungSign } from './signs'
 import { LIFT, SCRUFF, carry, fly, grab, hang, landingSpot, release, returnPath, worldToTile, type Flight, type Ground, type Held } from './grab'
 import { disposeSplash, makeSplash, tickSplash, type Splash } from './splash'
+import { BLAST_REST, BUILD, BUILD_REST, CENTRE, STORY_DROP, blendView, builder, doomAt, flashAlpha, foldAge, foldAt, foldLift, foldPlaying, landTime, shakeOffset, shockRadius, storyBounds, storyMix, storyScale, type FoldFx } from './fold'
+import { ashBurst, disposeBlast, doomOf, makeBlast, tickBlast, type Blast, type GroundAt } from './blast'
+import { disposeBuild, dropGear, makeBuild, thud, tickBuild, wearGear, type Build } from './build'
 
-const STATE_LABEL: Record<Hamster['state'], string> = {
-  idle: '쉬는 중', thinking: '생각 중', reading: '읽는 중', searching: '찾는 중', writing: '작성 중',
-  running: '실행 중', hiring: '동료 호출', browsing: '조사 중', talking: '이야기 중', waiting: '확인 필요', arriving: '출근 중', leaving: '퇴근 중',
-}
 const GLYPH: Partial<Record<IsoAnim, string>> = { think: '···', wave: '!', sleep: 'z', phone: '♪' }
 /** states in which a colleague counts as working — and so as fair game for the boss's rounds */
 const WORKING = new Set<HamsterState>(['thinking', 'reading', 'searching', 'writing', 'running', 'hiring', 'browsing', 'talking'])
@@ -83,6 +85,8 @@ export interface StudioDebug {
   patrol(mode: PatrolMode): void
   /** hold the pointer over the k-th wall print (`StudioWorld.signs` order), or over none */
   hoverSign(index: number | null): void
+  /** the fold story on screen (fold.ts): its phase and age, how many rigs it has hidden, the white-out's opacity */
+  fold(): { phase: FoldFx['phase']; age: number; hidden: number; flash: string }
 }
 declare global {
   interface Window { __studio?: StudioDebug }
@@ -158,6 +162,8 @@ interface Studio {
   signs: HungSign[]
   /** splashes on the water (splash.ts) — ticked every frame and removed when they are over */
   splashes: Splash[]
+  /** the world's chunk meshes: culling comes off them while a fold story (fold.ts) moves their vertices about */
+  chunks: THREE.Mesh[]
   minimapUrl: string
 }
 let studio: Studio | null = null
@@ -277,16 +283,21 @@ function createStudio(): Studio | null {
   const staticMat = voxMaterial({})
   const swayMat = voxMaterial({ sway: true, uTime })
   const depthSway = swayDepthMaterial(uTime)
+  // the still world's shadow pass has to follow the fold stories too (material.ts): a rising
+  // office would otherwise be shadowed by its finished self
+  const depthStill = foldDepthMaterial()
+  const chunks: THREE.Mesh[] = []
   for (const chunk of world.chunks) {
     for (const [geo, mat] of [[chunk.static, staticMat], [chunk.sway, swayMat]] as const) {
       if (!geo) continue
       const mesh = new THREE.Mesh(geo, mat)
       mesh.castShadow = true
       mesh.receiveShadow = true
-      if (mat === swayMat) mesh.customDepthMaterial = depthSway
+      mesh.customDepthMaterial = mat === swayMat ? depthSway : depthStill
       mesh.matrixAutoUpdate = false
       mesh.updateMatrix()
       scene.add(mesh)
+      chunks.push(mesh)
     }
   }
 
@@ -328,6 +339,7 @@ function createStudio(): Studio | null {
     deskDynamic,
     signs,
     splashes: [],
+    chunks,
     minimapUrl: minimapDataUrl(world),
   }
 }
@@ -337,6 +349,98 @@ function getStudio(): Studio | null {
   studio = createStudio()
   if (!studio) studioFailed = true
   return studio
+}
+
+// ---- the fold stories: the blast and the construction (fold.ts) ----------------------------
+// Switching the studio off blows it up, switching it on builds it back (blast.ts, build.ts). The
+// render loop runs whichever one App.tsx's clock says is playing, keeps a note of everything it
+// moved, and puts it all back the moment the story ends or is cut short — so the frame after is
+// exactly the frame the store would have drawn without it.
+interface FoldRun {
+  phase: 'blast' | 'build'
+  since: number
+  blast: Blast | null
+  build: Build | null
+  /** rigs a story has posed: back to their own scale, upright and visible when it is over */
+  rigs: Map<string, { rig: HamsterRig; main: boolean }>
+  /** the story's own framing (ground zero, a little wider than the view was), bisected once per size and orientation; `base` = the zoom the story started from */
+  view: { key: string; cam: Camera; base: number } | null
+  /** how far towards the story's view the camera already was when this run began (fold.ts `storyMix`) */
+  mixFrom: number
+}
+/** nothing playing: what the mini window and the preview hand the studio */
+const NO_FX: FoldFx = foldAt(false)
+
+function startFoldRun(st: Studio, world: Scene, fx: FoldFx, handed: number | null): FoldRun {
+  // A hamster in the hand or in the air goes back to its chair first: both stories pose every rig
+  // themselves, and a flight left mid-air would land in a room that is not there any more.
+  const reseat = (id: string): void => {
+    const k = world.seats.get(id)
+    if (k !== undefined) world.walkers.set(id, makeWalker(OFFICE.slots[k].seat))
+  }
+  for (const f of world.flights) reseat(f.id)
+  if (world.hold) reseat(world.hold.id)
+  world.flights = []
+  world.hold = null
+  const run: FoldRun = { phase: fx.phase as 'blast' | 'build', since: fx.since, blast: null, build: null, rigs: new Map(), view: null, mixFrom: handed ?? (fx.phase === 'build' ? 1 : 0) }
+  if (fx.phase === 'blast') {
+    run.blast = makeBlast()
+    st.scene.add(run.blast.group)
+  } else {
+    run.build = makeBuild(st.world)
+    st.scene.add(run.build.dust.mesh)
+  }
+  // the shader moves vertices well outside the chunks' bounding spheres while a story plays
+  for (const m of st.chunks) m.frustumCulled = false
+  return run
+}
+
+function endFoldRun(st: Studio, run: FoldRun): void {
+  if (run.blast) {
+    st.scene.remove(run.blast.group)
+    disposeBlast(run.blast)
+  }
+  if (run.build) {
+    st.scene.remove(run.build.dust.mesh)
+    disposeBuild(run.build)
+  }
+  VOX_FOLD.build.value = BUILD_REST
+  VOX_FOLD.blast.value = BLAST_REST
+  for (const m of st.chunks) m.frustumCulled = true
+  // the desks' lit parts and the wall prints back on their spots
+  st.world.deskParts.forEach((parts, k) => {
+    const dyn = st.deskDynamic[k]
+    for (const key of ['screen', 'keys', 'lamp', 'spill'] as const) {
+      dyn[key].position.y = parts[key].y
+      dyn[key].updateMatrix()
+    }
+  })
+  for (const s of st.signs) {
+    s.mesh.position.y = s.spot.y
+    s.mesh.updateMatrix()
+  }
+  for (const { rig, main } of run.rigs.values()) {
+    rig.group.scale.setScalar(main ? MAIN_SCALE : 1)
+    rig.group.rotation.x = 0
+    rig.group.rotation.z = 0
+    rig.group.visible = true
+  }
+}
+
+/** The fixtures that are not in the chunk geometry ride with their tiles (fold.ts `foldLift`). */
+function liftFixtures(st: Studio, build: number, blast: number): void {
+  st.world.deskParts.forEach((parts, k) => {
+    const dyn = st.deskDynamic[k]
+    for (const key of ['screen', 'keys', 'lamp', 'spill'] as const) {
+      const b = parts[key]
+      dyn[key].position.y = b.y - foldLift(b.x, b.y, b.z, build, blast)
+      dyn[key].updateMatrix()
+    }
+  })
+  for (const s of st.signs) {
+    s.mesh.position.y = s.spot.y - foldLift(s.spot.x, s.spot.y, s.spot.z, build, blast)
+    s.mesh.updateMatrix()
+  }
 }
 
 /** Pose the rig for one frame. Rhythms are lifted from the game's cat animation. */
@@ -482,13 +586,36 @@ function poseRig(st: RigState, anim: IsoAnim, seated: boolean, t: number): void 
       tailG.rotation.z = Math.sin(t * 14) * 0.5
       break
     }
+    case 'hammer': {
+      // On the site (build.ts): the near arm lifts the mallet slowly over the head and brings it
+      // down fast, a hop on every strike, the other paw steadying the work. Each hamster swings on
+      // its own beat (its place in the room sets the phase), or the crew would look like a machine.
+      const ph = (((t * 2.0 + rig.group.position.x * 0.013) % 1) + 1) % 1
+      const up = ph < 0.72 ? ph / 0.72 : 1 - (ph - 0.72) / 0.28
+      legs[0].rotation.x = -1.0 - 1.8 * up
+      legs[1].rotation.x = -1.1
+      const strike = ph >= 0.72 ? 1 - up : 0
+      const hop = Math.sin(strike * Math.PI) * 3
+      for (const part of [bodyM, headG, tailG, ...legs]) part.position.y += hop
+      headG.rotation.x += 0.08 + 0.12 * (1 - up)
+      tieG.position.y = bodyM.position.y - bodyY
+      break
+    }
     default:
       legs[0].rotation.x = -1.0
       legs[1].rotation.x = -1.0
   }
 }
 
-export function DeskStudio({ session, height }: { session: SessionState | null; height: number }) {
+/**
+ * `fx` is the fold switch's clock (fold.ts, from App.tsx's `useFold`): which story is playing, if
+ * any, and since when. The mini window and the preview leave it out — nothing plays there.
+ */
+/** the size the picture keeps while the pane slides (styles.css `.is-story .desk-canvas-host`); `w` null = the pane's own width */
+export interface KeepSize { w: number | null; h: number }
+
+export function DeskStudio({ session, height, fx = NO_FX, story = false, shut = false, keep }: { session: SessionState | null; height: number; fx?: FoldFx; story?: boolean; shut?: boolean; keep?: KeepSize }) {
+  const u = useUi()
   const wrapRef = useRef<HTMLDivElement>(null)
   const canvasHost = useRef<HTMLDivElement>(null)
   const feeds = useRef(new Map<string, HTMLDivElement>())
@@ -497,6 +624,16 @@ export function DeskStudio({ session, height }: { session: SessionState | null; 
   const viewportPolygon = useRef<SVGPolygonElement>(null)
   /** the caption under a wall print while the pointer is over it */
   const signTip = useRef<HTMLDivElement>(null)
+  /** the blast's white-out over the whole studio (styles.css `.office-flash`), driven by the render loop */
+  const flash = useRef<HTMLDivElement>(null)
+  const fxRef = useRef(fx)
+  fxRef.current = fx
+  /** the story on screen, with everything it has to put back (startFoldRun / endFoldRun) */
+  const foldRun = useRef<FoldRun | null>(null)
+  /** true while a story plays: the pointer takes hold of nothing then (the hamsters are not themselves) */
+  const fxOn = useRef(false)
+  /** the story mix drawn last frame (0 while nothing plays) */
+  const storyMixNow = useRef(0)
   const [zoom, setZoom] = useState(250)
   const [selected, setSelected] = useState('main')
   const [showMap, setShowMap] = useState(false)
@@ -665,6 +802,12 @@ export function DeskStudio({ session, height }: { session: SessionState | null; 
         const st = getStudio()
         if (st) setSignHot(st.signs, index === null ? null : st.signs[index] ?? null)
       },
+      fold() {
+        const now = fxRef.current
+        let hidden = 0
+        for (const rs of sceneFor().rigs.values()) if (!rs.rig.group.visible) hidden++
+        return { phase: now.phase, age: foldRun.current ? foldAge(now, performance.now()) : 0, hidden, flash: flash.current?.style.opacity ?? '' }
+      },
       setStates(map) {
         const id = sessionId()
         if (!id) return
@@ -683,7 +826,7 @@ export function DeskStudio({ session, height }: { session: SessionState | null; 
         if (!sid) return
         const ts = Date.now()
         const apply = useDesk.getState().apply
-        apply({ kind: 'agent_start', sessionId: sid, agentId: id, agentType, description: '새 동료', toolUseId: null, depth: 1, background: false, ts })
+        apply({ kind: 'agent_start', sessionId: sid, agentId: id, agentType, description: ui().studio.newColleague, toolUseId: null, depth: 1, background: false, ts })
         apply({ kind: 'model', sessionId: sid, agentId: id, model, effort: 'high', ts })
       },
     }
@@ -698,7 +841,7 @@ export function DeskStudio({ session, height }: { session: SessionState | null; 
     if (!st) { setNoGl(true); return }
     const canvas = st.renderer.domElement
     canvas.className = 'desk-canvas'
-    canvas.setAttribute('aria-label', `복셀 스튜디오, 책상 ${OFFICE.slots.length}개`)
+    canvas.setAttribute('aria-label', ui().studio.canvasLabel(OFFICE.slots.length))
     host.appendChild(canvas)
     return () => {
       if (canvas.parentNode === host) host.removeChild(canvas)
@@ -707,6 +850,9 @@ export function DeskStudio({ session, height }: { session: SessionState | null; 
 
   useEffect(() => {
     const el = wrapRef.current!
+    // sized by the canvas host, not the pane: during a fold story the pane slides while the host
+    // keeps its size (styles.css `.is-story .desk-canvas-host`); the pointer and wheel listeners
+    // below stay on the pane, so the overlays and a synthetic event on the pane reach them
     const ro = new ResizeObserver((entries) => {
       const rect = entries[0].contentRect
       size.current = { w: Math.max(1, Math.floor(rect.width)), h: Math.max(1, Math.floor(rect.height)) }
@@ -716,10 +862,15 @@ export function DeskStudio({ session, height }: { session: SessionState | null; 
       st.camera.aspect = size.current.w / size.current.h
       st.camera.updateProjectionMatrix()
     })
-    ro.observe(el)
-    // `x0, y0` is where the button went down: a release within a few pixels of it is a click, and
-    // the only thing in the scene a click means anything to is a print on the wall
-    let drag: { id: number; x: number; y: number; x0: number; y0: number; orbit: boolean } | null = null
+    ro.observe(canvasHost.current!)
+    // The three buttons do three things and nothing else. The left button only ever takes hold of
+    // something — a hamster (grab.ts), or a print on the wall on a click — and never moves the
+    // camera; the middle button pans (the look-around the left button used to do) and the right
+    // one orbits. So: `drag` is the middle or right button moving the camera, and `press` the left
+    // button held on nothing, which turns into a click if it lets go within a few pixels of where
+    // it went down.
+    let drag: { id: number; x: number; y: number; orbit: boolean } | null = null
+    let press: { id: number; x0: number; y0: number } | null = null
     // A hamster in the hand (grab.ts): which pointer holds it, and the scene it belongs to — a tab
     // switch mid-drag must let go of the one that was picked up, not of the new scene's nothing.
     let grabbing: { pointer: number; scene: Scene } | null = null
@@ -734,7 +885,8 @@ export function DeskStudio({ session, height }: { session: SessionState | null; 
     /** the hamster under the pointer, if any: one of the rigs' meshes hit by the ray, and not one already in the air */
     const hamsterUnder = (e: { clientX: number; clientY: number }): string | null => {
       const st = getStudio()
-      if (!st) return null
+      // while a fold story plays the hamsters are being blown up or dropped in: not for taking
+      if (!st || fxOn.current) return null
       const world = sceneFor()
       const owners = new Map<THREE.Object3D, string>()
       for (const [id, rs] of world.rigs) if (rs.rig.group.visible && !world.flights.some((f) => f.id === id)) owners.set(rs.rig.group, id)
@@ -757,7 +909,7 @@ export function DeskStudio({ session, height }: { session: SessionState | null; 
      */
     const signUnder = (e: { clientX: number; clientY: number }): HungSign | null => {
       const st = getStudio()
-      if (!st || !st.signs.length) return null
+      if (!st || !st.signs.length || fxOn.current) return null
       for (const plate of plates.current.values()) {
         if (plate.style.display === 'none') continue
         const r = plate.getBoundingClientRect()
@@ -785,9 +937,10 @@ export function DeskStudio({ session, height }: { session: SessionState | null; 
       updateZoom()
     }
     const down = (e: PointerEvent): void => {
-      if ((e.button !== 0 && e.button !== 2) || overUi(e) || grabbing) return
-      // the left button on a hamster picks it up instead of panning (grab.ts); shift keeps the orbit
-      if (e.button === 0 && !e.shiftKey) {
+      if (overUi(e) || grabbing) return
+      if (e.button === 0) {
+        // the left button on a hamster picks it up (grab.ts); on anything else it is a press that
+        // may turn out to be a click on a print — it never pans
         const id = hamsterUnder(e)
         const world = sceneFor()
         const rs = id ? world.rigs.get(id) : undefined
@@ -808,9 +961,15 @@ export function DeskStudio({ session, height }: { session: SessionState | null; 
           setDragging(true)
           return
         }
+        press = { id: e.pointerId, x0: e.clientX, y0: e.clientY }
+        return
       }
-      drag = { id: e.pointerId, x: e.clientX, y: e.clientY, x0: e.clientX, y0: e.clientY, orbit: e.button === 2 || e.shiftKey }
-      el.style.cursor = '' // the class's grab/grabbing takes over for the drag
+      if (e.button !== 1 && e.button !== 2) return
+      // (the middle button's own meaning, Chromium's autoscroll, is cancelled on `mousedown` below —
+      // cancelling this pointerdown instead would suppress that mouse event and leave the autoscroll
+      // on, eating every move of the drag)
+      drag = { id: e.pointerId, x: e.clientX, y: e.clientY, orbit: e.button === 2 }
+      el.style.cursor = '' // the class's grabbing cursor takes over for the drag
       hover(null)
       el.setPointerCapture(e.pointerId)
       setDragging(true)
@@ -821,10 +980,11 @@ export function DeskStudio({ session, height }: { session: SessionState | null; 
         return
       }
       if (!drag) {
-        // the prints on the walls are links: the cursor says so, and the print itself answers
-        // like a button — lifted, lit, captioned (signs.ts) — for as long as the pointer stays
+        // The prints on the walls are links: the cursor says so, and the print itself answers
+        // like a button — lifted, lit, captioned (signs.ts) — for as long as the pointer stays.
+        // Over a hamster the cursor is the hand that can pick it up.
         const sign = overUi(e) ? null : signUnder(e)
-        el.style.cursor = sign ? 'pointer' : ''
+        el.style.cursor = sign ? 'pointer' : !overUi(e) && hamsterUnder(e) ? 'grab' : ''
         hover(sign)
         return
       }
@@ -852,16 +1012,22 @@ export function DeskStudio({ session, height }: { session: SessionState | null; 
         }
         return
       }
-      const d = drag
+      if (press) {
+        const p = press
+        if (e.pointerId !== p.id) return
+        press = null
+        // A left click that did not move, on the print: open its site. `window.open` is how every
+        // external link leaves the app — electron/main.ts hands it to the default browser through
+        // setWindowOpenHandler, so this needs no bridge of its own.
+        if (e.type === 'pointerup' && e.button === 0 && Math.hypot(e.clientX - p.x0, e.clientY - p.y0) < 4) {
+          const sign = signUnder(e)
+          if (sign) window.open(sign.url, '_blank', 'noopener')
+        }
+        return
+      }
+      if (!drag) return
       drag = null
       setDragging(false)
-      // A left click that did not drag, on the print: open its site. `window.open` is how every
-      // external link leaves the app — electron/main.ts hands it to the default browser through
-      // setWindowOpenHandler, so this needs no bridge of its own.
-      if (d && e.type === 'pointerup' && e.button === 0 && Math.hypot(e.clientX - d.x0, e.clientY - d.y0) < 4) {
-        const sign = signUnder(e)
-        if (sign) window.open(sign.url, '_blank', 'noopener')
-      }
     }
     const dbl = (e: MouseEvent): void => {
       if (!overUi(e) && !signUnder(e) && !hamsterUnder(e)) focus()
@@ -871,6 +1037,11 @@ export function DeskStudio({ session, height }: { session: SessionState | null; 
       hover(null)
     }
     const menu = (e: Event): void => e.preventDefault()
+    // The middle button pans, so its own meaning — Chromium's autoscroll, a default action of the
+    // mouse events, not the pointer ones — is cancelled here, on mousedown and on the auxclick after.
+    const aux = (e: MouseEvent): void => {
+      if (e.button === 1) e.preventDefault()
+    }
     el.addEventListener('wheel', wheel, { passive: false })
     el.addEventListener('pointerdown', down)
     el.addEventListener('pointermove', move)
@@ -880,6 +1051,8 @@ export function DeskStudio({ session, height }: { session: SessionState | null; 
     el.addEventListener('pointerleave', leave)
     el.addEventListener('dblclick', dbl)
     el.addEventListener('contextmenu', menu)
+    el.addEventListener('mousedown', aux)
+    el.addEventListener('auxclick', aux)
     return () => {
       ro.disconnect()
       el.removeEventListener('wheel', wheel)
@@ -891,6 +1064,8 @@ export function DeskStudio({ session, height }: { session: SessionState | null; 
       el.removeEventListener('pointerleave', leave)
       el.removeEventListener('dblclick', dbl)
       el.removeEventListener('contextmenu', menu)
+      el.removeEventListener('mousedown', aux)
+      el.removeEventListener('auxclick', aux)
       leave()
       // unmounted mid-drag (the desk folded away): let go, or the hamster hangs in the air for good
       if (grabbing?.scene.hold) {
@@ -914,6 +1089,36 @@ export function DeskStudio({ session, height }: { session: SessionState | null; 
     world.width = W
     world.height = H
     st.uTime.value += dt
+
+    // ---- the fold stories (fold.ts): start, end or cut whichever App.tsx's clock says ----------
+    // A story that is over, or replaced by the other one (an unfold in the middle of the blast),
+    // is torn down before anything else happens this frame, so a cut is one clean frame.
+    const fx = fxRef.current
+    let run = foldRun.current
+    // the view a story that is being cut short was showing: the next one carries on from there
+    let handed: number | null = null
+    if (run && (!foldPlaying(fx) || run.phase !== fx.phase || run.since !== fx.since)) {
+      handed = storyMixNow.current
+      endFoldRun(st, run)
+      run = foldRun.current = null
+    }
+    if (!run && foldPlaying(fx)) run = foldRun.current = startFoldRun(st, world, fx, handed)
+    const ft = run ? foldAge(fx, t) : 0
+    fxOn.current = !!run
+    /** height of the ground at a world point, or null over the sea — what a thrown hamster and the blast's dust land on */
+    const groundAt: GroundAt = (x, z) => {
+      const tx = Math.floor(x / T)
+      const ty = Math.floor(z / T)
+      return st.world.land[ty]?.[tx] ? st.world.heights[ty][tx] : null
+    }
+    if (run?.blast) tickBlast(run.blast, ft, dt, groundAt, WATER_Y)
+    if (run?.build) tickBuild(run.build, ft, dt)
+    if (run) {
+      VOX_FOLD.blast.value = run.blast ? shockRadius(ft) : BLAST_REST
+      liftFixtures(st, run.build ? ft : BUILD_REST, VOX_FOLD.blast.value)
+    }
+    /** the overlays (plates, glyphs, feeds) stay off while the room is not itself */
+    const hideUi = !!run && (!!run.blast || ft < BUILD.HAMMER_END)
 
     const hams = s ? s.order.map((id) => s.hamsters[id]).filter(Boolean) : []
     reconcileSeats(world.seats, hams.map((h) => h.id))
@@ -957,11 +1162,7 @@ export function DeskStudio({ session, height }: { session: SessionState | null; 
     if (world.hold && !hams.some((h) => h.id === world.hold!.id)) world.hold = null
     if (world.hold) hang(world.hold, dt)
     if (world.flights.length) {
-      const ground: Ground = (x, z) => {
-        const tx = Math.floor(x / T)
-        const ty = Math.floor(z / T)
-        return st.world.land[ty]?.[tx] ? st.world.heights[ty][tx] : null
-      }
+      const ground: Ground = groundAt
       world.flights = world.flights.filter((f) => {
         if (!hams.some((h) => h.id === f.id)) return false
         const ev = fly(f, dt, ground, WATER_Y)
@@ -1015,7 +1216,9 @@ export function DeskStudio({ session, height }: { session: SessionState | null; 
     {
       const boss = s?.hamsters.main
       const bw = world.walkers.get('main')
-      if (boss && bw && !carried.has('main')) {
+      if (run) {
+        // a fold story freezes the rounds where they are, like everything else on the floor
+      } else if (boss && bw && !carried.has('main')) {
         const workers: { id: string; seat: { i: number; j: number } }[] = []
         for (const h of hams) {
           // a colleague in the user's hand is off its chair, so a round on it is cut short
@@ -1063,8 +1266,9 @@ export function DeskStudio({ session, height }: { session: SessionState | null; 
       // The boss may be out on its rounds, and for those it takes the direct lanes rather than
       // the door corridor; everybody else only ever walks the corridor to a seat or the door.
       // In the hand or in the air it walks nowhere: the walker waits where it was picked up until
-      // it lands, and the landing sets it down and gives it the way home (above).
-      if (!inHand) {
+      // it lands, and the landing sets it down and gives it the way home (above). A fold story
+      // freezes every walker where it is, and they carry on from there when it is over.
+      if (!inHand && !run) {
         if (h.id === 'main' && patrol.phase !== 'idle') walkDirect(walker, patrolGoal(patrol) ?? slot.seat)
         else walkTo(walker, h.state === 'leaving' ? OFFICE.door : slot.seat)
         advanceWalker(walker, dt)
@@ -1125,6 +1329,46 @@ export function DeskStudio({ session, height }: { session: SessionState | null; 
         : 0
       poseRig(rs, anim, seated && !walker.moving, t / 1000)
 
+      // ---- a fold story has the last word on the rig (fold.ts) -------------------------------
+      if (run) {
+        const noted = run.rigs.get(h.id)
+        if (!noted || noted.rig !== rs.rig) run.rigs.set(h.id, { rig: rs.rig, main: h.id === 'main' })
+        const g = rs.rig.group
+        if (run.blast) {
+          // the wave reaches it: thrown outward and up, tumbling, shrinking to nothing, with a
+          // burst of ash where it stood (blast.ts)
+          const doom = doomOf(run.blast, h.id, pos.x, pos.z, ft)
+          if (doom) {
+            if (doom.fresh) ashBurst(run.blast, pos.x, groundY + 20, pos.z)
+            const d = doomAt(doom.age)
+            const dx = pos.x - CENTRE.x
+            const dz = pos.z - CENTRE.z
+            const len = Math.hypot(dx, dz) || 1
+            g.position.set(pos.x + (dx / len) * d.out, groundY + d.up, pos.z + (dz / len) * d.out)
+            g.scale.setScalar(scaleF * d.scale)
+            g.rotation.x = d.spin
+            g.rotation.z = d.spin * 0.6
+            g.visible = d.scale > 0
+            poseRig(rs, 'struggle', false, t / 1000)
+          }
+        } else if (run.build) {
+          // on the site (build.ts): down from the sky once its tile is there, hard hat on,
+          // hammering where it stands until the place is up — then the pose above, in the same
+          // spot, takes over and it sits down
+          const floor = groundAt(pos.x, pos.z) ?? H_OFFICE
+          const b = builder(ft, landTime(pos.x, pos.z, floor))
+          if (b.working) {
+            g.visible = b.here
+            g.position.y = floor + b.height
+            poseRig(rs, 'hammer', false, t / 1000)
+            if (b.landed) {
+              thud(run.build, h.id, pos.x, floor, pos.z)
+              wearGear(run.build, h.id, rs.rig, st.hamsterMat)
+            }
+          } else dropGear(run.build, h.id)
+        }
+      }
+
       // ---- DOM overlays ---------------------------------------------------------------------
       const scale = c.scale
       const headTop = groundY + (rs.rig.headG.position.y + FEED_ANCHOR) * scaleF
@@ -1134,7 +1378,7 @@ export function DeskStudio({ session, height }: { session: SessionState | null; 
         : { x: pos.x, y: groundY + 4, z: pos.z }
       if (plate) {
         const p = worldToScreen(c, plateWorld, W, H)
-        const show = scale >= PLATE_MIN_SCALE && !p.behind && p.x > -60 && p.x < W + 60 && p.y > -20 && p.y < H + 20
+        const show = !hideUi && scale >= PLATE_MIN_SCALE && !p.behind && p.x > -60 && p.x < W + 60 && p.y > -20 && p.y < H + 20
         plate.style.display = show ? '' : 'none'
         // The boss on its rounds ends up standing just behind and beside a colleague, and a plate
         // centred under its feet lands squarely on that colleague's head — the one thing the
@@ -1150,7 +1394,7 @@ export function DeskStudio({ session, height }: { session: SessionState | null; 
         // the boss's mark goes on the far side of its head: the near side is where the colleague
         // it is standing over keeps its own feed rows
         const p = worldToScreen(c, { x: pos.x + (mark && h.id === 'main' ? -14 : 14), y: headTop + 14, z: pos.z }, W, H)
-        const show = !!symbol && (mark ? scale >= 0.8 : !walker.moving && scale >= 1.5) && !p.behind && p.x > 0 && p.x < W && p.y > 0 && p.y < H
+        const show = !hideUi && !!symbol && (mark ? scale >= 0.8 : !walker.moving && scale >= 1.5) && !p.behind && p.x > 0 && p.x < W && p.y > 0 && p.y < H
         glyph.style.display = show ? '' : 'none'
         if (show) {
           glyph.textContent = symbol as string
@@ -1163,7 +1407,7 @@ export function DeskStudio({ session, height }: { session: SessionState | null; 
         // how many rows this zoom carries — the same answer the automatic framing reserved sky for
         const lines = feedLines(scale)
         const p = worldToScreen(c, { x: pos.x, y: headTop + FEED_RISE, z: pos.z }, W, H)
-        const show = lines > 0 && !p.behind && p.x > 70 && p.x < W - 70 && p.y > 40 && p.y < H + 70
+        const show = !hideUi && lines > 0 && !p.behind && p.x > 70 && p.x < W - 70 && p.y > 40 && p.y < H + 70
         feed.style.opacity = show ? '1' : '0'
         // `visibility` takes the rows out of hit testing too; the container itself never gets clicks
         feed.style.visibility = show ? '' : 'hidden'
@@ -1289,7 +1533,42 @@ export function DeskStudio({ session, height }: { session: SessionState | null; 
       }
     }
 
-    applyTo(st.camera, c, W, H)
+    // A story's camera work is done on a copy: the view cuts over to ground zero with the whole
+    // island in frame (the blast under its flash, the build from its first frame) and the build
+    // eases home before the hats come off (fold.ts `storyMix`). The camera state never learns of
+    // it, so the view after a story is the view before it — and a right-drag during the story
+    // still turns the room, which is why the story's framing is bisected again when the
+    // orientation or the size changes.
+    let view: Camera = c
+    const k = run ? storyMix(run.phase, ft, run.mixFrom) : 0
+    storyMixNow.current = k
+    if (run) {
+      if (k > 0) {
+        const key = `${W}x${H}|${c.yaw.toFixed(3)}|${c.pitch.toFixed(3)}`
+        if (!run.view || run.view.key !== key) {
+          // the zoom the story started from, not the one the auto camera is easing through now
+          const base = run.view?.base ?? c.scale
+          const cam: Camera = { ...c }
+          overviewCamera(cam, storyBounds(), W, H)
+          focusCamera(cam, CENTRE, W, H, storyScale(base, cam.scale), H * STORY_DROP)
+          run.view = { key, cam, base }
+        }
+        view = { ...c, ...blendView(c, run.view.cam, k) }
+      }
+    }
+    applyTo(st.camera, view, W, H)
+    if (run?.blast) {
+      // the tremor, on the three camera alone
+      const sh = shakeOffset(ft, distanceFor(view.scale))
+      st.camera.position.x += sh.x
+      st.camera.position.y += sh.y
+      st.camera.position.z += sh.z
+    }
+    if (flash.current) {
+      const a = run?.blast ? flashAlpha(ft) : 0
+      const v = a > 0 ? a.toFixed(3) : '0'
+      if (flash.current.style.opacity !== v) flash.current.style.opacity = v
+    }
     st.sky.position.copy(st.camera.position)
     if (!document.hidden) st.renderer.render(st.scene, st.camera)
 
@@ -1310,15 +1589,32 @@ export function DeskStudio({ session, height }: { session: SessionState | null; 
       raf = requestAnimationFrame(tick)
     }
     raf = requestAnimationFrame(tick)
-    return () => cancelAnimationFrame(raf)
+    return () => {
+      cancelAnimationFrame(raf)
+      // unmounted mid-story (the blast has folded the studio away, or the tab closed under a
+      // build): everything the story moved goes back now, not on a frame that will never come
+      const run = foldRun.current
+      if (run) {
+        const st = getStudio()
+        if (st) endFoldRun(st, run)
+        foldRun.current = null
+      }
+      fxOn.current = false
+    }
   }, [])
 
   const studioRef = getStudio()
   return (
-    <section ref={wrapRef} className={`desk-wrap desk-studio ${dragging ? 'is-dragging' : ''}`} style={{ height }} aria-label="햄스터 스튜디오">
+    <section
+      ref={wrapRef}
+      className={`desk-wrap desk-studio ${dragging ? 'is-dragging' : ''} ${story ? 'is-story' : ''} ${shut ? 'is-shut' : ''}`}
+      style={{ height, ...(story && keep ? { ['--keep-h' as string]: `${keep.h}px`, ['--keep-w' as string]: keep.w === null ? '100%' : `${keep.w}px` } : {}) }}
+      aria-label={u.studio.label}
+    >
       <div ref={canvasHost} className="desk-canvas-host" />
-      {noGl && <div className="office-nogl">3D 화면을 열 수 없어요.<br />그래픽 드라이버나 하드웨어 가속 설정을 확인해 주세요.</div>}
+      {noGl && <div className="office-nogl">{rich(u.studio.noGl)}</div>}
       <div className="office-vignette" />
+      <div ref={flash} className="office-flash" aria-hidden="true" />
       <div className="desk3d-overlay">
         {list.map((h) => (
           <div key={`plate:${session?.info.sessionId}:${h.id}`} className={`office-nameplate ${h.id === selected ? 'is-selected' : ''}`} data-id={h.id} ref={(el) => {
@@ -1328,8 +1624,8 @@ export function DeskStudio({ session, height }: { session: SessionState | null; 
             return () => { if (plates.current.get(h.id) === el) plates.current.delete(h.id) }
           }}>
             <span className="np-dot" style={{ background: statusDot(h.state) }} />
-            <span className={`np-name ${h.id === 'main' ? 'is-main' : ''}`}>{h.id === 'main' ? '메인' : h.name.length > 13 ? `${h.name.slice(0, 12)}…` : h.name}</span>
-            <span className="np-sub">{[modelSkin(h.model).label, h.effort].filter(Boolean).join(' · ') || STATE_LABEL[h.state]}</span>
+            <span className={`np-name ${h.id === 'main' ? 'is-main' : ''}`}>{h.id === 'main' ? u.common.mainHamster : h.name.length > 13 ? `${h.name.slice(0, 12)}…` : h.name}</span>
+            <span className="np-sub">{[modelSkin(h.model).label, h.effort].filter(Boolean).join(' · ') || u.studio.state[h.state]}</span>
           </div>
         ))}
         {list.map((h) => (
@@ -1366,7 +1662,7 @@ export function DeskStudio({ session, height }: { session: SessionState | null; 
                 className={`ob-item kind-${f.kind} tone-${f.tone}`}
                 data-ts={f.ts}
                 data-life={feedLife(f)}
-                title={`${f.raw}\n\n클릭: 말풍선 로그에서 자세히 · 우클릭: 닫기`}
+                title={u.studio.feedTip(f.raw)}
                 onClick={() => { if (session) requestLogReveal(session.info.sessionId, f.id) }}
                 onContextMenu={(e) => { e.preventDefault(); if (session) dismissFeedItem(session.info.sessionId, h.id, f.id) }}
               >
@@ -1376,29 +1672,27 @@ export function DeskStudio({ session, height }: { session: SessionState | null; 
             ))}
           </div>
         ))}
-        <div ref={signTip} className="office-sign-tip" aria-hidden="true">{SIGN_TIP}</div>
+        <div ref={signTip} className="office-sign-tip" aria-hidden="true">{u.studio.signTip}</div>
       </div>
       <div className="office-header" data-office-ui>
         <div className="office-heading">
           <span className="office-eyebrow"><span className="office-live-dot" /> THE HAMSTER STUDIO <span className="office-floor">01F</span></span>
-          <span className="office-title" title={session?.info.cwd}>{session?.title || session?.info.name || '작은 동료들의 작업실'}</span>
+          <span className="office-title" title={session?.info.cwd}>{session?.title || session?.info.name || u.studio.defaultTitle}</span>
         </div>
-        <div className="office-status"><span><i className="status-active" />작업 {active}</span><span><i />휴식 {list.length - active - waiting}</span>{waiting > 0 && <span className="needs-attention"><i />확인 {waiting}</span>}<span className="office-occupancy" title="사장 자리를 뺀 동료 자리"><small>동료</small> {Math.min(list.filter((h) => h.id !== 'main').length, OFFICE.staff)} <small>/ {OFFICE.staff}</small></span></div>
+        <div className="office-status"><span><i className="status-active" />{u.studio.working} {active}</span><span><i />{u.studio.resting} {list.length - active - waiting}</span>{waiting > 0 && <span className="needs-attention"><i />{u.studio.attention} {waiting}</span>}<span className="office-occupancy" title={u.studio.occupancyTip}><small>{u.studio.colleagues}</small> {Math.min(list.filter((h) => h.id !== 'main').length, OFFICE.staff)} <small>/ {OFFICE.staff}</small></span></div>
       </div>
       {!session && (
         <div className="office-welcome" data-office-ui>
-          <span>자리는 준비되어 있어요</span>
-          <p>
-            터미널에서 <code>claude</code>를 실행하거나<br />아래 버튼을 누르세요.
-          </p>
+          <span>{u.studio.welcomeReady}</span>
+          <p>{rich(u.studio.welcomeHow)}</p>
           {welcomeWs && welcomePty !== null && (
             <div className="office-welcome-actions">
-              <button className="owa-run" data-debug-click="welcome-run" onClick={() => runInShell('claude')} title="이 터미널에서 claude 시작">
-                claude 실행
+              <button className="owa-run" data-debug-click="welcome-run" onClick={() => runInShell('claude')} title={u.studio.runClaudeTip}>
+                {u.studio.runClaude}
               </button>
               {/* the list the session bar's `지난 대화` opens, but a pick runs in this idle terminal
                   rather than a new tab — there is no claude here yet to keep out of the way */}
-              <Popover label="지난 대화" title="이 폴더에서 나눈 지난 대화를 이 터미널에서 이어서" ariaLabel="지난 대화" width={320} debugClick="welcome-history">
+              <Popover label={u.studio.history} title={u.studio.historyHereTip} ariaLabel={u.studio.history} width={360} debugClick="welcome-history">
                 {(close) => <TranscriptList cwd={welcomeWs.cwd} profileId={welcomeWs.profileId} onPick={close} run={runInShell} />}
               </Popover>
             </div>
@@ -1408,27 +1702,27 @@ export function DeskStudio({ session, height }: { session: SessionState | null; 
       <div className="office-bottom" data-office-ui>
         <div className="office-follow">
           <span className="office-follow-icon"><IconTarget size={14} /></span>
-          <select aria-label="햄스터 위치 찾기" value={list.some((h) => h.id === selected && scene.seats.has(h.id)) ? selected : ''} onChange={(e) => focus(e.target.value)}>
-            <option value="" disabled>동료 위치 찾기</option>
-            {list.map((h) => <option key={h.id} value={h.id} disabled={!scene.seats.has(h.id)}>{h.id === 'main' ? '메인 햄스터' : h.name} · {scene.seats.has(h.id) ? STATE_LABEL[h.state] : '빈자리 대기'}</option>)}
+          <select aria-label={u.studio.findLabel} value={list.some((h) => h.id === selected && scene.seats.has(h.id)) ? selected : ''} onChange={(e) => focus(e.target.value)}>
+            <option value="" disabled>{u.studio.findPlaceholder}</option>
+            {list.map((h) => <option key={h.id} value={h.id} disabled={!scene.seats.has(h.id)}>{h.id === 'main' ? u.studio.mainHamster : h.name} · {scene.seats.has(h.id) ? u.studio.state[h.state] : u.studio.waitingSeat}</option>)}
           </select>
-          {overflow > 0 && <span className="office-overflow" role="status">{overflow}마리 빈자리 대기</span>}
+          {overflow > 0 && <span className="office-overflow" role="status">{u.studio.overflow(overflow)}</span>}
         </div>
         <div className="office-controls">
-          <button onClick={home} title="메인 햄스터로 이동 (자동 카메라 켜기)" aria-label="메인 햄스터로 이동"><IconHome size={14} /></button>
-          <button className={autoFrame ? 'is-on' : ''} aria-pressed={autoFrame} title="있는 햄스터들만 화면에 담는 자동 카메라" onClick={() => (autoFrame ? manual() : home())}>자동</button>
+          <button onClick={home} title={u.studio.homeTip} aria-label={u.studio.home}><IconHome size={14} /></button>
+          <button className={autoFrame ? 'is-on' : ''} aria-pressed={autoFrame} title={u.studio.autoTip} onClick={() => (autoFrame ? manual() : home())}>{u.studio.auto}</button>
           <span className="control-divider" />
-          <button onClick={() => zoomBy(0.8)} aria-label="축소" title="축소"><IconMinus size={14} /></button>
+          <button onClick={() => zoomBy(0.8)} aria-label={u.studio.zoomOut} title={u.studio.zoomOut}><IconMinus size={14} /></button>
           <span className="office-zoom">{zoom}%</span>
-          <button onClick={() => zoomBy(1.25)} aria-label="확대" title="확대"><IconPlus size={14} /></button>
+          <button onClick={() => zoomBy(1.25)} aria-label={u.studio.zoomIn} title={u.studio.zoomIn}><IconPlus size={14} /></button>
           <span className="control-divider" />
-          <button onClick={overview} data-debug-click="overview">전체 보기</button>
-          <button className={showMap ? 'is-on' : ''} aria-pressed={showMap} onClick={() => setShowMap(!showMap)}><IconMap className="ctl-ico" size={13} />지도</button>
+          <button onClick={overview} data-debug-click="overview">{u.studio.overview}</button>
+          <button className={showMap ? 'is-on' : ''} aria-pressed={showMap} onClick={() => setShowMap(!showMap)}><IconMap className="ctl-ico" size={13} />{u.studio.map}</button>
         </div>
       </div>
       {showMap && <div className="office-minimap" data-office-ui>
-        <span>OFFICE MAP <small>클릭하여 이동</small></span>
-        <svg viewBox="0 0 100 100" role="img" aria-label="사무실 지도" onClick={(e) => {
+        <span>OFFICE MAP <small>{u.studio.mapHint}</small></span>
+        <svg viewBox="0 0 100 100" role="img" aria-label={u.studio.mapLabel} onClick={(e) => {
           const r = e.currentTarget.getBoundingClientRect()
           const c = sceneFor().camera
           manual()
@@ -1444,7 +1738,7 @@ export function DeskStudio({ session, height }: { session: SessionState | null; 
           <polygon ref={viewportPolygon} fill="#c9e3b516" stroke="#d7edbf" strokeWidth="0.8" />
         </svg>
       </div>}
-      <div className="office-help">드래그로 둘러보기 <span>·</span> 우클릭 드래그로 회전 <span>·</span> 휠로 확대</div>
+      <div className="office-help">{u.studio.helpLeft} <span>·</span> {u.studio.helpRight} <span>·</span> {u.studio.helpWheel} <span>·</span> {u.studio.helpMiddle}</div>
       {session && <div className="office-metrics"><span>+{session.linesAdded}</span> −{session.linesRemoved}<i />{session.edits.length} edits <i />{session.turns} turns</div>}
     </section>
   )

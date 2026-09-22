@@ -7,6 +7,7 @@
 // The paint-atlas branch of the original is not ported — nothing here is paintable.
 import * as THREE from 'three'
 import { SHADE_GLSL } from './builder'
+import { BLAST, BLAST_REST, BUILD, BUILD_REST, CENTRE } from '../fold'
 
 export type TimeUniform = { value: number }
 
@@ -79,6 +80,38 @@ export function setVoxBump(amount: number): void {
   VOX_BUMP.value = Math.max(0, amount)
 }
 
+/**
+ * The two stories the fold switch plays (src/desk/fold.ts): `build` is seconds into a
+ * construction, `blast` the shockwave's radius from ground zero. Shared objects like `VOX_BUMP`,
+ * so every voxel material reads the same two numbers and moving a story on is two assignments.
+ * At their resting values the shader adds exactly nothing.
+ */
+export const VOX_FOLD = { build: { value: BUILD_REST }, blast: { value: BLAST_REST } }
+
+/**
+ * Vertex-shader twin of fold.ts `foldLift`: how far below its place a voxel sits — sunk under the
+ * sea bed before its turn comes in a construction (each tile column rising on its own schedule,
+ * feet before heads, so walls and desks grow up out of their floor), and dropping away again
+ * behind the blast's shockwave. Every constant is the JS one, and the per-tile raggedness is
+ * integer arithmetic, so the dust the JS side spawns lands on the very frame the tile does.
+ */
+const VX_FOLD_GLSL = `
+uniform float uBuild;
+uniform float uBlast;
+float vxFoldLift(vec3 wp) {
+  vec2 tile = floor(wp.xz / 64.0);
+  float jit = mod(tile.x * 7.0 + tile.y * 13.0, 17.0) / 17.0;
+  float d = length(wp.xz - vec2(${CENTRE.x.toFixed(1)}, ${CENTRE.z.toFixed(1)}));
+  float delay = d / 64.0 * ${BUILD.PER_TILE} + clamp(wp.y, 0.0, ${BUILD.LAG_H.toFixed(1)}) / ${BUILD.LAG_H.toFixed(1)} * ${BUILD.LAG} + jit * ${BUILD.JITTER};
+  float k = clamp((uBuild - delay) / ${BUILD.RISE}, 0.0, 1.0) - 1.0;
+  float e = 1.0 + 2.1 * k * k * k + 1.1 * k * k;
+  float s = clamp((uBlast - d - ${BLAST.SINK_LAG.toFixed(1)} - jit * ${BLAST.SINK_JITTER.toFixed(1)}) / ${BLAST.SINK_FRONT.toFixed(1)}, 0.0, 1.0);
+  return (1.0 - e) * ${BUILD.DROP.toFixed(1)} + s * s * ${BUILD.DROP.toFixed(1)};
+}
+`
+/** the line every world-space vertex shader adds after `begin_vertex` */
+const VX_FOLD_APPLY = 'transformed.y -= vxFoldLift((modelMatrix * vec4(position, 1.0)).xyz);\n'
+
 export interface VoxMaterialOptions {
   sway?: boolean
   uTime?: TimeUniform | null
@@ -102,9 +135,12 @@ export function voxMaterial({ sway = false, uTime = null, transparent = false, o
   mat.onBeforeCompile = (sh) => {
     if (uTime) sh.uniforms.uTime = uTime
     sh.uniforms.uBumpAmt = VOX_BUMP // every material shares the object, so a setting change is free
+    sh.uniforms.uBuild = VOX_FOLD.build
+    sh.uniforms.uBlast = VOX_FOLD.blast
     let v = sh.vertexShader
     v = 'attribute float aMat;\nvarying float vMat;\nvarying vec3 vWp;\nvarying vec3 vWn;\n'
       + (sway ? 'uniform float uTime;\nattribute float aSway;\nattribute float aPhase;\nattribute float aBob;\nattribute float aGlow;\nvarying float vGlowMul;\n' + WAVE_GLSL + FLOAT_GLSL : '')
+      + (localDetail ? '' : VX_FOLD_GLSL)
       + v
     v = v.replace('#include <begin_vertex>',
       '#include <begin_vertex>\n'
@@ -115,6 +151,8 @@ export function voxMaterial({ sway = false, uTime = null, transparent = false, o
           + 'else transformed.y += sin(uTime * 1.9 + aPhase * 1.61) * aBob;\n'
           + 'vGlowMul = 1.0 + aGlow * (sin(uTime * 0.95 + aPhase * 1.23) * 0.85 + 0.65);\n'
         : '')
+      // the world rises and falls with the fold stories; a hamster (local detail) is posed by the studio instead
+      + (localDetail ? '' : VX_FOLD_APPLY)
       + 'vMat = aMat;\n'
       // pattern coordinates come from the undeformed vertex, so swaying leaves keep their grain
       + (localDetail
@@ -187,19 +225,37 @@ export function voxMaterial({ sway = false, uTime = null, transparent = false, o
   return mat
 }
 
-/** Depth material for swaying meshes — without it leaves flicker in and out of their own shadow. */
+/**
+ * Depth material for swaying meshes — without it leaves flicker in and out of their own shadow.
+ * It follows the fold stories too, or a construction site would lie in the finished room's shadow.
+ */
 export function swayDepthMaterial(uTime: TimeUniform): THREE.MeshDepthMaterial {
   const mat = new THREE.MeshDepthMaterial({ depthPacking: THREE.RGBADepthPacking })
   mat.customProgramCacheKey = () => 'vox-depth-sway'
   mat.onBeforeCompile = (sh) => {
     sh.uniforms.uTime = uTime
-    sh.vertexShader = ('uniform float uTime;\nattribute float aSway;\nattribute float aPhase;\nattribute float aBob;\n' + WAVE_GLSL + FLOAT_GLSL + sh.vertexShader)
+    sh.uniforms.uBuild = VOX_FOLD.build
+    sh.uniforms.uBlast = VOX_FOLD.blast
+    sh.vertexShader = ('uniform float uTime;\nattribute float aSway;\nattribute float aPhase;\nattribute float aBob;\n' + WAVE_GLSL + FLOAT_GLSL + VX_FOLD_GLSL + sh.vertexShader)
       .replace('#include <begin_vertex>',
         '#include <begin_vertex>\n'
         + 'transformed.x += sin(uTime * 1.7 + aPhase) * aSway;\n'
         + 'transformed.z += cos(uTime * 1.3 + aPhase * 1.37) * aSway * 0.6;\n'
         + 'if (aBob < 0.0) transformed += floatOffset((modelMatrix * vec4(position, 1.0)).xz, uTime, -aBob);\n'
-        + 'else transformed.y += sin(uTime * 1.9 + aPhase * 1.61) * aBob;\n')
+        + 'else transformed.y += sin(uTime * 1.9 + aPhase * 1.61) * aBob;\n'
+        + VX_FOLD_APPLY)
+  }
+  return mat
+}
+
+/** Depth material for the still world: the plain shadow pass, plus the fold stories' rise and fall. */
+export function foldDepthMaterial(): THREE.MeshDepthMaterial {
+  const mat = new THREE.MeshDepthMaterial({ depthPacking: THREE.RGBADepthPacking })
+  mat.customProgramCacheKey = () => 'vox-depth-fold'
+  mat.onBeforeCompile = (sh) => {
+    sh.uniforms.uBuild = VOX_FOLD.build
+    sh.uniforms.uBlast = VOX_FOLD.blast
+    sh.vertexShader = (VX_FOLD_GLSL + sh.vertexShader).replace('#include <begin_vertex>', '#include <begin_vertex>\n' + VX_FOLD_APPLY)
   }
   return mat
 }

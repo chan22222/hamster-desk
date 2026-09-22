@@ -28,8 +28,13 @@
 }
 .notify-banner .nb-main:hover { background: #8a5a081a; }
 
-.notify-banner .nb-title { font-weight: 600; font-size: 12px; flex: none; }
+/* the title keeps its full width while the body has room to give; only a title that is too long on
+   its own (`I have a question · <28-char tab name>` in a narrow column) is cut, and with an ellipsis
+   rather than clipped by the banner's edge */
+.notify-banner .nb-title { font-weight: 600; font-size: 12px; flex: 0 1 auto; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .notify-banner .nb-body {
+  flex: 1 1 0;
+  min-width: 0;
   font-size: 12px;
   color: var(--text-2);
   overflow: hidden;

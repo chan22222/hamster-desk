@@ -4,13 +4,13 @@
 // something, not something you want in the way all day.
 
 import { useEffect, useMemo, useState } from 'react'
+import { useUi } from '../i18n'
 import { dirKey, forgetRecent, middlePath, missingDirs, recentEntries, relTime, toggleFav, type RecentEntry } from '../sidebar/recent'
 import { useDesk } from '../store'
 import { IconClose, IconFolder, IconSearch, IconStar } from './icons'
 
-const GONE = '폴더를 찾을 수 없어요.'
-
 export function RecentList({ onOpen, maxHeight = 300 }: { onOpen: (dir: string) => void; maxHeight?: number }) {
+  const u = useUi()
   // Derived from the settings bag, again whenever it changes (`uiRev`). The start card mounts
   // before the file has been read, so a list taken once at mount was empty for the rest of the
   // run — "no projects yet" on every launch, over a file that had them. A star or × in the
@@ -38,7 +38,7 @@ export function RecentList({ onOpen, maxHeight = 300 }: { onOpen: (dir: string) 
 
   const open = (r: RecentEntry): void => {
     if (missing.has(dirKey(r.path))) {
-      setNotice(`${GONE} (${r.name})`)
+      setNotice(`${u.sidebar.folderGone} (${r.name})`)
       return
     }
     onOpen(r.path)
@@ -48,19 +48,19 @@ export function RecentList({ onOpen, maxHeight = 300 }: { onOpen: (dir: string) 
     <>
       <div className="side-search rl-search">
         <IconSearch size={14} />
-        <input className="side-filter" placeholder="프로젝트 검색" value={filter} onChange={(e) => setFilter(e.target.value)} aria-label="최근 프로젝트 검색" />
+        <input className="side-filter" placeholder={u.sidebar.searchProjects} value={filter} onChange={(e) => setFilter(e.target.value)} aria-label={u.sidebar.searchProjectsLabel} />
       </div>
       {notice && <p className="pop-note warn-line">{notice}</p>}
       <div className="rl-list" style={{ maxHeight }}>
-        {rows.length === 0 && <p className="pop-note">아직 이 앱에서 연 프로젝트가 없어요. 아래에서 폴더를 고르면 여기에 쌓입니다.</p>}
-        {rows.length > 0 && shown.length === 0 && <p className="pop-note">검색 결과가 없어요.</p>}
+        {rows.length === 0 && <p className="pop-note">{u.sidebar.noProjects}</p>}
+        {rows.length > 0 && shown.length === 0 && <p className="pop-note">{u.common.noResults}</p>}
         {shown.map((r) => {
           const gone = missing.has(dirKey(r.path))
           return (
             <div
               key={r.path}
               className={`rec-row ${gone ? 'is-gone' : ''}`}
-              title={gone ? `${r.path}\n${GONE}` : `${r.path}\n클릭: 여기서 터미널 열기`}
+              title={gone ? `${r.path}\n${u.sidebar.folderGone}` : u.sidebar.recentTip(r.path)}
               onClick={() => open(r)}
             >
               <span className="rec-ico">
@@ -70,11 +70,11 @@ export function RecentList({ onOpen, maxHeight = 300 }: { onOpen: (dir: string) 
                 <span className="rec-name">{r.name}</span>
                 <span className="rec-path">{middlePath(r.path, 34)}</span>
               </span>
-              <span className="rec-when">{gone ? '없음' : relTime(r.at)}</span>
+              <span className="rec-when">{gone ? u.common.none : relTime(r.at)}</span>
               <button
                 className={`rec-star ${r.fav ? 'is-on' : ''}`}
-                title={r.fav ? '즐겨찾기 해제' : '즐겨찾기'}
-                aria-label={r.fav ? '즐겨찾기 해제' : '즐겨찾기'}
+                title={r.fav ? u.sidebar.unfavorite : u.sidebar.favorite}
+                aria-label={r.fav ? u.sidebar.unfavorite : u.sidebar.favorite}
                 onClick={(e) => {
                   e.stopPropagation()
                   toggleFav(r.path) // the bag changes → `rows` is derived again
@@ -84,8 +84,8 @@ export function RecentList({ onOpen, maxHeight = 300 }: { onOpen: (dir: string) 
               </button>
               <button
                 className="rec-x"
-                title="목록에서 지우기"
-                aria-label="목록에서 지우기"
+                title={u.sidebar.removeFromList}
+                aria-label={u.sidebar.removeFromList}
                 onClick={(e) => {
                   e.stopPropagation()
                   forgetRecent(r.path)

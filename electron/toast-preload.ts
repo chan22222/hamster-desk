@@ -4,6 +4,7 @@
 // holding any of it.
 
 import { contextBridge, ipcRenderer } from 'electron'
+import type { Code } from '../shared/i18n/lang'
 import type { ToastItem } from './toast-stack'
 
 export interface ToastState {
@@ -11,6 +12,8 @@ export interface ToastState {
   items: ToastItem[]
   /** the palette the app is painted with right now */
   theme: 'light' | 'dark'
+  /** the language the app speaks (electron/lang.ts) — the page has no preferences of its own to read */
+  lang: Code
 }
 
 export interface ToastBridge {

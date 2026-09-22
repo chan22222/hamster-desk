@@ -20,11 +20,9 @@ import type { WallSign } from './vox/world'
 // there taints the canvas it is drawn on, and WebGL refuses a tainted canvas as a texture. A data
 // URL is same-origin everywhere, and the CSP already allows `img-src data:`.
 import logoUrl from '../assets/spritfy-logo.png?inline'
+import { ui } from '../i18n'
 
 export const SPRITFY_URL = 'https://spritfy.xyz/'
-/** what the hover caption under a print says */
-export const SIGN_TIP = 'spritfy.xyz 열기 ↗'
-const CAPTION = '3D & 스프라이트 생성 툴'
 const SITE = 'spritfy.xyz'
 /** the app's own text stack (styles.css), so the card's type matches the UI around the scene */
 const FONT = "'Pretendard', 'Pretendard Variable', system-ui, -apple-system, 'Malgun Gothic', sans-serif"
@@ -77,7 +75,7 @@ function paintCard(g: CanvasRenderingContext2D, logo: HTMLImageElement | null): 
   g.textBaseline = 'alphabetic'
   g.fillStyle = '#f4f1ff'
   g.font = `700 48px ${FONT}`
-  g.fillText(CAPTION, TEX_W / 2, 346)
+  g.fillText(ui().studio.signCaption, TEX_W / 2, 346) // the language at the time the texture is drawn: it is built once per scene
   // the site's lavender, lifted a step: at the wall's slant the darker tint fell below reading
   g.fillStyle = '#d9cdff'
   g.font = `600 40px ${FONT}`

@@ -1,7 +1,7 @@
 import { useEffect, useState } from 'react'
 import type { FiveHourAccount, FiveHourState, Profile } from '@shared/events'
 import { useDesk, type DeskSide, type ThemeMode } from '../store'
-import { LANG_OPTIONS, type PrefLang } from '../i18n'
+import { langOptions, useUi, type PrefLang, type UiStrings } from '../i18n'
 import { bubbleAvailability, resetBubbleStats, type BubbleAvailability } from '../bubbles/summarize'
 import { Popover } from './Popover'
 import { IconCheck, IconMore } from './icons'
@@ -58,14 +58,15 @@ function Segmented<T extends string>({ label, value, options, onChange }: { labe
   )
 }
 
-const THEMES: { value: ThemeMode; label: string }[] = [
-  { value: 'light', label: '라이트' },
-  { value: 'dark', label: '다크' },
-  { value: 'system', label: '시스템' },
+// The choices of the segmented rows are worded per render, so a language change applies live.
+const themes = (u: UiStrings): { value: ThemeMode; label: string }[] => [
+  { value: 'light', label: u.settings.themeLight },
+  { value: 'dark', label: u.settings.themeDark },
+  { value: 'system', label: u.settings.themeSystem },
 ]
-const SIDES: { value: DeskSide; label: string }[] = [
-  { value: 'top', label: '위' },
-  { value: 'right', label: '오른쪽' },
+const sides = (u: UiStrings): { value: DeskSide; label: string }[] => [
+  { value: 'top', label: u.settings.sideTop },
+  { value: 'right', label: u.settings.sideRight },
 ]
 /** the sizes worth one click; anything else is still reachable with Ctrl+= / Ctrl+− */
 const TERM_FONTS = ['12', '13', '14', '16'].map((v) => ({ value: v, label: v }))
@@ -83,16 +84,14 @@ function money(usd: number): string {
 
 /** How much of the subscription the bubble summaries have used. Measured: ~550 in / ~30 out a call. */
 function UsageRow({ stats, onReset }: { stats: BubbleAvailability['stats']; onReset: () => void }) {
-  if (stats.calls === 0) return <p className="pop-note">아직 요약한 적이 없어요.</p>
+  const u = useUi()
+  if (stats.calls === 0) return <p className="pop-note">{u.settings.noSummaryYet}</p>
   const since = stats.since ? new Date(stats.since) : null
   return (
-    <div className="pop-usage" title={since ? `${since.getMonth() + 1}/${since.getDate()} 부터` : undefined}>
-      <span>
-        요약 {stats.calls}회 · 토큰 {compact(stats.inputTokens + stats.outputTokens)} (입력 {compact(stats.inputTokens)} · 출력{' '}
-        {compact(stats.outputTokens)}) · ≈ {money(stats.costUSD)}
-      </span>
-      <button onClick={onReset} title="사용량 카운터 초기화">
-        초기화
+    <div className="pop-usage" title={since ? u.settings.since(`${since.getMonth() + 1}/${since.getDate()}`) : undefined}>
+      <span>{u.settings.summaryStats(stats.calls, compact(stats.inputTokens + stats.outputTokens), compact(stats.inputTokens), compact(stats.outputTokens), money(stats.costUSD))}</span>
+      <button onClick={onReset} title={u.settings.resetCounterTip}>
+        {u.settings.reset}
       </button>
     </div>
   )
@@ -118,14 +117,14 @@ function useFiveHour(): [FiveHourState | null, (id: string, on: boolean) => void
   return [state, set]
 }
 
-/** `다음 14:02` — or why not, and when it tries again. Nothing while off. */
-function fiveHourLine(a: FiveHourAccount): string | null {
+/** `다음 시작 14:02` — or why not, and when it tries again. Nothing while off. */
+function fiveHourLine(a: FiveHourAccount, u: UiStrings): string | null {
   if (!a.on) return null
-  if (a.sending) return '새 5시간을 시작하는 중…'
+  if (a.sending) return u.fiveHour.starting
   const soon = !a.nextAt || a.nextAt <= Date.now() + 30_000
-  if (a.error) return `${a.error} · ${soon ? '곧' : `${fmtReset(a.nextAt)} 에`} 다시 시도`
-  const last = a.lastAt ? ` · 마지막 ${fmtReset(a.lastAt)}` : ''
-  return `${soon ? '곧 시작' : `다음 시작 ${fmtReset(a.nextAt)}`}${last}`
+  if (a.error) return soon ? u.fiveHour.retrySoon(a.error) : u.fiveHour.retryAt(a.error, fmtReset(a.nextAt))
+  const last = a.lastAt ? u.fiveHour.last(fmtReset(a.lastAt)) : ''
+  return `${soon ? u.fiveHour.startSoon : u.fiveHour.nextStart(fmtReset(a.nextAt))}${last}`
 }
 
 /**
@@ -133,6 +132,7 @@ function fiveHourLine(a: FiveHourAccount): string | null {
  * running when the user comes back (electron/five-hour.ts). Off unless switched on.
  */
 function FiveHourSection() {
+  const u = useUi()
   const profiles = useDesk((s) => s.profiles)
   const [state, set] = useFiveHour()
   if (!state) return null
@@ -140,15 +140,15 @@ function FiveHourSection() {
   const row = (p: Profile) => {
     const a = state[p.id]
     if (!a) return null
-    const line = fiveHourLine(a)
+    const line = fiveHourLine(a, u)
     // no login, no window to start: the CLI would only answer "please /login"
     const out = !p.email && !a.on
     return (
       <div key={p.id}>
         <CheckRow
           on={a.on}
-          label={many ? p.name : '초기화되면 바로 다시 시작'}
-          hint={out ? '로그인 전' : undefined}
+          label={many ? p.name : u.fiveHour.autoStart}
+          hint={out ? u.common.notLoggedIn : undefined}
           disabled={out}
           onClick={() => set(p.id, !a.on)}
         />
@@ -158,8 +158,8 @@ function FiveHourSection() {
   }
   return (
     <>
-      <div className="pop-head">5시간 창 자동 시작</div>
-      <p className="pop-note">초기화되자마자 Haiku 에게 한 단어를 보내 다음 5시간을 바로 시작해요. 앱이 켜져 있을 때만, 한 번에 토큰 400개쯤.</p>
+      <div className="pop-head">{u.fiveHour.head}</div>
+      <p className="pop-note">{u.fiveHour.note}</p>
       {profiles.map(row)}
     </>
   )
@@ -173,19 +173,21 @@ function tilde(path: string, home: string): string {
 
 /** Where the settings actually live — one file, shared by every way of running the app. */
 function SettingsFile() {
+  const u = useUi()
   const [where, setWhere] = useState<{ uiPath: string; home: string } | null>(null)
   useEffect(() => {
     void window.desk?.info().then((i) => setWhere({ uiPath: i.uiPath, home: i.home }))
   }, [])
   if (!where?.uiPath) return null
   return (
-    <button className="pop-path" title={`${where.uiPath}\n클릭: 탐색기에서 보기`} onClick={() => window.desk?.fs.showInFolder(where.uiPath)}>
-      설정 파일: {tilde(where.uiPath, where.home)}
+    <button className="pop-path" title={`${where.uiPath}\n${u.settings.settingsFileTip}`} onClick={() => window.desk?.fs.showInFolder(where.uiPath)}>
+      {u.settings.settingsFile(tilde(where.uiPath, where.home))}
     </button>
   )
 }
 
 function Body({ onUpdate, close }: { onUpdate: () => void; close: () => void }) {
+  const u = useUi()
   const prefs = useDesk((s) => s.prefs)
   const setPrefs = useDesk((s) => s.setPrefs)
   const mini = useDesk((s) => s.mini)
@@ -199,20 +201,20 @@ function Body({ onUpdate, close }: { onUpdate: () => void; close: () => void }) 
 
   return (
     <div className="pop-body">
-      <CheckRow on={prefs.showSidebar} label="사이드바" hint="Ctrl+B" onClick={() => setPrefs({ showSidebar: !prefs.showSidebar })} />
-      <CheckRow on={!prefs.folded} label="책상 펼치기" onClick={() => setPrefs({ folded: !prefs.folded })} />
-      <CheckRow on={prefs.restoreTabs} label="시작할 때 지난 탭 다시 열기" onClick={() => setPrefs({ restoreTabs: !prefs.restoreTabs })} />
+      <CheckRow on={prefs.showSidebar} label={u.settings.sidebar} hint="Ctrl+B" onClick={() => setPrefs({ showSidebar: !prefs.showSidebar })} />
+      <CheckRow on={!prefs.folded} label={u.settings.hamsterGui} onClick={() => setPrefs({ folded: !prefs.folded })} />
+      <CheckRow on={prefs.restoreTabs} label={u.settings.restoreTabs} onClick={() => setPrefs({ restoreTabs: !prefs.restoreTabs })} />
       <CheckRow
         on={prefs.showSidebar && prefs.showLog}
-        label="바뀐 파일"
-        hint="사이드바"
+        label={u.settings.changedFiles}
+        hint={u.settings.sidebar}
         onClick={() => (prefs.showSidebar && prefs.showLog ? setPrefs({ showLog: false }) : setPrefs({ showSidebar: true, showLog: true }))}
       />
-      <CheckRow on={prefs.onTop} label="항상 위" onClick={() => setPrefs({ onTop: !prefs.onTop })} />
-      <CheckRow on={mini} label="미니 모드" hint="Ctrl+Shift+M" debugClick="mini-toggle" onClick={toggleMini} />
-      <Segmented label="책상 위치" value={prefs.deskSide} options={SIDES} onChange={(v) => setPrefs({ deskSide: v })} />
-      <Segmented label="테마" value={prefs.theme} options={THEMES} onChange={(v) => setPrefs({ theme: v })} />
-      <Segmented label="터미널 글꼴" value={String(prefs.termFont)} options={TERM_FONTS} onChange={(v) => setPrefs({ termFont: Number(v) })} />
+      <CheckRow on={prefs.onTop} label={u.settings.onTop} onClick={() => setPrefs({ onTop: !prefs.onTop })} />
+      <CheckRow on={mini} label={u.settings.mini} hint="Ctrl+Shift+M" debugClick="mini-toggle" onClick={toggleMini} />
+      <Segmented label={u.settings.deskSide} value={prefs.deskSide} options={sides(u)} onChange={(v) => setPrefs({ deskSide: v })} />
+      <Segmented label={u.settings.theme} value={prefs.theme} options={themes(u)} onChange={(v) => setPrefs({ theme: v })} />
+      <Segmented label={u.settings.termFont} value={String(prefs.termFont)} options={TERM_FONTS} onChange={(v) => setPrefs({ termFont: Number(v) })} />
 
       <div className="pop-sep" />
       <AccountsSection onDone={close} />
@@ -221,26 +223,26 @@ function Body({ onUpdate, close }: { onUpdate: () => void; close: () => void }) 
       <FiveHourSection />
 
       <div className="pop-sep" />
-      <div className="pop-head">알림</div>
-      <CheckRow on={notify.permission} label="권한 요청" debugClick="notify-permission" onClick={() => setPrefs({ notify: { ...notify, permission: !notify.permission } })} />
-      <CheckRow on={notify.question} label="질문" debugClick="notify-question" onClick={() => setPrefs({ notify: { ...notify, question: !notify.question } })} />
-      <CheckRow on={notify.turnEnd} label="턴 완료" debugClick="notify-turn" onClick={() => setPrefs({ notify: { ...notify, turnEnd: !notify.turnEnd } })} />
-      <CheckRow on={notify.sound} label="소리" debugClick="notify-sound" onClick={() => setPrefs({ notify: { ...notify, sound: !notify.sound } })} />
+      <div className="pop-head">{u.settings.notifyHead}</div>
+      <CheckRow on={notify.permission} label={u.settings.notifyPermission} debugClick="notify-permission" onClick={() => setPrefs({ notify: { ...notify, permission: !notify.permission } })} />
+      <CheckRow on={notify.question} label={u.settings.notifyQuestion} debugClick="notify-question" onClick={() => setPrefs({ notify: { ...notify, question: !notify.question } })} />
+      <CheckRow on={notify.turnEnd} label={u.settings.notifyTurnEnd} debugClick="notify-turn" onClick={() => setPrefs({ notify: { ...notify, turnEnd: !notify.turnEnd } })} />
+      <CheckRow on={notify.sound} label={u.settings.notifySound} debugClick="notify-sound" onClick={() => setPrefs({ notify: { ...notify, sound: !notify.sound } })} />
 
       <div className="pop-sep" />
-      <div className="pop-head">말풍선</div>
+      <div className="pop-head">{u.settings.bubbleHead}</div>
       <CheckRow
         on={prefs.bubbleSummary}
-        label="요약해서 말하기"
+        label={u.settings.summarize}
         disabled={bubble ? !bubble.available : false}
         onClick={() => setPrefs({ bubbleSummary: !prefs.bubbleSummary })}
       />
-      {bubble && !bubble.available && <p className="pop-note">{bubble.reason ?? '지금은 요약할 수 없어요.'}</p>}
+      {bubble && !bubble.available && <p className="pop-note">{bubble.reason ?? u.settings.cannotSummarize}</p>}
       {bubble && <UsageRow stats={bubble.stats} onReset={() => void resetBubbleStats().then(setBubble)} />}
       <label className="pop-field">
-        언어
+        {u.settings.language}
         <select value={prefs.lang} onChange={(e) => setPrefs({ lang: e.target.value as PrefLang })}>
-          {LANG_OPTIONS.map((o) => (
+          {langOptions(u).map((o) => (
             <option key={o.value} value={o.value}>
               {o.label}
             </option>
@@ -264,8 +266,9 @@ function Body({ onUpdate, close }: { onUpdate: () => void; close: () => void }) 
 
 /** The quiet corner of the top bar: view toggles, theme, bubble settings and the CLI version. */
 export function MoreMenu({ onUpdate }: { onUpdate: () => void }) {
+  const u = useUi()
   return (
-    <Popover className="icon-btn" label={<IconMore />} ariaLabel="설정" title="설정" width={268} debugClick="more">
+    <Popover className="icon-btn" label={<IconMore />} ariaLabel={u.settings.title} title={u.settings.title} width={268} debugClick="more">
       {(close) => <Body onUpdate={onUpdate} close={close} />}
     </Popover>
   )

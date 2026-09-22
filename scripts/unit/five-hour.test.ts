@@ -12,6 +12,8 @@ import assert from 'node:assert/strict'
 
 const HOME = mkdtempSync(join(tmpdir(), 'hd-five-hour-'))
 process.env.HAMSTER_HOME = HOME
+// the error wording asserted below is Korean (electron/lang.ts): fixed before the module is imported
+process.env.HAMSTER_LANG = 'ko'
 
 import { flushUi, saveUi } from '../../electron/ui-store'
 import { GRACE_MS, WINDOW_MS, FiveHourStarter, backoffMs, dueAt, parsePing, sanitizeEntries, type FiveHourAccountRef, type FiveHourEntry } from '../../electron/five-hour'

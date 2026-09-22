@@ -12,7 +12,7 @@
 
 import { promises as fsp } from 'node:fs'
 import { join } from 'node:path'
-import type { ProjectAction, ProjectActionGroup, ProjectInfo, ProjectKindInfo } from '../shared/events'
+import type { ProjectAction, ProjectActionGroup, ProjectActionLabel, ProjectInfo, ProjectKindInfo } from '../shared/events'
 import { findOnPath } from './env'
 
 /** the tools a folder's markers are useless without: a Makefile needs make, a compose file docker */
@@ -112,28 +112,35 @@ interface Folder {
   read(name: string): Promise<string>
 }
 
-const action = (kind: string, id: string, label: string, command: string, group: ProjectActionGroup): ProjectAction => ({
+/**
+ * `labelKey` names a command the UI words in its language (`run.actions` in shared/i18n); a script
+ * the app does not know has none, and its row shows `label` — the script's own name. `detail` is
+ * what follows the label in brackets: `실행 (main.py)`, `테스트 (pytest)`.
+ */
+const action = (kind: string, id: string, labelKey: ProjectActionLabel | null, command: string, group: ProjectActionGroup, detail?: string): ProjectAction => ({
   id: `${kind}:${id}`,
-  label,
+  labelKey,
+  label: id,
   command,
   group,
+  ...(detail ? { detail } : {}),
 })
 
 // ---- Node -----------------------------------------------------------------------------------
 
 type PackageManager = 'npm' | 'pnpm' | 'yarn' | 'bun'
 
-/** the scripts everyone has, in the order the menu lists them, with the Korean label and the group each gets */
-const NODE_KNOWN: { name: string; label: string; group: ProjectActionGroup }[] = [
-  { name: 'dev', label: '개발 서버', group: 'dev' },
-  { name: 'start', label: '시작', group: 'dev' },
-  { name: 'serve', label: '서버', group: 'dev' },
-  { name: 'preview', label: '미리보기', group: 'dev' },
-  { name: 'build', label: '빌드', group: 'build' },
-  { name: 'test', label: '테스트', group: 'test' },
-  { name: 'lint', label: '린트', group: 'test' },
+/** the scripts everyone has, in the order the menu lists them (each worded by `run.actions[name]`), and the group each gets */
+const NODE_KNOWN: { name: ProjectActionLabel; group: ProjectActionGroup }[] = [
+  { name: 'dev', group: 'dev' },
+  { name: 'start', group: 'dev' },
+  { name: 'serve', group: 'dev' },
+  { name: 'preview', group: 'dev' },
+  { name: 'build', group: 'build' },
+  { name: 'test', group: 'test' },
+  { name: 'lint', group: 'test' },
 ]
-const NODE_KNOWN_NAMES = new Set(NODE_KNOWN.map((k) => k.name))
+const NODE_KNOWN_NAMES = new Set<string>(NODE_KNOWN.map((k) => k.name))
 
 /** the badge's framework word: the first of these found among the dependencies wins */
 const NODE_FRAMEWORKS: [string, string][] = [
@@ -196,14 +203,14 @@ async function detectNode(f: Folder): Promise<ProjectKindInfo | null> {
   const scripts = Object.keys(scriptsRaw).filter((s) => typeof scriptsRaw[s] === 'string' && s.trim() === s && s.length > 0)
 
   const actions: ProjectAction[] = []
-  for (const k of NODE_KNOWN) if (scripts.includes(k.name)) actions.push(action('node', k.name, k.label, nodeCommand(pm, k.name), k.group))
+  for (const k of NODE_KNOWN) if (scripts.includes(k.name)) actions.push(action('node', k.name, k.name, nodeCommand(pm, k.name), k.group))
   for (const s of scripts) {
     if (NODE_KNOWN_NAMES.has(s)) continue
     if (s.startsWith('pre') || s.startsWith('post')) continue // lifecycle hooks run by themselves
     if (actions.length >= NODE_SCRIPTS_MAX) break
-    actions.push(action('node', s, s, nodeCommand(pm, s), nodeGroupOf(s)))
+    actions.push(action('node', s, null, nodeCommand(pm, s), nodeGroupOf(s)))
   }
-  if (!f.names.has('node_modules')) actions.push(action('node', 'install', '의존성 설치', `${pm} install`, 'install'))
+  if (!f.names.has('node_modules')) actions.push(action('node', 'install', 'install', `${pm} install`, 'install'))
 
   const deps = new Set<string>()
   for (const key of ['dependencies', 'devDependencies']) {
@@ -241,13 +248,13 @@ async function detectPython(f: Folder): Promise<ProjectKindInfo | null> {
 
   const actions: ProjectAction[] = []
   if (django) {
-    actions.push(action('python', 'runserver', '개발 서버 (runserver)', `${run}${py} manage.py runserver`, 'dev'))
-    actions.push(action('python', 'test', '테스트', pytest ? `${run}pytest` : `${run}${py} manage.py test`, 'test'))
-    actions.push(action('python', 'migrate', 'migrate', `${run}${py} manage.py migrate`, 'other'))
+    actions.push(action('python', 'runserver', 'dev', `${run}${py} manage.py runserver`, 'dev', 'runserver'))
+    actions.push(action('python', 'test', 'test', pytest ? `${run}pytest` : `${run}${py} manage.py test`, 'test'))
+    actions.push(action('python', 'migrate', null, `${run}${py} manage.py migrate`, 'other'))
   } else {
     const entry = ['main.py', 'app.py'].find((n) => f.names.has(n))
-    if (entry) actions.push(action('python', 'run', `실행 (${entry})`, `${run}${py} ${entry}`, 'dev'))
-    if (pytest) actions.push(action('python', 'test', '테스트 (pytest)', `${run}pytest`, 'test'))
+    if (entry) actions.push(action('python', 'run', 'run', `${run}${py} ${entry}`, 'dev', entry))
+    if (pytest) actions.push(action('python', 'test', 'test', `${run}pytest`, 'test', 'pytest'))
   }
   const install =
     runner === 'uv'
@@ -261,7 +268,7 @@ async function detectPython(f: Folder): Promise<ProjectKindInfo | null> {
             : f.names.has('pyproject.toml') || f.names.has('setup.py')
               ? `${run}pip install -e .`
               : null
-  if (install) actions.push(action('python', 'install', '의존성 설치', install, 'install'))
+  if (install) actions.push(action('python', 'install', 'install', install, 'install'))
 
   const badge = ['Python', runner !== 'plain' ? runner : venv ? 'venv' : null, django ? 'Django' : null].filter(Boolean).join(' · ')
   return { kind: 'python', badge, actions }
@@ -275,10 +282,10 @@ function detectRust(f: Folder): ProjectKindInfo | null {
     kind: 'rust',
     badge: 'Rust',
     actions: [
-      action('rust', 'run', '실행', 'cargo run', 'dev'),
-      action('rust', 'build', '빌드', 'cargo build', 'build'),
-      action('rust', 'test', '테스트', 'cargo test', 'test'),
-      action('rust', 'check', '검사 (check)', 'cargo check', 'other'),
+      action('rust', 'run', 'run', 'cargo run', 'dev'),
+      action('rust', 'build', 'build', 'cargo build', 'build'),
+      action('rust', 'test', 'test', 'cargo test', 'test'),
+      action('rust', 'check', 'check', 'cargo check', 'other', 'check'),
     ],
   }
 }
@@ -288,7 +295,7 @@ function detectGo(f: Folder): ProjectKindInfo | null {
   return {
     kind: 'go',
     badge: 'Go',
-    actions: [action('go', 'run', '실행', 'go run .', 'dev'), action('go', 'build', '빌드', 'go build ./...', 'build'), action('go', 'test', '테스트', 'go test ./...', 'test')],
+    actions: [action('go', 'run', 'run', 'go run .', 'dev'), action('go', 'build', 'build', 'go build ./...', 'build'), action('go', 'test', 'test', 'go test ./...', 'test')],
   }
 }
 
@@ -297,7 +304,7 @@ function detectDotnet(f: Folder): ProjectKindInfo | null {
   return {
     kind: 'dotnet',
     badge: '.NET',
-    actions: [action('dotnet', 'run', '실행', 'dotnet run', 'dev'), action('dotnet', 'build', '빌드', 'dotnet build', 'build'), action('dotnet', 'test', '테스트', 'dotnet test', 'test')],
+    actions: [action('dotnet', 'run', 'run', 'dotnet run', 'dev'), action('dotnet', 'build', 'build', 'dotnet build', 'build'), action('dotnet', 'test', 'test', 'dotnet test', 'test')],
   }
 }
 
@@ -305,8 +312,8 @@ async function detectMaven(f: Folder): Promise<ProjectKindInfo | null> {
   if (!f.names.has('pom.xml')) return null
   const pom = await f.read('pom.xml')
   const actions: ProjectAction[] = []
-  if (pom.includes('spring-boot')) actions.push(action('maven', 'run', '실행 (spring-boot:run)', 'mvn spring-boot:run', 'dev'))
-  actions.push(action('maven', 'package', '패키지', 'mvn clean package', 'build'), action('maven', 'test', '테스트', 'mvn test', 'test'))
+  if (pom.includes('spring-boot')) actions.push(action('maven', 'run', 'run', 'mvn spring-boot:run', 'dev', 'spring-boot:run'))
+  actions.push(action('maven', 'package', 'package', 'mvn clean package', 'build'), action('maven', 'test', 'test', 'mvn test', 'test'))
   return { kind: 'maven', badge: 'Maven', actions }
 }
 
@@ -317,9 +324,9 @@ async function detectGradle(f: Folder): Promise<ProjectKindInfo | null> {
   // the wrapper is the project's own gradle; without it, whatever `gradle` is on PATH
   const g = f.names.has('gradlew') ? (f.platform === 'win32' ? '.\\gradlew.bat' : './gradlew') : 'gradle'
   const actions: ProjectAction[] = []
-  if (text.includes('org.springframework.boot')) actions.push(action('gradle', 'bootRun', '실행 (bootRun)', `${g} bootRun`, 'dev'))
-  else if (/(?:id\s*\(?\s*['"]application['"]|apply plugin:\s*['"]application['"])/.test(text)) actions.push(action('gradle', 'run', '실행', `${g} run`, 'dev'))
-  actions.push(action('gradle', 'build', '빌드', `${g} build`, 'build'), action('gradle', 'test', '테스트', `${g} test`, 'test'))
+  if (text.includes('org.springframework.boot')) actions.push(action('gradle', 'bootRun', 'run', `${g} bootRun`, 'dev', 'bootRun'))
+  else if (/(?:id\s*\(?\s*['"]application['"]|apply plugin:\s*['"]application['"])/.test(text)) actions.push(action('gradle', 'run', 'run', `${g} run`, 'dev'))
+  actions.push(action('gradle', 'build', 'build', `${g} build`, 'build'), action('gradle', 'test', 'test', `${g} test`, 'test'))
   return { kind: 'gradle', badge: 'Gradle', actions }
 }
 
@@ -327,10 +334,10 @@ async function detectRuby(f: Folder): Promise<ProjectKindInfo | null> {
   if (!f.names.has('Gemfile')) return null
   const rails = f.names.has('bin') && (await isFile(join(f.dir, 'bin', 'rails')))
   const actions: ProjectAction[] = []
-  if (rails) actions.push(action('ruby', 'server', '개발 서버 (rails server)', 'bundle exec rails server', 'dev'))
-  if (f.names.has('spec')) actions.push(action('ruby', 'rspec', '테스트 (rspec)', 'bundle exec rspec', 'test'))
-  else if (rails && f.names.has('test')) actions.push(action('ruby', 'test', '테스트', 'bundle exec rails test', 'test'))
-  actions.push(action('ruby', 'install', '의존성 설치', 'bundle install', 'install'))
+  if (rails) actions.push(action('ruby', 'server', 'dev', 'bundle exec rails server', 'dev', 'rails server'))
+  if (f.names.has('spec')) actions.push(action('ruby', 'rspec', 'test', 'bundle exec rspec', 'test', 'rspec'))
+  else if (rails && f.names.has('test')) actions.push(action('ruby', 'test', 'test', 'bundle exec rails test', 'test'))
+  actions.push(action('ruby', 'install', 'install', 'bundle install', 'install'))
   return { kind: 'ruby', badge: rails ? 'Ruby · Rails' : 'Ruby', actions }
 }
 
@@ -369,7 +376,7 @@ async function detectMake(f: Folder): Promise<ProjectKindInfo | null> {
   if (!file || !f.tools.make) return null
   const targets = makeTargets(await f.read(file))
   if (targets.length === 0) return null
-  return { kind: 'make', badge: 'Make', actions: targets.map((t) => action('make', t, t, `make ${t}`, makeGroupOf(t))) }
+  return { kind: 'make', badge: 'Make', actions: targets.map((t) => action('make', t, null, `make ${t}`, makeGroupOf(t))) }
 }
 
 function detectCompose(f: Folder): ProjectKindInfo | null {
@@ -377,7 +384,7 @@ function detectCompose(f: Folder): ProjectKindInfo | null {
   return {
     kind: 'compose',
     badge: 'Docker Compose',
-    actions: [action('compose', 'up', '컨테이너 올리기 (up)', 'docker compose up', 'dev'), action('compose', 'down', '컨테이너 내리기 (down)', 'docker compose down', 'other')],
+    actions: [action('compose', 'up', 'up', 'docker compose up', 'dev', 'up'), action('compose', 'down', 'down', 'docker compose down', 'other', 'down')],
   }
 }
 

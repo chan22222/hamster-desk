@@ -1,7 +1,7 @@
 import { create } from 'zustand'
 import type { AppUpdateInfo, DeskEvent, EffortLevel, GitInfo, LogItem, Profile, ProfilesState, SessionInfo, StatusSnapshot, ToolAction, TurnSummary, TurnToast, VersionInfo } from '@shared/events'
 import { DEFAULT_PROFILE_ID } from '@shared/events'
-import { setLang, t, type PrefLang } from './i18n'
+import { setLang, t, ui, type PrefLang } from './i18n'
 import { cancelSummary, requestSummary } from './bubbles/summarize'
 import { summarizeTurn } from './log/turn'
 
@@ -271,6 +271,12 @@ interface DeskStore {
   /** adopt what main says the accounts are (after list/add/rename/remove/setCurrent) */
   /** the CLI's own account (~/.claude) was taken off the list; the accounts menu offers it back */
   cliAccountHidden: boolean
+  /**
+   * The account the CLI's own folder (~/.claude) is folded into — the one logged in as the same
+   * person (electron/profiles.ts `mergedDefaultInto`). Main then leaves the CLI row off the list,
+   * and what runs under ~/.claude counts as this account's (`resolveProfileId`). Null otherwise.
+   */
+  cliAccountMergedInto: string | null
   setProfiles(state: ProfilesState): void
   bindWorkspacePty(id: number, ptyId: number, cwd: string): void
   /** the terminal was sent to another folder (a `cd` typed into it): the tab follows — folder, name, git chip, the explorer */
@@ -517,7 +523,7 @@ function mainHamster(sessionId: string): Hamster {
   return {
     id: 'main',
     sessionId,
-    name: '메인',
+    name: ui().common.mainHamster,
     agentType: 'main',
     depth: 0,
     background: false,
@@ -774,9 +780,10 @@ export const useDesk = create<DeskStore>((set, get) => {
     ptyWaiting: {},
     usage: null,
     usageByProfile: {},
-    profiles: [{ id: DEFAULT_PROFILE_ID, name: '기본', dir: null }],
+    profiles: [{ id: DEFAULT_PROFILE_ID, name: ui().main.accountN(1), dir: null }],
     currentProfileId: DEFAULT_PROFILE_ID,
     cliAccountHidden: false,
+    cliAccountMergedInto: null,
     version: null,
     appUpdate: null,
     prefs: loadPrefs(),
@@ -820,7 +827,7 @@ export const useDesk = create<DeskStore>((set, get) => {
     setProfiles(state) {
       const list = state.list.length ? state.list : get().profiles
       // the CLI's own account can be off the list, so "whatever comes first" is the fallback, not 'default'
-      set({ profiles: list, currentProfileId: list.some((p) => p.id === state.currentId) ? state.currentId : list[0].id, cliAccountHidden: state.hiddenDefault === true })
+      set({ profiles: list, currentProfileId: list.some((p) => p.id === state.currentId) ? state.currentId : list[0].id, cliAccountHidden: state.hiddenDefault === true, cliAccountMergedInto: state.mergedDefaultInto ?? null })
     },
     bindWorkspacePty(id, ptyId, cwd) {
       set({
@@ -1105,7 +1112,8 @@ export const useDesk = create<DeskStore>((set, get) => {
           const hasWindows = !!(snap.fiveHour || snap.sevenDay)
           const usage = hasWindows && (!st.usage || snap.ts >= st.usage.ts) ? snap : st.usage
           // …and the newest one per account, which is what the gauges show once there are several
-          const pid = snap.profileId ?? DEFAULT_PROFILE_ID
+          // a session under ~/.claude counts as the account that folder is folded into, when there is one
+          const pid = resolveProfileId(snap.profileId)
           const mine = st.usageByProfile[pid]
           // the per-model weekly windows come from the usage query, never from the status line: keep them
           const kept = mine && Object.keys(snap.otherWindows).length === 0 ? { ...snap, otherWindows: mine.otherWindows } : snap
@@ -1169,6 +1177,18 @@ export const useDesk = create<DeskStore>((set, get) => {
     },
   }
 })
+
+/**
+ * The account a session or snapshot belongs to on screen. What runs under ~/.claude reports
+ * itself as `DEFAULT_PROFILE_ID` (or nothing at all); while that folder is folded into an added
+ * account with the same login (`cliAccountMergedInto`), it is that account's — the CLI row is
+ * not on the list to be found.
+ */
+export function resolveProfileId(id: string | undefined): string {
+  const pid = id ?? DEFAULT_PROFILE_ID
+  const merged = useDesk.getState().cliAccountMergedInto
+  return pid === DEFAULT_PROFILE_ID && merged ? merged : pid
+}
 
 /** Session shown for a tab: the workspace's own claude session, or the external session itself. */
 export function sessionForTab(st: Pick<DeskStore, 'sessions' | 'workspaces'>, tab: string | null): SessionState | null {

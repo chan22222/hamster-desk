@@ -6,6 +6,7 @@
 // without the two ever disagreeing about what is being searched for.
 
 import { useEffect, useRef } from 'react'
+import { useUi } from '../i18n'
 import { IconChevron, IconClose, IconSearch } from '../widgets/icons'
 import './term.css'
 
@@ -25,6 +26,7 @@ export interface TermSearchProps {
 }
 
 export function TermSearch({ q, caseSensitive, index, total, focusKey, onQuery, onCase, onNext, onPrev, onClose }: TermSearchProps) {
+  const u = useUi()
   const inputRef = useRef<HTMLInputElement>(null)
 
   useEffect(() => {
@@ -44,8 +46,8 @@ export function TermSearch({ q, caseSensitive, index, total, focusKey, onQuery, 
       <input
         ref={inputRef}
         className="ts-input"
-        placeholder="터미널에서 찾기"
-        aria-label="터미널에서 찾기"
+        placeholder={u.search.placeholder}
+        aria-label={u.search.placeholder}
         value={q}
         onChange={(e) => onQuery(e.target.value)}
         onKeyDown={(e) => {
@@ -60,22 +62,22 @@ export function TermSearch({ q, caseSensitive, index, total, focusKey, onQuery, 
         }}
       />
       <span className={`ts-count ${q && total === 0 ? 'is-none' : ''}`}>{count}</span>
-      <button className="ts-btn" title="이전 (Shift+Enter)" aria-label="이전 결과" disabled={!q} onClick={onPrev}>
+      <button className="ts-btn" title={u.search.prevTip} aria-label={u.search.prev} disabled={!q} onClick={onPrev}>
         <IconChevron dir="up" size={13} />
       </button>
-      <button className="ts-btn" title="다음 (Enter)" aria-label="다음 결과" disabled={!q} onClick={onNext}>
+      <button className="ts-btn" title={u.search.nextTip} aria-label={u.search.next} disabled={!q} onClick={onNext}>
         <IconChevron dir="down" size={13} />
       </button>
       <button
         className={`ts-btn ts-case ${caseSensitive ? 'is-on' : ''}`}
-        title="대소문자 구분"
-        aria-label="대소문자 구분"
+        title={u.search.caseSensitive}
+        aria-label={u.search.caseSensitive}
         aria-pressed={caseSensitive}
         onClick={() => onCase(!caseSensitive)}
       >
         Aa
       </button>
-      <button className="ts-btn" data-debug-click="term-search-close" title="닫기 (Esc)" aria-label="찾기 닫기" onClick={onClose}>
+      <button className="ts-btn" data-debug-click="term-search-close" title={u.search.closeTip} aria-label={u.search.close} onClick={onClose}>
         <IconClose size={12} />
       </button>
     </div>

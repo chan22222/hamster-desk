@@ -4,10 +4,12 @@
 
 import { useEffect, useState } from 'react'
 import type { GitDiff } from '@shared/events'
+import { useUi } from '../i18n'
 import { classifyDiffLine } from './diff'
 import './git.css'
 
 export function DiffView({ cwd, file }: { cwd: string; file: string }) {
+  const u = useUi()
   const [diff, setDiff] = useState<GitDiff | null>(null)
 
   useEffect(() => {
@@ -28,11 +30,11 @@ export function DiffView({ cwd, file }: { cwd: string; file: string }) {
     }
   }, [cwd, file])
 
-  if (!window.desk) return <div className="dv-note">데스크톱 앱에서만 볼 수 있어요.</div>
-  if (!diff) return <div className="dv-note">git diff 읽는 중…</div>
-  if (diff.error) return <div className="dv-note warn-line">git diff 를 읽지 못했어요. ({diff.error})</div>
-  if (diff.untracked) return <div className="dv-note">아직 git 에 없는 파일이에요.</div>
-  if (!diff.text.trim()) return <div className="dv-note">git 에 남은 변경이 없어요.</div>
+  if (!window.desk) return <div className="dv-note">{u.files.desktopOnly}</div>
+  if (!diff) return <div className="dv-note">{u.files.diffLoading}</div>
+  if (diff.error) return <div className="dv-note warn-line">{u.files.diffFailed(diff.error)}</div>
+  if (diff.untracked) return <div className="dv-note">{u.files.untracked}</div>
+  if (!diff.text.trim()) return <div className="dv-note">{u.files.noDiff}</div>
 
   return (
     <div className="diff-view">
@@ -43,7 +45,7 @@ export function DiffView({ cwd, file }: { cwd: string; file: string }) {
           </div>
         ))}
       </pre>
-      {diff.truncated && <div className="dv-note">너무 길어서 앞부분만 보여 줘요.</div>}
+      {diff.truncated && <div className="dv-note">{u.files.truncated}</div>}
     </div>
   )
 }

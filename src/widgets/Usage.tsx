@@ -1,6 +1,8 @@
 import { useEffect, useState } from 'react'
-import { DEFAULT_PROFILE_ID, type RateWindow, type StatusSnapshot } from '@shared/events'
-import { useDesk } from '../store'
+import type { RateWindow, StatusSnapshot } from '@shared/events'
+import { resolveProfileId, useDesk } from '../store'
+import { useUi, type UiStrings } from '../i18n'
+import { rich } from '../rich'
 import { Popover } from './Popover'
 import '../accounts/accounts.css'
 
@@ -15,25 +17,25 @@ export function fmtReset(ms: number | null): string {
   return `${d.getMonth() + 1}/${d.getDate()} ${hh}`
 }
 
-function remaining(ms: number | null): string {
+function remaining(ms: number | null, u: UiStrings): string {
   if (!ms) return ''
   const diff = ms - Date.now()
-  if (diff <= 0) return '곧'
+  if (diff <= 0) return u.common.soon
   const h = Math.floor(diff / 3600000)
   const m = Math.floor((diff % 3600000) / 60000)
-  if (h >= 24) return `${Math.floor(h / 24)}일 ${h % 24}시간`
-  return h ? `${h}시간 ${m}분` : `${m}분`
+  if (h >= 24) return u.time.daysHours(Math.floor(h / 24), h % 24)
+  return h ? u.time.hoursMinutes(h, m) : u.time.minutes(m)
 }
 
 /** The chip version: one unit past a day, two below it — it has to fit next to the percentage. */
-function countdown(ms: number | null): string {
+function countdown(ms: number | null, u: UiStrings): string {
   if (!ms) return ''
   const diff = ms - Date.now()
-  if (diff <= 0) return '곧'
+  if (diff <= 0) return u.common.soon
   const h = Math.floor(diff / 3600000)
-  if (h >= 24) return `${Math.floor(h / 24)}일`
+  if (h >= 24) return u.time.days(Math.floor(h / 24))
   const m = Math.floor((diff % 3600000) / 60000)
-  return h ? `${h}시간 ${m}분` : `${m}분`
+  return h ? u.time.hoursMinutes(h, m) : u.time.minutes(m)
 }
 
 /**
@@ -59,6 +61,7 @@ export function Meter({ pct }: { pct: number }) {
 }
 
 function Row({ label, w }: { label: string; w: RateWindow | null }) {
+  const u = useUi()
   if (!w) return null
   const pct = clamp(w)
   return (
@@ -69,7 +72,8 @@ function Row({ label, w }: { label: string; w: RateWindow | null }) {
       </span>
       <span className="u-pct">{pct.toFixed(0)}%</span>
       <span className="u-when">
-        {fmtReset(w.resetsAt)} 초기화{w.resetsAt ? ` · ${remaining(w.resetsAt)} 남음` : ''}
+        {u.usage.resetAt(fmtReset(w.resetsAt))}
+        {w.resetsAt ? u.usage.remaining(remaining(w.resetsAt, u)) : ''}
       </span>
     </div>
   )
@@ -94,24 +98,26 @@ function weeklyMax(u: StatusSnapshot): { who: string | null; w: RateWindow | nul
 }
 
 /** `주 42%`, or `주·Fable 88%` when a model's own weekly window is the fuller one. */
-function WeekBrief({ u }: { u: StatusSnapshot }) {
-  const m = weeklyMax(u)
-  return <Brief label={m.who ? `주·${m.who}` : '주'} w={m.w} />
+function WeekBrief({ snap }: { snap: StatusSnapshot }) {
+  const u = useUi()
+  const m = weeklyMax(snap)
+  return <Brief label={m.who ? u.usage.weekOf(m.who) : u.usage.week} w={m.w} />
 }
 
 /** `3분 전` — how old a snapshot is. An account nobody is using right now keeps its last numbers. */
-function ago(ts: number): string {
+function ago(ts: number, u: UiStrings): string {
   const m = Math.floor((Date.now() - ts) / 60000)
-  if (m < 1) return '방금'
-  if (m < 60) return `${m}분 전`
+  if (m < 1) return u.time.justNow
+  if (m < 60) return u.time.minutesAgo(m)
   const h = Math.floor(m / 60)
-  return h < 24 ? `${h}시간 전` : `${Math.floor(h / 24)}일 전`
+  return h < 24 ? u.time.hoursAgo(h) : u.time.daysAgo(Math.floor(h / 24))
 }
 
 /** `5h 81%`; a window whose reset time has passed since the snapshot is simply empty again. */
 function Brief({ label, w }: { label: string; w: RateWindow | null }) {
+  const u = useUi()
   if (!w) return null
-  if (w.resetsAt && w.resetsAt < Date.now()) return <span className="au-num">{label} 초기화됨</span>
+  if (w.resetsAt && w.resetsAt < Date.now()) return <span className="au-num">{u.usage.wasReset(label)}</span>
   const pct = clamp(w)
   return (
     <span className={`au-num ${step(pct)}`}>
@@ -126,13 +132,14 @@ function Brief({ label, w }: { label: string; w: RateWindow | null }) {
  * says them while the account is talking, and only with the status line linked.
  */
 export function AccountUsageLine({ profileId }: { profileId: string }) {
-  const u = useDesk((s) => s.usageByProfile[profileId])
-  if (!u || (!u.fiveHour && !u.sevenDay)) return null
+  const u = useUi()
+  const snap = useDesk((s) => s.usageByProfile[profileId])
+  if (!snap || (!snap.fiveHour && !snap.sevenDay)) return null
   return (
     <span className="au-line">
-      <Brief label="5h" w={u.fiveHour} />
-      <WeekBrief u={u} />
-      <span className="au-age">{ago(u.ts)}</span>
+      <Brief label="5h" w={snap.fiveHour} />
+      <WeekBrief snap={snap} />
+      <span className="au-age">{ago(snap.ts, u)}</span>
     </span>
   )
 }
@@ -143,6 +150,7 @@ export function AccountUsageLine({ profileId }: { profileId: string }) {
  * row also says how old it is. Nothing while there is only one account.
  */
 function AccountUsageList({ shownId }: { shownId: string }) {
+  const u = useUi()
   const profiles = useDesk((s) => s.profiles)
   const usageBy = useDesk((s) => s.usageByProfile)
   const [states, setStates] = useState<Record<string, SLState>>({})
@@ -170,36 +178,37 @@ function AccountUsageList({ shownId }: { shownId: string }) {
   return (
     <>
       <div className="pop-sep" />
-      <div className="pop-head">계정별 사용량</div>
+      <div className="pop-head">{u.usage.perAccount}</div>
       {profiles.map((p) => {
-        const u: StatusSnapshot | undefined = usageBy[p.id]
+        const snap: StatusSnapshot | undefined = usageBy[p.id]
         const st = states[p.id]
         return (
           <div key={p.id} className="au-row" aria-current={p.id === shownId ? 'true' : undefined} title={p.email ?? undefined}>
             <span className="au-name">{p.name}</span>
-            {u ? (
+            {snap ? (
               <>
-                <Brief label="5h" w={u.fiveHour} />
-                <WeekBrief u={u} />
-                <span className="au-age">{ago(u.ts)}</span>
+                <Brief label="5h" w={snap.fiveHour} />
+                <WeekBrief snap={snap} />
+                <span className="au-age">{ago(snap.ts, u)}</span>
               </>
             ) : st === 'none' || st === 'foreign' ? (
-              <button className="au-link" onClick={() => void link(p.id)} title="이 계정의 settings.json 에 상태줄을 추가합니다">
-                연동하기
+              <button className="au-link" onClick={() => void link(p.id)} title={u.usage.linkTip}>
+                {u.usage.link}
               </button>
             ) : (
-              <span className="au-none">아직 기록 없음</span>
+              <span className="au-none">{u.usage.noRecord}</span>
             )}
           </div>
         )
       })}
-      <p className="pop-note">사용량은 그 계정으로 Claude 를 쓰는 동안에만 갱신돼요.</p>
+      <p className="pop-note">{u.usage.perAccountNote}</p>
     </>
   )
 }
 
 /** One line of the chip: `5h ▰▰▰▰▱ 81% · 2시간 10분`. */
 function Line({ row }: { row: WindowRow }) {
+  const u = useUi()
   const pct = clamp(row.w)
   return (
     <span className="um-line">
@@ -209,16 +218,16 @@ function Line({ row }: { row: WindowRow }) {
       {row.who && <span className="um-who">{row.who}</span>}
       {/* "얼마나 썼나" 만큼이나 "언제 다시 차나" 가 궁금한 숫자라, 남은 시간은 늘 붙어 있다.
           초기화 *시각* 은 title 과 팝오버에 있다. 좁은 창에서는 이 조각이 가장 먼저 접힌다. */}
-      {row.w.resetsAt && <span className="um-reset">· {countdown(row.w.resetsAt)}</span>}
+      {row.w.resetsAt && <span className="um-reset">· {countdown(row.w.resetsAt, u)}</span>}
     </span>
   )
 }
 
 /** One window in words, for the tooltip and the screen reader: `5시간 사용량 81% · 18:20 초기화 (2시간 10분 남음)`. */
-function describe(row: WindowRow): string {
+function describe(row: WindowRow, u: UiStrings): string {
   const pct = clamp(row.w)
   const reset = fmtReset(row.w.resetsAt)
-  return `${row.name} 사용량 ${pct.toFixed(0)}%${reset ? ` · ${reset} 초기화 (${remaining(row.w.resetsAt)} 남음)` : ''}`
+  return `${u.usage.windowWords(row.name, pct.toFixed(0))}${reset ? u.usage.windowReset(reset, remaining(row.w.resetsAt, u)) : ''}`
 }
 
 /**
@@ -228,22 +237,23 @@ function describe(row: WindowRow): string {
  * Clicking anywhere on it opens the one detail panel with every window in it.
  */
 function UsageChip({ lines, rows, ts, shownId, onRefresh, onUninstall }: { lines: WindowRow[]; rows: WindowRow[]; ts: number; shownId: string; onRefresh: () => void; onUninstall: () => void }) {
+  const u = useUi()
   const label = lines.map((r) => <Line key={r.key} row={r} />)
   // the tooltip gets one line per window; the accessible name is the same words on one line
-  const words = lines.map(describe)
+  const words = lines.map((r) => describe(r, u))
   return (
     <Popover className="pill um" label={label} title={words.join('\n')} ariaLabel={words.join(', ')} width={292} debugClick="usage">
       {(close) => (
         <div className="pop-body">
-          <div className="pop-head">사용량</div>
+          <div className="pop-head">{u.usage.head}</div>
           {rows.map((r) => (
             <Row key={r.key} label={r.name} w={r.w} />
           ))}
           {/* the numbers are as old as the last status line or usage query; the button asks the CLI now */}
           <div className="pop-usage">
-            <span>{ago(ts)} 기준 · 모델별 주간 창은 10분마다 CLI 에 물어봐요</span>
-            <button onClick={onRefresh} title="지금 다시 물어봅니다" data-debug-click="usage-refresh">
-              다시 확인
+            <span>{u.usage.asOf(ago(ts, u))}</span>
+            <button onClick={onRefresh} title={u.usage.refreshTip} data-debug-click="usage-refresh">
+              {u.common.recheck}
             </button>
           </div>
           <AccountUsageList shownId={shownId} />
@@ -254,7 +264,7 @@ function UsageChip({ lines, rows, ts, shownId, onRefresh, onUninstall }: { lines
               close()
             }}
           >
-            연동 해제
+            {u.usage.unlink}
           </button>
         </div>
       )}
@@ -264,12 +274,14 @@ function UsageChip({ lines, rows, ts, shownId, onRefresh, onUninstall }: { lines
 
 /** 5-hour and weekly usage as one two-line gauge chip, with the one-click opt-in behind it. */
 export function UsageMeters() {
+  const u = useUi()
   // Rate limits belong to an account, so the gauges follow the tab in front: its account's numbers,
   // and its account's status line. With nothing open, the account new terminals would use.
   const shownId = useDesk((s) => {
     const tab = s.activeTab
     if (tab?.startsWith('ws:')) return s.workspaces.find((w) => `ws:${w.id}` === tab)?.profileId ?? s.currentProfileId
-    if (tab?.startsWith('session:')) return s.sessions[tab.slice('session:'.length)]?.info.profileId ?? DEFAULT_PROFILE_ID
+    // a session under ~/.claude counts as the account that folder is folded into, when there is one
+    if (tab?.startsWith('session:')) return resolveProfileId(s.sessions[tab.slice('session:'.length)]?.info.profileId)
     return s.currentProfileId
   })
   const usage = useDesk((s) => s.usageByProfile[shownId] ?? null)
@@ -317,14 +329,11 @@ export function UsageMeters() {
 
   if (sl === 'none' || sl === 'foreign') {
     return (
-      <Popover className="pill" label={`사용량 연동${who}`} title="5시간·주간 사용량을 상단에 표시합니다">
+      <Popover className="pill" label={`${u.usage.linkPill}${who}`} title={u.usage.linkPillTip}>
         {(close) => (
           <div className="pop-body">
-            <p>
-              5시간·주간 사용량과 초기화 시각을 여기에 보여 드려요. {shown?.dir ? <>이 계정(<b>{shown.name}</b>)의 <code>settings.json</code></> : <code>~/.claude/settings.json</code>} 에 상태줄 한 줄을 추가하면, Claude Code 가
-              대화가 갱신될 때마다 작은 스크립트를 비동기로 실행해 사용량을 파일로 남깁니다(응답 속도에는 영향이 없어요).
-            </p>
-            {sl === 'foreign' && <p className="warn-line">이미 다른 상태줄이 설정돼 있어요. 기존 설정은 보관했다가 연동을 해제할 때 되돌립니다.</p>}
+            <p>{rich(u.usage.linkNote(shown?.dir ? u.usage.accountFile(shown.name) : '<code>~/.claude/settings.json</code>'))}</p>
+            {sl === 'foreign' && <p className="warn-line">{u.usage.foreignWarn}</p>}
             <button
               className="pop-primary"
               disabled={busy}
@@ -333,7 +342,7 @@ export function UsageMeters() {
                 close()
               }}
             >
-              {sl === 'foreign' ? '기존 상태줄 교체하기' : '연동하기'}
+              {sl === 'foreign' ? u.usage.replaceForeign : u.usage.link}
             </button>
             <AccountUsageList shownId={shownId} />
           </div>
@@ -352,10 +361,10 @@ export function UsageMeters() {
 
   if (!five && !week) {
     return (
-      <Popover className="pill dim" label={`사용량 대기 중${who}`} title="새 세션에서 첫 메시지를 보내면 표시됩니다">
+      <Popover className="pill dim" label={`${u.usage.waitingPill}${who}`} title={u.usage.waitingPillTip}>
         {(close) => (
           <div className="pop-body">
-            <p>연동은 끝났어요. {many ? '이 계정으로 ' : ''}새 세션에서 첫 메시지를 보내면 사용량이 나타납니다.</p>
+            <p>{many ? u.usage.waitingNoteAccount : u.usage.waitingNote}</p>
             <AccountUsageList shownId={shownId} />
             <button
               className="pop-ghost"
@@ -364,7 +373,7 @@ export function UsageMeters() {
                 close()
               }}
             >
-              연동 해제
+              {u.usage.unlink}
             </button>
           </div>
         )}
@@ -373,15 +382,15 @@ export function UsageMeters() {
   }
 
   const rows: WindowRow[] = []
-  if (five) rows.push({ key: 'five', name: '5시간', short: '5h', w: five })
+  if (five) rows.push({ key: 'five', name: u.usage.fiveHourName, short: '5h', w: five })
   // The weekly windows: the all-model one, then each model's own. Fable has a weekly budget of its
   // own that can run out before the all-model one does — the usage query is what knows it
   // (src/store.ts 'usage_windows'); the status line never says.
   const weekly: WindowRow[] = []
-  if (week) weekly.push({ key: 'week', name: '주간 (전체)', short: '주', w: week })
+  if (week) weekly.push({ key: 'week', name: u.usage.weekAll, short: u.usage.week, w: week })
   for (const [k, w] of others) {
     const f = fresh(w)
-    if (f) weekly.push({ key: `week:${k}`, name: `주간 (${k})`, short: '주', who: k, w: f })
+    if (f) weekly.push({ key: `week:${k}`, name: u.usage.weekModel(k), short: u.usage.week, who: k, w: f })
   }
   rows.push(...weekly)
   // the chip's lower line is whichever weekly window is fullest — that is the one that stops the
@@ -393,7 +402,7 @@ export function UsageMeters() {
     <div className="usage">
       {/* whose numbers these are — they change with the tab once there is a second account */}
       {many && shown && (
-        <span className="um-acct" title={`${shown.name} 계정의 사용량${shown.email ? ` · ${shown.email}` : ''}`}>
+        <span className="um-acct" title={`${u.usage.accountTip(shown.name)}${shown.email ? ` · ${shown.email}` : ''}`}>
           {shown.name}
         </span>
       )}

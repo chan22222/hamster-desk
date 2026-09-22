@@ -3,6 +3,7 @@ import { mkdirSync, readFileSync, renameSync, writeFileSync } from 'node:fs'
 import { homedir } from 'node:os'
 import { dirname, join } from 'node:path'
 import { claudeInvocation, cleanEnv, findClaude } from './env'
+import { tr } from './lang'
 import type { BubbleRequest, BubbleResult, BubbleState, BubbleStats } from '../shared/events'
 
 /**
@@ -43,7 +44,6 @@ const CACHE_MAX = 500
 const AVAIL_TTL = 60_000
 const FAIL_LIMIT = 3
 const DISABLE_MS = 5 * 60_000
-const NO_CLAUDE = 'claude 명령을 찾을 수 없어요'
 const STATS_PATH = join(homedir(), '.hamster-desk', 'bubble-stats.json')
 
 // ---- usage counter: what the bubbles have actually cost (measured: ~550 in / ~30 out / $0.0007 a call)
@@ -232,7 +232,7 @@ export class BubbleSummarizer {
       this.disabledUntil = null
       this.fails = 0
     }
-    return { available: ok, reason: ok ? null : NO_CLAUDE, disabledUntil: this.disabledUntil, stats: { ...this.stats } }
+    return { available: ok, reason: ok ? null : tr().main.noClaude, disabledUntil: this.disabledUntil, stats: { ...this.stats } }
   }
 
   /** Zero the usage counter (the ⋯ menu's 초기화 button). */

@@ -1,7 +1,7 @@
 // Bubble summaries. A hamster says the raw sentence right away; a moment later the main process
 // (which runs the summarizer) may hand back a 40-character version that fits the bubble.
 // Nothing here blocks the UI: a failure simply leaves the raw text in place.
-import { langName } from '../i18n'
+import { langName, ui } from '../i18n'
 import type { BubbleStats } from '@shared/events'
 
 export interface BubbleAvailability {
@@ -27,7 +27,8 @@ export interface SummaryRequest {
 
 const DEBOUNCE_MS = 600
 const STATE_TTL_MS = 30_000
-const NO_BRIDGE: BubbleAvailability = { available: false, reason: '데스크톱 앱에서만 쓸 수 있어요.', disabledUntil: null, stats: NO_STATS }
+/** no bridge, no summarizer — worded when asked, so the `⋯` menu says it in the current language */
+const noBridge = (): BubbleAvailability => ({ available: false, reason: ui().common.desktopOnly, disabledUntil: null, stats: NO_STATS })
 
 let cached: { state: BubbleAvailability; at: number } | null = null
 let inflight: Promise<BubbleAvailability> | null = null
@@ -37,10 +38,8 @@ export async function bubbleAvailability(force = false): Promise<BubbleAvailabil
   const now = Date.now()
   if (!force && cached && now - cached.at < STATE_TTL_MS) return cached.state
   const api = window.desk?.bubble
-  if (!api) {
-    cached = { state: NO_BRIDGE, at: now }
-    return NO_BRIDGE
-  }
+  // not cached: nothing about it can change, and the wording follows the language
+  if (!api) return noBridge()
   if (!inflight) {
     inflight = api
       .state()
@@ -58,7 +57,7 @@ export async function bubbleAvailability(force = false): Promise<BubbleAvailabil
 /** Zero the usage counter and refresh the cached state, so the menu redraws with 0. */
 export async function resetBubbleStats(): Promise<BubbleAvailability> {
   const api = window.desk?.bubble
-  if (!api) return NO_BRIDGE
+  if (!api) return noBridge()
   const state = await api.resetStats()
   cached = { state, at: Date.now() }
   return state

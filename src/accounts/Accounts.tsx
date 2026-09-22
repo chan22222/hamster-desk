@@ -4,7 +4,10 @@
 // under. The CLI's own folder (~/.claude) is simply the first of them — it has no "default" label
 // and logs in with the same button. The one difference: its × takes it *off the list* instead of
 // deleting it. That folder is not this app's, and every other terminal's claude logs in from it;
-// the accounts menu offers it back.
+// the accounts menu offers it back. And when that folder is logged in as the same person as an
+// account the app added, main folds it into that account (`cliAccountMergedInto` in the store): the
+// CLI row is off the list, a note under the rows says so, and whatever runs under ~/.claude counts
+// as that account's (`resolveProfileId`).
 //
 // Three small pieces, all invisible until there is a second account:
 //   AccountPicker   — "which account is active", at the top of the `+` menu
@@ -19,7 +22,9 @@
 
 import { useEffect, useRef, useState } from 'react'
 import { DEFAULT_PROFILE_ID, type Profile, type ProfilesState } from '@shared/events'
-import { useDesk } from '../store'
+import { resolveProfileId, useDesk } from '../store'
+import { useUi } from '../i18n'
+import { rich } from '../rich'
 import { lastCwd } from '../sidebar/recent'
 import { IconCheck, IconClose, IconFolder, IconPlus } from '../widgets/icons'
 import { AccountUsageLine } from '../widgets/Usage'
@@ -45,7 +50,7 @@ export function setCurrentAccount(id: string): void {
   const s = useDesk.getState()
   if (s.currentProfileId === id) return
   // paint first: the very next click is usually "open a terminal", and it must land on this account
-  s.setProfiles({ list: s.profiles, currentId: id, hiddenDefault: s.cliAccountHidden })
+  s.setProfiles({ list: s.profiles, currentId: id, hiddenDefault: s.cliAccountHidden, ...(s.cliAccountMergedInto ? { mergedDefaultInto: s.cliAccountMergedInto } : {}) })
   void change((p) => p.setCurrent(id))
 }
 
@@ -96,6 +101,7 @@ export async function addAccount(name: string): Promise<boolean> {
 
 /** `계정 추가`: a name, and the rest happens by itself (`addAccount`); `onAdded` runs once it has. */
 function AddAccount({ onAdded }: { onAdded: () => void }) {
+  const u = useUi()
   const [adding, setAdding] = useState(false)
   const [name, setName] = useState('')
   const add = (): void => {
@@ -110,7 +116,7 @@ function AddAccount({ onAdded }: { onAdded: () => void }) {
         <span className="pop-item-ico">
           <IconPlus size={14} />
         </span>
-        <span className="pop-item-text">계정 추가</span>
+        <span className="pop-item-text">{u.accounts.add}</span>
       </button>
     )
   }
@@ -121,8 +127,8 @@ function AddAccount({ onAdded }: { onAdded: () => void }) {
         value={name}
         autoFocus
         maxLength={24}
-        placeholder="계정 이름 (예: 회사)"
-        aria-label="새 계정 이름"
+        placeholder={u.accounts.namePlaceholder}
+        aria-label={u.accounts.newNameLabel}
         onChange={(e) => setName(e.target.value)}
         onKeyDown={(e) => {
           e.stopPropagation()
@@ -134,7 +140,7 @@ function AddAccount({ onAdded }: { onAdded: () => void }) {
         }}
       />
       <button className="acct-btn is-primary" onClick={add}>
-        추가 후 로그인
+        {u.accounts.addAndLogin}
       </button>
     </div>
   )
@@ -151,7 +157,7 @@ export function useAccountsRefresh(): void {
       if (s.sessions === prev.sessions) return
       const waiting = s.profiles.filter((p) => p.dir && !p.email).map((p) => p.id)
       if (waiting.length === 0) return
-      if (!Object.values(s.sessions).some((x) => waiting.includes(x.info.profileId ?? DEFAULT_PROFILE_ID))) return
+      if (!Object.values(s.sessions).some((x) => waiting.includes(resolveProfileId(x.info.profileId)))) return
       const now = Date.now()
       if (now - last < 10_000) return // an API-key login never gets an email; do not ask on every event
       last = now
@@ -162,13 +168,14 @@ export function useAccountsRefresh(): void {
 
 /** The account new terminals open under. Hidden while there is only one. */
 export function AccountPicker() {
+  const u = useUi()
   const profiles = useDesk((s) => s.profiles)
   const current = useDesk((s) => s.currentProfileId)
   useEffect(refreshAccounts, [])
   if (profiles.length < 2) return null
   return (
-    <div className="acct-pick" role="radiogroup" aria-label="새 터미널을 열 계정">
-      <span className="acct-pick-label">활성 계정</span>
+    <div className="acct-pick" role="radiogroup" aria-label={u.accounts.pickerLabel}>
+      <span className="acct-pick-label">{u.accounts.activeAccount}</span>
       <span className="acct-pick-list">
         {profiles.map((p) => (
           <button
@@ -195,15 +202,30 @@ export function AccountPicker() {
  * in the `+` menu were easy to never notice. The tabs that came back from the last run are not
  * touched: each keeps the account it was opened under. The rows are the accounts list's own.
  */
+/**
+ * Once per *run*, not once per mount: the gate lives in the main shell, and mini mode swaps that
+ * shell out and back in (src/App.tsx), which used to ask the question again every time the window
+ * came back from mini. A module variable outlives the component; the store is left alone because
+ * this is not state anyone else reads.
+ */
+let gateAnswered = false
+
 export function AccountGate() {
+  const u = useUi()
   const profiles = useDesk((s) => s.profiles)
   const current = useDesk((s) => s.currentProfileId)
-  // decided at mount (the list is read before the stored tabs come back): one logged-in account
-  // means no question, and an account added later in the run must not raise it then
-  const [done, setDone] = useState(() => {
+  // decided at first mount (the list is read before the stored tabs come back): one logged-in
+  // account means no question, and an account added later in the run must not raise it then
+  const [done, setDoneState] = useState(() => {
+    if (gateAnswered) return true
     const p = useDesk.getState().profiles
-    return p.length < 2 && !!p[0]?.email
+    gateAnswered = p.length < 2 && !!p[0]?.email
+    return gateAnswered
   })
+  const setDone = (v: boolean): void => {
+    gateAnswered = gateAnswered || v
+    setDoneState(v)
+  }
   if (done) return null
   /** the only account, and it has no login: the question is whether to log in first */
   const fresh = profiles.length < 2
@@ -218,14 +240,10 @@ export function AccountGate() {
   }
   return (
     <div className="upd-veil acct-veil">
-      <div className="upd-dialog acct-gate" role="dialog" aria-modal="true" aria-label="계정 고르기">
-        <div className="upd-title">{fresh ? '먼저 로그인할까요?' : '어느 계정으로 시작할까요?'}</div>
-        <p className="pop-note">
-          {fresh
-            ? '아직 로그인한 계정이 없어요. 로그인을 누르면 이 계정의 터미널에서 브라우저 로그인이 열리고, 끝나면 claude 가 이어서 떠요. 그냥 시작해도 돼요.'
-            : '새 터미널이 이 계정으로 열려요. 돌아온 탭은 각자 열 때의 계정 그대로이고, 나중에 ⋯ › 계정에서 바꿀 수 있어요.'}
-        </p>
-        <div className="acct-gate-list" role="group" aria-label="계정">
+      <div className="upd-dialog acct-gate" role="dialog" aria-modal="true" aria-label={u.accounts.gateLabel}>
+        <div className="upd-title">{fresh ? u.accounts.gateTitleFresh : u.accounts.gateTitlePick}</div>
+        <p className="pop-note">{fresh ? u.accounts.gateNoteFresh : u.accounts.gateNotePick}</p>
+        <div className="acct-gate-list" role="group" aria-label={u.accounts.head}>
           {profiles.map((p) => {
             const on = p.id === current
             return (
@@ -234,21 +252,21 @@ export function AccountGate() {
                   className="acct-main"
                   // Enter goes to the login when the remembered account has none, to the account otherwise
                   autoFocus={on && !!p.email}
-                  title={p.email ? `${p.name} · ${p.email}` : `${p.name} · 로그인 전 — 이대로 시작`}
+                  title={p.email ? `${p.name} · ${p.email}` : u.accounts.gateRowTipFresh(p.name)}
                   onClick={() => pick(p.id)}
                 >
                   <span className="pop-tick">{on && <IconCheck size={14} />}</span>
                   <span className="acct-text">
                     <span className="acct-name">
                       <span className="acct-name-text">{p.name}</span>
-                      {on && !fresh && <span className="acct-active">지난번</span>}
+                      {on && !fresh && <span className="acct-active">{u.accounts.lastTime}</span>}
                     </span>
-                    <span className="acct-sub">{p.email ?? '로그인 전'}</span>
+                    <span className="acct-sub">{p.email ?? u.common.notLoggedIn}</span>
                   </span>
                 </button>
                 {!p.email && (
-                  <button className="acct-btn is-primary acct-login" autoFocus={on} title="이 계정의 터미널을 열고 로그인을 시작합니다" onClick={() => login(p.id)}>
-                    로그인
+                  <button className="acct-btn is-primary acct-login" autoFocus={on} title={u.accounts.loginTip} onClick={() => login(p.id)}>
+                    {u.accounts.login}
                   </button>
                 )}
               </div>
@@ -263,18 +281,20 @@ export function AccountGate() {
 
 /** The account's name on a tab. Nothing while there is only one account. */
 export function AccountBadge({ profileId }: { profileId: string | undefined }) {
+  const u = useUi()
   const profiles = useDesk((s) => s.profiles)
   if (profiles.length < 2) return null
-  const p = profiles.find((x) => x.id === (profileId ?? DEFAULT_PROFILE_ID))
+  const p = profiles.find((x) => x.id === resolveProfileId(profileId))
   if (!p) return null
   return (
-    <span className="acct-badge" title={p.email ? `계정: ${p.name} · ${p.email}` : `계정: ${p.name}`}>
+    <span className="acct-badge" title={p.email ? `${u.accounts.badgeTip(p.name)} · ${p.email}` : u.accounts.badgeTip(p.name)}>
       {p.name}
     </span>
   )
 }
 
 function Row({ p, current, only, onDone }: { p: Profile; current: boolean; only: boolean; onDone: () => void }) {
+  const u = useUi()
   const [editing, setEditing] = useState(false)
   const [name, setName] = useState(p.name)
   const [asking, setAsking] = useState(false)
@@ -306,22 +326,12 @@ function Row({ p, current, only, onDone }: { p: Profile; current: boolean; only:
   if (asking) {
     return (
       <div className="acct-row is-asking">
-        <span className="acct-ask">
-          {cli ? (
-            <>
-              <b>{p.name}</b> 을(를) 목록에서 뺄까요? 로그인과 <code>~/.claude</code> 폴더는 그대로 두고, 이 계정으로 열린 탭만 닫습니다.
-            </>
-          ) : (
-            <>
-              <b>{p.name}</b> 계정을 지울까요?
-            </>
-          )}
-        </span>
+        <span className="acct-ask">{rich(cli ? u.accounts.askRemoveCli(p.name) : u.accounts.askDelete(p.name))}</span>
         <button className="acct-btn is-danger" onClick={remove}>
-          {cli ? '빼기' : '지우기'}
+          {cli ? u.accounts.removeCli : u.accounts.delete}
         </button>
         <button className="acct-btn" onClick={() => setAsking(false)}>
-          취소
+          {u.common.cancel}
         </button>
       </div>
     )
@@ -340,7 +350,7 @@ function Row({ p, current, only, onDone }: { p: Profile; current: boolean; only:
             value={name}
             autoFocus
             maxLength={24}
-            aria-label="계정 이름"
+            aria-label={u.accounts.nameLabel}
             onChange={(e) => setName(e.target.value)}
             onBlur={commit}
             onKeyDown={(e) => {
@@ -359,7 +369,7 @@ function Row({ p, current, only, onDone }: { p: Profile; current: boolean; only:
           className="acct-main"
           role="menuitemradio"
           aria-checked={current}
-          title={current ? '활성 계정 · 누르면 이 계정의 새 터미널을 엽니다' : '이 계정을 활성으로 하고, 이 계정의 새 터미널을 엽니다'}
+          title={current ? u.accounts.rowTipActive : u.accounts.rowTip}
           onClick={() => {
             // switching is for working as that account, so the terminal comes with it — picking the
             // account and then finding `+` was two steps for one intention
@@ -372,9 +382,9 @@ function Row({ p, current, only, onDone }: { p: Profile; current: boolean; only:
           <span className="acct-text">
             <span className="acct-name">
               <span className="acct-name-text">{p.name}</span>
-              {current && <span className="acct-active">활성</span>}
+              {current && <span className="acct-active">{u.accounts.active}</span>}
             </span>
-            <span className="acct-sub">{p.email ?? '로그인 전'}</span>
+            <span className="acct-sub">{p.email ?? u.common.notLoggedIn}</span>
             {/* the last numbers this account reported, however old — it says how old */}
             <AccountUsageLine profileId={p.id} />
           </span>
@@ -383,22 +393,22 @@ function Row({ p, current, only, onDone }: { p: Profile; current: boolean; only:
       {!editing && loggedOut && (
         <button
           className="acct-btn is-primary acct-login"
-          title="이 계정의 터미널을 열고 로그인을 시작합니다"
+          title={u.accounts.loginTip}
           onClick={() => {
             setCurrentAccount(p.id)
             openLogin(p.id)
             onDone()
           }}
         >
-          로그인
+          {u.accounts.login}
         </button>
       )}
       {!editing && (
         <span className="acct-tools">
           <button
             className="acct-tool"
-            title="이름 바꾸기"
-            aria-label={`${p.name} 이름 바꾸기`}
+            title={u.accounts.rename}
+            aria-label={u.accounts.renameOf(p.name)}
             onClick={() => {
               cancelled.current = false
               setEditing(true)
@@ -406,15 +416,15 @@ function Row({ p, current, only, onDone }: { p: Profile; current: boolean; only:
           >
             ✎
           </button>
-          <button className="acct-tool" title="계정 폴더 열기" aria-label={`${p.name} 폴더 열기`} onClick={() => void window.desk?.profiles.openFolder(p.id)}>
+          <button className="acct-tool" title={u.accounts.openFolder} aria-label={u.accounts.openFolderOf(p.name)} onClick={() => void window.desk?.profiles.openFolder(p.id)}>
             <IconFolder size={13} />
           </button>
           {/* the last account stays: a list with nothing in it has nowhere to open a terminal */}
           {!only && (
             <button
               className="acct-tool"
-              title={cli ? '목록에서 빼기 (로그인과 폴더는 그대로)' : '계정 지우기'}
-              aria-label={cli ? `${p.name} 목록에서 빼기` : `${p.name} 계정 지우기`}
+              title={cli ? u.accounts.removeCliTip : u.accounts.deleteTip}
+              aria-label={cli ? u.accounts.removeCliOf(p.name) : u.accounts.deleteOf(p.name)}
               onClick={() => setAsking(true)}
             >
               <IconClose size={13} />
@@ -428,27 +438,33 @@ function Row({ p, current, only, onDone }: { p: Profile; current: boolean; only:
 
 /** Add / rename / delete accounts. Lives in the `⋯` menu; `onDone` closes it. */
 export function AccountsSection({ onDone }: { onDone: () => void }) {
+  const u = useUi()
   const profiles = useDesk((s) => s.profiles)
   const current = useDesk((s) => s.currentProfileId)
   const cliHidden = useDesk((s) => s.cliAccountHidden)
+  const merged = useDesk((s) => s.cliAccountMergedInto)
   // a login that finished since the list was last read shows up as soon as the menu opens
   useEffect(refreshAccounts, [])
+  /** the account the CLI's own folder is folded into — the note under the rows says it is two in one */
+  const mergedInto = merged ? profiles.find((p) => p.id === merged) : undefined
 
   return (
     <>
-      <div className="pop-head">계정</div>
-      <p className="pop-note">계정을 누르면 활성 계정이 되고 그 계정의 새 터미널이 열려요. 이미 열린 탭은 열 때의 계정 그대로예요.</p>
+      <div className="pop-head">{u.accounts.head}</div>
+      <p className="pop-note">{u.accounts.note}</p>
       {profiles.map((p) => (
         <Row key={p.id} p={p} current={p.id === current} only={profiles.length === 1} onDone={onDone} />
       ))}
+      {mergedInto && <p className="pop-note">{rich(u.accounts.mergedNote(mergedInto.name))}</p>}
       {/* name it, and the rest happens by itself: the account becomes current and its login opens */}
       <AddAccount onAdded={onDone} />
-      {cliHidden && (
-        <button className="pop-item" title="목록에서 뺐던 ~/.claude 계정을 다시 보이게 합니다" onClick={() => void change((b) => b.showDefault())}>
+      {/* while the CLI's own account is folded into another, there is nothing to put back */}
+      {cliHidden && !merged && (
+        <button className="pop-item" title={u.accounts.showCliTip} onClick={() => void change((b) => b.showDefault())}>
           <span className="pop-item-ico">
             <IconFolder size={14} />
           </span>
-          <span className="pop-item-text">CLI 계정(~/.claude) 다시 표시</span>
+          <span className="pop-item-text">{u.accounts.showCli}</span>
         </button>
       )}
     </>

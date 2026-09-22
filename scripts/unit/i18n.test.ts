@@ -4,7 +4,8 @@
 
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
-import { codeOfLanguage, formatDuration, langCode, langName, setLang, t } from '../../src/i18n'
+import { codeOfLanguage, formatDuration, langCode, langName, langOptions, setLang, t, ui } from '../../src/i18n'
+import { CODES, UI } from '../../shared/i18n'
 
 /** `navigator.language` for the duration of one call — Node has a global `navigator` of its own */
 function withBrowser<T>(language: string, run: () => T): T {
@@ -98,4 +99,47 @@ test('formatDuration reads like a person saying it, in either language', () => {
   assert.equal(t().turnSummary(1, 12, 3, formatDuration(130_000)), '1 file · +12 −3 · 2m 10s')
   setLang('ko', null)
   assert.equal(t().turnSummary(1, 12, 3, formatDuration(130_000)), '파일 1 · +12 −3 · 2분 10초')
+})
+
+test('the whole UI follows the same choice as the bubbles', () => {
+  setLang('ko', null)
+  assert.equal(ui().settings.language, '언어')
+  assert.equal(langOptions()[0].label, '자동')
+  setLang('en', null)
+  assert.equal(ui().settings.language, 'Language')
+  assert.equal(langOptions()[0].label, 'Auto')
+  assert.equal(langOptions().find((o) => o.value === 'ja')?.label, '日本語') // every other row is in its own language
+  setLang('auto', 'Klingon')
+  assert.equal(withBrowser('it-IT', () => ui().settings.language), 'Language') // no Italian strings: English, never a crash
+})
+
+/** every leaf string of a dictionary, with its dotted key */
+function leaves(obj: unknown, path = ''): [string, string][] {
+  if (typeof obj === 'string') return [[path, obj]]
+  if (typeof obj === 'function') {
+    // call with sample arguments: the *shape* of the output is what these tests look at
+    const f = obj as (...a: unknown[]) => unknown
+    const out = f('X', 'Y', 'Z', 'W', 'V', 'U')
+    return typeof out === 'string' ? [[path, out]] : []
+  }
+  if (obj && typeof obj === 'object') return Object.entries(obj).flatMap(([k, v]) => leaves(v, path ? `${path}.${k}` : k))
+  return []
+}
+
+test('every language has a word for everything, and the PowerShell lines have no apostrophe', () => {
+  const ko = new Set(leaves(UI.ko).map(([k]) => k))
+  for (const code of CODES) {
+    const l = leaves(UI[code])
+    assert.deepEqual(new Set(l.map(([k]) => k)), ko, `${code}: same keys as ko`)
+    for (const [k, v] of l) {
+      assert.ok(v.length > 0 || k === 'usage.remaining', `${code}: ${k} is empty`)
+      // the self-update console script quotes these with single quotes (electron/app-update.ts), and
+      // PowerShell reads the typographic ones (U+2018–U+201B) as single quotes too
+      if (k.startsWith('main.upd')) assert.ok(!/['‘’‚‛]/.test(v), `${code}: ${k} holds an apostrophe`)
+      // rich markup is flat, and every tag is closed
+      const opens = (v.match(/<(b|code)>/g) ?? []).length
+      const closes = (v.match(/<\/(b|code)>/g) ?? []).length
+      assert.equal(opens, closes, `${code}: ${k} has an unclosed tag`)
+    }
+  }
 })

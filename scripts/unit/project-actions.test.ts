@@ -54,7 +54,9 @@ test('a Vite/React app with a pnpm lock: Node · pnpm · Vite, the everyday scri
   assert.equal(info.kinds[0].badge, 'Node · pnpm · Vite')
   // known scripts in the menu's order, then the rest in package.json order; lifecycle hooks are left out
   assert.deepEqual(commands(info), ['pnpm dev', 'pnpm build', 'pnpm test', 'pnpm lint', 'pnpm run typecheck', 'pnpm run test:unit', 'pnpm install'])
-  assert.equal(byId(info, 'node:dev')?.label, '개발 서버')
+  assert.equal(byId(info, 'node:dev')?.labelKey, 'dev') // worded by the UI in its language (`run.actions.dev`)
+  assert.equal(byId(info, 'node:typecheck')?.labelKey, null)
+  assert.equal(byId(info, 'node:typecheck')?.label, 'typecheck') // a script the app does not know keeps its own name
   assert.equal(byId(info, 'node:dev')?.group, 'dev')
   assert.equal(byId(info, 'node:test:unit')?.group, 'test') // `test:unit` belongs with the tests
   assert.equal(byId(info, 'node:typecheck')?.group, 'other')
@@ -111,7 +113,8 @@ test('uv and poetry projects run through their tool, and install with it', async
   const uv = await detectProject(folder({ 'pyproject.toml': '[project]\nname = "x"\n', 'uv.lock': '', 'main.py': 'print(1)\n' }), { platform: 'win32', tools: NONE })
   assert.equal(uv.kinds[0].badge, 'Python · uv')
   assert.deepEqual(commands(uv), ['uv run python main.py', 'uv sync'])
-  assert.equal(byId(uv, 'python:run')?.label, '실행 (main.py)')
+  assert.equal(byId(uv, 'python:run')?.labelKey, 'run')
+  assert.equal(byId(uv, 'python:run')?.detail, 'main.py') // what the label shows in brackets
 
   const poetry = await detectProject(folder({ 'pyproject.toml': '[tool.poetry]\nname = "x"\n\n[tool.pytest.ini_options]\n', '.venv/': '' }), { platform: 'linux', tools: NONE })
   assert.equal(poetry.kinds[0].badge, 'Python · poetry')

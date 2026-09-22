@@ -12,7 +12,7 @@
 // renderer reload replays the whole backlog, R7) and a 5 s de-duplication per tag+terminal.
 
 import soundUrl from '../assets/notify.wav?url'
-import { formatDuration, t } from '../i18n'
+import { formatDuration, t, ui } from '../i18n'
 import { shortName, useDesk, type SessionState } from '../store'
 import type { NotifyRequest, NotifyResult } from '@shared/events'
 
@@ -109,7 +109,7 @@ export function openNotifyTarget(tab: string, ptyId?: number | null): void {
 function tabLabel(sess: SessionState | null, tab: string): string {
   const st = useDesk.getState()
   const ws = st.workspaces.find((w) => `ws:${w.id}` === tab)
-  return shortName(sess?.title || ws?.title || sess?.info.name || '터미널', 28)
+  return shortName(sess?.title || ws?.title || sess?.info.name || ui().common.terminal, 28)
 }
 
 /** What a waiting terminal is waiting about: the last thing said, else the prompt that started it. */

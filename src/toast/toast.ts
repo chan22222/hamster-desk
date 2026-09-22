@@ -10,6 +10,7 @@ import '../styles.css'
 import './toast.css'
 import type { ToastBridge, ToastState } from '../../electron/toast-preload'
 import type { ToastItem } from '../../electron/toast-stack'
+import { uiStringsOf, type UiStrings } from '../../shared/i18n'
 
 declare global {
   interface Window {
@@ -23,7 +24,10 @@ const stack = document.getElementById('stack')!
 /** what a card is about, for its colour: a request needs the user, a finished turn just tells */
 const KIND: Record<ToastItem['tag'], string> = { permission: 'ask', question: 'ask', turn: 'done' }
 
-function card(item: ToastItem): HTMLElement {
+/** the page's few fixed words, in the language each state names — this window reads no preferences of its own */
+type Words = UiStrings['toast']
+
+function card(item: ToastItem, words: Words): HTMLElement {
   const el = document.createElement('div')
   el.className = `toast-card is-${KIND[item.tag] ?? 'ask'}`
   el.dataset.id = String(item.id)
@@ -32,7 +36,7 @@ function card(item: ToastItem): HTMLElement {
   const main = document.createElement('button')
   main.className = 'tc-main'
   main.type = 'button'
-  main.title = '누르면 그 탭으로 가요'
+  main.title = words.goToTab
   const title = document.createElement('span')
   title.className = 'tc-title'
   title.textContent = item.title
@@ -45,8 +49,8 @@ function card(item: ToastItem): HTMLElement {
   const x = document.createElement('button')
   x.className = 'tc-x'
   x.type = 'button'
-  x.setAttribute('aria-label', '알림 닫기')
-  x.title = '닫기'
+  x.setAttribute('aria-label', words.closeNotification)
+  x.title = words.close
   x.textContent = '×'
   x.addEventListener('click', (e) => {
     e.stopPropagation()
@@ -59,11 +63,15 @@ function card(item: ToastItem): HTMLElement {
 
 function render(s: ToastState): void {
   document.documentElement.dataset.theme = s.theme
+  const words = uiStringsOf(s.lang).toast
+  // `lang` on <html> for the fonts Chromium picks for CJK, as the main window does (src/i18n.ts)
+  if (s.lang && document.documentElement.lang !== s.lang) document.documentElement.lang = s.lang
+  if (document.title !== words.windowTitle) document.title = words.windowTitle
   // keep the nodes of the cards that are still there: a card that is being hovered must not be
   // rebuilt under the pointer when a neighbour expires
   const keep = new Map<string, HTMLElement>()
   for (const el of Array.from(stack.children) as HTMLElement[]) keep.set(el.dataset.id ?? '', el)
-  const next = s.items.map((item) => keep.get(String(item.id)) ?? card(item))
+  const next = s.items.map((item) => keep.get(String(item.id)) ?? card(item, words))
   stack.replaceChildren(...next)
 }
 

@@ -6,14 +6,12 @@
 
 import { useEffect, useLayoutEffect, useRef, useState } from 'react'
 import type { TranscriptEntry } from '@shared/events'
+import { useUi } from '../i18n'
 import { useDesk } from '../store'
 import { relTime } from '../sidebar/recent'
 import { termLog } from '../term/search'
 import { IconBranch, IconSearch } from '../widgets/icons'
 import './session.css'
-
-const EMPTY = '이 폴더의 대화 기록이 없어요.'
-const LIVE = '이미 실행 중인 대화예요.'
 
 /** the tallest the list gets, and the least it is squeezed to */
 const LIST_MAX = 320
@@ -42,6 +40,8 @@ function sameText(subtitle: string, title: string): boolean {
  * studio's welcome card: the idle shell under it) instead of opening a new tab for it.
  */
 export function TranscriptList({ cwd, profileId, onPick, run }: { cwd: string; profileId: string; onPick: () => void; run?: (cmd: string) => void }) {
+  // every word comes from the dictionary at render time, so a language change applies to the open list
+  const u = useUi()
   const addWorkspace = useDesk((s) => s.addWorkspace)
   const [rows, setRows] = useState<TranscriptEntry[] | null>(null)
   const [filter, setFilter] = useState('')
@@ -99,30 +99,30 @@ export function TranscriptList({ cwd, profileId, onPick, run }: { cwd: string; p
 
   const continueLast = (): void => {
     if (run) run('claude --continue')
-    else addWorkspace(cwd, '이어서', 'claude --continue', profileId)
+    else addWorkspace(cwd, u.tabs.continueTab, 'claude --continue', profileId)
     onPick()
   }
-  const where = run ? '이 터미널에서' : '새 터미널에서'
+  const where = run ? u.history.inThisTerminal : u.history.inNewTerminal
 
   return (
     <div className="pop-body tl">
       {rows && rows.length > 2 && (
         <div className="side-search tl-search">
           <IconSearch size={14} />
-          <input className="side-filter" placeholder="지난 대화 검색" value={filter} onChange={(ev) => setFilter(ev.target.value)} aria-label="지난 대화 검색" />
+          <input className="side-filter" placeholder={u.history.search} value={filter} onChange={(ev) => setFilter(ev.target.value)} aria-label={u.history.search} />
         </div>
       )}
       <div ref={listRef} className="tl-list" style={room === null ? undefined : { maxHeight: room }}>
-        {rows === null && <p className="pop-note">불러오는 중…</p>}
-        {rows !== null && rows.length === 0 && <p className="pop-note">{EMPTY}</p>}
-        {rows !== null && rows.length > 0 && shown && shown.length === 0 && <p className="pop-note">검색 결과가 없어요.</p>}
+        {rows === null && <p className="pop-note">{u.common.loading}</p>}
+        {rows !== null && rows.length === 0 && <p className="pop-note">{u.history.empty}</p>}
+        {rows !== null && rows.length > 0 && shown && shown.length === 0 && <p className="pop-note">{u.common.noResults}</p>}
         {(shown ?? []).map((e, i) => (
           <button
             key={e.sessionId}
             className={`tl-row ${e.live ? 'is-live' : ''}`}
             data-debug-click={`history-${i}`}
             disabled={e.live}
-            title={e.live ? LIVE : `${e.title}\n${e.path}\n클릭: ${where} 이어서`}
+            title={e.live ? u.history.live : u.history.rowTip(e.title, e.path, where)}
             onClick={() => resume(e)}
           >
             <span className="tl-title">{e.title}</span>
@@ -136,13 +136,13 @@ export function TranscriptList({ cwd, profileId, onPick, run }: { cwd: string; p
                   {e.branch}
                 </span>
               )}
-              {e.live && <span className="tl-live">실행 중</span>}
+              {e.live && <span className="tl-live">{u.history.running}</span>}
             </span>
           </button>
         ))}
       </div>
       <button className="pop-ghost" data-debug-click="history-continue" onClick={continueLast} title="claude --continue">
-        이 폴더의 마지막 대화 이어서 (--continue)
+        {u.history.continueLast}
       </button>
     </div>
   )

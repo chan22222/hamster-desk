@@ -23,6 +23,7 @@ Everything in detail is in [docs/features.md](docs/features.md) (Korean).
 
 - **Embedded terminal** — several node-pty + xterm.js tabs. Copy/paste like Windows Terminal, `Ctrl+F` search, font size, one set of shortcuts. → [터미널](docs/features.md#터미널)
 - **Hamster desk** — an office on a voxel island. The main agent sits at the boss's desk; subagents walk in through the door, take a staff desk and show what they are saying and doing in speech bubbles. Per-model skins, an auto camera, the boss doing the rounds. → [책상](docs/features.md#책상-복셀-스튜디오)
+- **Languages** — pick one in the `⋯` menu and the whole UI follows: 한국어 · English · 日本語 · 中文 · Español · Deutsch · Français · Português · Русский. → [언어](docs/features.md#언어)
 - **Bubble summaries** — long sentences are shortened to one line by Haiku and translated into your language (off by default; about $0.0007 per call on your subscription). → [말풍선 요약](docs/features.md#말풍선-요약)
 - **Usage gauge** — the 5-hour and weekly windows (per-model weekly included), percent and time until reset, in one chip on the top bar. → [사용량](docs/features.md#사용량)
 - **Session control bar** — change model and effort, a context meter, `/compact` · `/clear`, and a multi-agent instruction switch. → [세션 컨트롤 바](docs/features.md#세션-컨트롤-바)

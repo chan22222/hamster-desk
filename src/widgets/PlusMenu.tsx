@@ -1,9 +1,11 @@
+import { useUi } from '../i18n'
 import { AccountPicker } from '../accounts/Accounts'
 import { RecentList } from './RecentList'
 import { Popover } from './Popover'
 import { IconPlus, IconSearch, IconSidebar } from './icons'
 
 function Actions({ onOpen, onShowSidebar, close }: { onOpen: (dir: string) => void; onShowSidebar: () => void; close: () => void }) {
+  const u = useUi()
   const browse = async (): Promise<void> => {
     const dir = await window.desk?.dialog.pickFolder()
     if (dir) onOpen(dir)
@@ -21,7 +23,7 @@ function Actions({ onOpen, onShowSidebar, close }: { onOpen: (dir: string) => vo
         <span className="pop-item-ico">
           <IconSearch size={14} />
         </span>
-        <span className="pop-item-text">폴더 찾아보기…</span>
+        <span className="pop-item-text">{u.plus.browseFolder}</span>
       </button>
       <button
         className="pop-item"
@@ -33,7 +35,7 @@ function Actions({ onOpen, onShowSidebar, close }: { onOpen: (dir: string) => vo
         <span className="pop-item-ico">
           <IconSidebar size={14} />
         </span>
-        <span className="pop-item-text">사이드바에서 고르기</span>
+        <span className="pop-item-text">{u.plus.pickInSidebar}</span>
       </button>
     </>
   )
@@ -41,11 +43,12 @@ function Actions({ onOpen, onShowSidebar, close }: { onOpen: (dir: string) => vo
 
 /** The `+` next to the tabs: the whole "new terminal" screen — search, every recent project, browse. */
 export function PlusMenu({ onOpen, onShowSidebar }: { onOpen: (dir: string) => void; onShowSidebar: () => void }) {
+  const u = useUi()
   return (
-    <Popover className="tab-plus" label={<IconPlus />} ariaLabel="새 터미널" title="새 터미널 열기" width={320} debugClick="plus">
+    <Popover className="tab-plus" label={<IconPlus />} ariaLabel={u.plus.newTerminal} title={u.plus.openNewTerminal} width={320} debugClick="plus">
       {(close) => (
         <div className="pop-body">
-          <div className="pop-head">새 터미널</div>
+          <div className="pop-head">{u.plus.newTerminal}</div>
           <AccountPicker />
           <RecentList
             onOpen={(dir) => {
@@ -63,11 +66,12 @@ export function PlusMenu({ onOpen, onShowSidebar }: { onOpen: (dir: string) => v
 
 /** The middle of the window when there is no terminal at all: the same list, as a card. */
 export function StartCard({ onOpen, onShowSidebar }: { onOpen: (dir: string) => void; onShowSidebar: () => void }) {
+  const u = useUi()
   return (
     <div className="start-pane">
       <div className="start-card">
         <div className="pop-body">
-          <div className="pop-head">새 터미널</div>
+          <div className="pop-head">{u.plus.newTerminal}</div>
           <AccountPicker />
           <RecentList onOpen={onOpen} maxHeight={280} />
           <Actions onOpen={onOpen} onShowSidebar={onShowSidebar} close={() => undefined} />

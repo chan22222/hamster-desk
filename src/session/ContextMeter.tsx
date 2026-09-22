@@ -6,7 +6,7 @@
 // `step()` the usage chips use, so 70 % and 90 % mean the same thing everywhere in the window.
 
 import { useEffect, useState } from 'react'
-import { t } from '../i18n'
+import { t, useUi } from '../i18n'
 import type { SessionState } from '../store'
 import { Meter, step } from '../widgets/Usage'
 import './session.css'
@@ -58,11 +58,12 @@ function useCompacting(session: SessionState | null): boolean {
 
 /** The percentage that rides along in the tab label. External sessions get it too — it is read-only. */
 export function TabContext({ session }: { session: SessionState | null }) {
+  const u = useUi()
   const pct = contextPct(session)
   if (pct === null) return null
   const n = Math.round(pct)
   return (
-    <span className={`tab-ctx ${step(pct)}`} title={`컨텍스트 ${n}% 사용${pct >= 90 ? ' · 곧 압축이 필요해요' : ''}`}>
+    <span className={`tab-ctx ${step(pct)}`} title={u.session.contextUsed(n) + (pct >= 90 ? u.session.contextSoon : '')}>
       {n}%
     </span>
   )
@@ -70,17 +71,18 @@ export function TabContext({ session }: { session: SessionState | null }) {
 
 /** The wider meter the session bar shows. Nothing is drawn when there is no snapshot to draw. */
 export function ContextMeter({ session }: { session: SessionState | null }) {
+  const u = useUi()
   const pct = contextPct(session)
   const compacting = useCompacting(session)
   if (pct === null) return null
   const n = Math.round(pct)
   const size = windowSize(session?.status?.contextSize)
   return (
-    <span className="sb-ctx" title={`컨텍스트 ${n}% 사용${size ? ` · 창 ${size}` : ''}`}>
+    <span className="sb-ctx" title={u.session.contextUsed(n) + (size ? u.session.contextWindow(size) : '')}>
       <Meter pct={pct} />
       <span className={`sb-ctx-pct ${step(pct)}`}>{n}%</span>
       {size && <span className="sb-ctx-size">· {size}</span>}
-      {compacting && <span className="sb-ctx-busy">정리 중…</span>}
+      {compacting && <span className="sb-ctx-busy">{u.session.compacting}</span>}
     </span>
   )
 }

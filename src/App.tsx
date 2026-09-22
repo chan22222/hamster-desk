@@ -1,7 +1,8 @@
 import { useEffect, useRef, useState, type ReactNode } from 'react'
 import { externalSessions, freezePrefs, hydrateUi, runInTerminal, sessionForTab, setDebugClick, useDesk } from './store'
-import { setLang } from './i18n'
+import { setLang, useUi } from './i18n'
 import { DeskStudio } from './desk/DeskStudio'
+import { useFold } from './desk/useFold'
 import { TerminalPane } from './Terminal'
 import { Sidebar } from './sidebar/Sidebar'
 import { baseName, cdCommand, rememberRecent, setLastCwd } from './sidebar/recent'
@@ -50,17 +51,18 @@ function TabText({ title, folder, children }: { title: string; folder: string | 
 
 /** The × on a tab. A terminal with a live claude session asks first, in a popover. */
 function TabClose({ busy, onClose }: { busy: boolean; onClose: () => void }) {
+  const u = useUi()
   if (!busy)
     return (
-      <button className="tab-x" title="터미널 닫기" aria-label="터미널 닫기" onClick={onClose}>
+      <button className="tab-x" title={u.tabs.closeTerminal} aria-label={u.tabs.closeTerminal} onClick={onClose}>
         <IconClose size={12} />
       </button>
     )
   return (
-    <Popover className="tab-x" label={<IconClose size={12} />} ariaLabel="터미널 닫기" title="터미널 닫기" width={224}>
+    <Popover className="tab-x" label={<IconClose size={12} />} ariaLabel={u.tabs.closeTerminal} title={u.tabs.closeTerminal} width={224}>
       {(close) => (
         <div className="pop-body">
-          <p>이 터미널에서 Claude 가 실행 중이에요. 닫으면 하던 일이 멈춥니다.</p>
+          <p>{u.tabs.closeRunningNote}</p>
           <button
             className="pop-primary"
             onClick={() => {
@@ -68,7 +70,7 @@ function TabClose({ busy, onClose }: { busy: boolean; onClose: () => void }) {
               onClose()
             }}
           >
-            그래도 닫기
+            {u.tabs.closeAnyway}
           </button>
         </div>
       )}
@@ -77,6 +79,7 @@ function TabClose({ busy, onClose }: { busy: boolean; onClose: () => void }) {
 }
 
 export default function App() {
+  const u = useUi()
   const apply = useDesk((s) => s.apply)
   const sessions = useDesk((s) => s.sessions)
   const workspaces = useDesk((s) => s.workspaces)
@@ -136,6 +139,8 @@ export default function App() {
           const { demoAgents, ...rest } = info.debugPrefs as { demoAgents?: number } & Partial<typeof prefs>
           freezePrefs()
           useDesk.setState((s) => ({ prefs: { ...s.prefs, ...rest } }))
+          // straight into the store, past `setPrefs`: the language has to be told by hand
+          if (rest.lang) setLang(rest.lang, info.claudeLanguage)
           const n = Number(demoAgents ?? 0)
           if (n > 0) void import('./dev/demo').then((m) => m.startDemo(apply, n))
         }
@@ -200,7 +205,7 @@ export default function App() {
    * with no claude in it: typed into claude, the `cd` would be a prompt. A session is dropped the
    * moment claude exits (`session_gone`), so "there is a session for this tab" is exactly that.
    */
-  const moveWhy = !activeWs || activeWs.ptyId === null ? '앞에 열린 터미널이 없어요' : active ? 'claude 가 실행 중인 터미널은 옮길 수 없어요. 새 탭으로 여세요.' : null
+  const moveWhy = !activeWs || activeWs.ptyId === null ? u.tabs.noFrontTerminal : active ? u.tabs.cannotMoveRunning : null
   const moveTerminal = (dir: string): void => {
     if (!activeWs || activeWs.ptyId === null || active) return
     setLastCwd(dir)
@@ -223,7 +228,7 @@ export default function App() {
 
   const runUpdate = (): void => {
     const cwd = activeWs?.cwd ?? workspaces[0]?.cwd ?? ''
-    useDesk.getState().addWorkspace(cwd, '업데이트', 'claude update')
+    useDesk.getState().addWorkspace(cwd, u.tabs.updateTab, 'claude update')
   }
 
   /**
@@ -255,18 +260,32 @@ export default function App() {
   const resetSplit = (): void => setPrefs(prefs.deskSide === 'right' ? { deskW: DESK_W.def } : { deskH: DESK_H.def })
 
   const beside = prefs.deskSide === 'right'
+  // Folding the studio away blows it up first, unfolding builds it back (src/desk/fold.ts): the
+  // studio stays mounted through the blast after `folded` has flipped, so what gates it is this
+  // clock's answer, not the preference itself. The saved value arriving at boot is not a flip.
+  const fold = useFold(prefs.folded, booting)
   const splitter = (
     <div
       className={`splitter ${beside ? 'is-v' : ''}`}
       role="separator"
       aria-orientation={beside ? 'vertical' : 'horizontal'}
-      aria-label="책상 크기"
-      title="끌어서 크기 조절 · 더블클릭: 기본값"
+      aria-label={u.tabs.deskSize}
+      title={u.tabs.deskResizeTip}
       onMouseDown={onDrag}
       onDoubleClick={resetSplit}
     />
   )
-  const studio = <DeskStudio session={active} height={beside ? Math.max(1, colH) : prefs.deskH} />
+  // shut = zero height (or, beside the terminal, zero width through `--desk-w`); `.is-story` makes the change a slide
+  const studio = (
+    <DeskStudio
+      session={active}
+      height={beside ? Math.max(1, colH) : fold.collapsed ? 0 : prefs.deskH}
+      fx={fold.fx}
+      story={fold.playing}
+      shut={fold.collapsed}
+      keep={beside ? { w: prefs.deskW, h: Math.max(1, colH) } : { w: null, h: prefs.deskH }}
+    />
+  )
 
   /*
    * Mini mode does *not* replace the tree. `TerminalPane` kills its pty when it unmounts, so
@@ -281,7 +300,7 @@ export default function App() {
     <div className={`app ${mini ? 'is-mini' : ''}`} data-booting={booting ? '' : undefined}>
       {mini && <MiniShell session={active} />}
       <header className="topbar">
-        <button className="icon-btn" onClick={() => setPrefs({ showSidebar: !prefs.showSidebar })} title="사이드바 (Ctrl+B)" aria-label="사이드바" aria-pressed={prefs.showSidebar}>
+        <button className="icon-btn" onClick={() => setPrefs({ showSidebar: !prefs.showSidebar })} title={u.tabs.sidebarTip} aria-label={u.tabs.sidebar} aria-pressed={prefs.showSidebar}>
           <IconSidebar />
         </button>
         <span className="bar-sep" />
@@ -313,7 +332,7 @@ export default function App() {
             const id = `session:${s.info.sessionId}`
             return (
               <div key={id} className={`tab ext ${activeTab === id ? 'active' : ''}`}>
-                <button className="tab-main" onClick={() => setActiveTab(id)} title={`${s.info.cwd} (다른 터미널에서 실행 중)`}>
+                <button className="tab-main" onClick={() => setActiveTab(id)} title={u.tabs.externalTab(s.info.cwd)}>
                   <span className={`dot ${s.info.status === 'busy' ? 'busy' : 'idle'}`} />
                   <TabText title={s.title || s.info.name || s.info.sessionId.slice(0, 8)} folder={baseName(s.info.cwd) || null}>
                     <AccountBadge profileId={s.info.profileId} />
@@ -334,9 +353,9 @@ export default function App() {
       </header>
       <div className="body">
         {prefs.showSidebar && <Sidebar start={activeWs?.cwd ?? workspaces[0]?.cwd ?? ''} session={active} onOpen={openTerminal} onMove={moveTerminal} moveWhy={moveWhy} onRun={runInFolder} />}
-        <div ref={colRef} className={`column ${beside ? 'is-beside' : ''}`} style={{ ['--desk-w' as string]: `${prefs.deskW}px` }}>
+        <div ref={colRef} className={`column ${beside ? 'is-beside' : ''}`} style={{ ['--desk-w' as string]: `${beside && fold.collapsed ? 0 : prefs.deskW}px` }}>
           <Banner />
-          {!mini && !prefs.folded && !beside && (
+          {!mini && fold.shown && !beside && (
             <>
               {studio}
               {splitter}
@@ -348,16 +367,16 @@ export default function App() {
               <TerminalPane key={w.id} ws={w} visible={activeTab === `ws:${w.id}`} />
             ))}
             {activeTab?.startsWith('session:') && (
-              <div className="ext-pane">이 세션은 다른 터미널에서 실행 중입니다. 위 책상에서 지켜볼 수만 있고, 입력은 그 터미널에서 하세요.</div>
+              <div className="ext-pane">{u.tabs.externalPane}</div>
             )}
             {!activeTab &&
               (window.desk ? (
                 <StartCard onOpen={openTerminal} onShowSidebar={() => setPrefs({ showSidebar: true })} />
               ) : (
-                <div className="ext-pane">스튜디오 미리보기 · 터미널은 데스크톱 앱에서 사용할 수 있어요.</div>
+                <div className="ext-pane">{u.tabs.studioPreview}</div>
               ))}
           </div>
-          {!mini && !prefs.folded && beside && (
+          {!mini && fold.shown && beside && (
             <>
               {splitter}
               {studio}
@@ -369,7 +388,8 @@ export default function App() {
       {/* asks once per start as soon as the check finds a newer version; the mini window has no room for it */}
       {!mini && !booting && <AppUpdatePrompt />}
       {/* after the update dialog in the DOM, so it paints over it: the account is answered first */}
-      {!mini && !booting && !captureRun && <AccountGate />}
+      {/* no bridge = the browser preview (scripts/office-smoke.cjs): no accounts to choose from, and a veil would swallow its clicks */}
+      {!mini && !booting && !captureRun && !!window.desk && <AccountGate />}
     </div>
   )
 }

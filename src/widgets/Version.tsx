@@ -1,4 +1,5 @@
 import { useDesk } from '../store'
+import { useUi } from '../i18n'
 import { IconDownload, IconRefresh } from './icons'
 
 function newer(a: string, b: string): boolean {
@@ -19,18 +20,20 @@ export function useUpdateAvailable(): string | null {
 
 /** Only appears when there is something to install; runs `claude update` in a new terminal tab. */
 export function UpdatePill({ onUpdate }: { onUpdate: () => void }) {
+  const u = useUi()
   const latest = useUpdateAvailable()
   if (!latest) return null
   return (
-    <button className="pill alert" onClick={onUpdate} title={`claude update 를 새 터미널 탭에서 실행 (→ ${latest})`}>
+    <button className="pill alert" onClick={onUpdate} title={u.update.claudeUpdateTip(latest)}>
       <IconDownload size={14} />
-      업데이트
+      {u.update.claudeUpdate}
     </button>
   )
 }
 
 /** The "Claude Code" block inside the ⋯ menu. */
 export function VersionSection({ onUpdate }: { onUpdate: () => void }) {
+  const u = useUi()
   const v = useDesk((s) => s.version)
   const latest = useUpdateAvailable()
   const recheck = (): void => void window.desk?.version.check(true)
@@ -38,16 +41,16 @@ export function VersionSection({ onUpdate }: { onUpdate: () => void }) {
     <>
       <div className="pop-line">
         <span>v{v?.current ?? '?'}</span>
-        {v?.error ? <span className="dim"> · 확인 실패</span> : latest ? <span className="dim"> · 새 버전 {latest}</span> : v?.latest ? <span className="ok"> · 최신</span> : null}
+        {v?.error ? <span className="dim">{u.update.checkFailed}</span> : latest ? <span className="dim">{u.update.newVersion(latest)}</span> : v?.latest ? <span className="ok">{u.update.upToDate}</span> : null}
       </div>
       <div className="pop-row">
         <button className="pop-ghost" onClick={recheck}>
           <IconRefresh size={14} />
-          다시 확인
+          {u.common.recheck}
         </button>
         {latest && (
           <button className="pop-primary" onClick={onUpdate}>
-            업데이트 v{latest} 설치
+            {u.update.installClaude(latest)}
           </button>
         )}
       </div>

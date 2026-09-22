@@ -1,12 +1,14 @@
 // `⎇ main · 3` on a workspace tab: which branch that terminal is sitting in, and how many paths
 // are dirty. It is a `<span>`, not a button — the tab itself is the button it lives inside.
 
+import { useUi } from '../i18n'
 import { gitKey, useDesk } from '../store'
 import { IconBranch } from '../widgets/icons'
 import { useGit } from './useGit'
 import './git.css'
 
 export function TabGit({ cwd }: { cwd: string }) {
+  const u = useUi()
   const activeTab = useDesk((s) => s.activeTab)
   const workspaces = useDesk((s) => s.workspaces)
   const active = workspaces.some((w) => `ws:${w.id}` === activeTab && gitKey(w.cwd) === gitKey(cwd))
@@ -17,7 +19,7 @@ export function TabGit({ cwd }: { cwd: string }) {
 
   const tip = [
     `⎇ ${info.branch}`,
-    info.changed > 0 ? `바뀐 파일 ${info.changed}` : '바뀐 파일 없음',
+    info.changed > 0 ? u.files.changed(info.changed) : u.files.noChanges,
     info.ahead > 0 ? `↑${info.ahead}` : '',
     info.behind > 0 ? `↓${info.behind}` : '',
   ]

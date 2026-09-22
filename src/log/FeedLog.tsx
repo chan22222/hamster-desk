@@ -8,15 +8,17 @@
 // Pointing the camera at the speaker, which a row click used to do, is a button inside the detail.
 
 import { useEffect, useMemo, useRef, useState } from 'react'
+import { useUi, type UiStrings } from '../i18n'
 import { useDesk, type SessionState } from '../store'
 import './log.css'
 
 type Filter = 'all' | 'say' | 'act'
 
-const FILTERS: { value: Filter; label: string }[] = [
-  { value: 'all', label: '전체' },
-  { value: 'say', label: '말' },
-  { value: 'act', label: '활동' },
+/** the filter segment's rows, worded in the current language */
+const filters = (u: UiStrings): { value: Filter; label: string }[] => [
+  { value: 'all', label: u.feed.all },
+  { value: 'say', label: u.feed.say },
+  { value: 'act', label: u.feed.act },
 ]
 
 function timeOf(ts: number): string {
@@ -25,6 +27,7 @@ function timeOf(ts: number): string {
 }
 
 export function FeedLog({ session }: { session: SessionState | null }) {
+  const u = useUi()
   const requestHamsterFocus = useDesk((s) => s.requestHamsterFocus)
   const reveal = useDesk((s) => s.revealLog)
   const [q, setQ] = useState('')
@@ -52,7 +55,7 @@ export function FeedLog({ session }: { session: SessionState | null }) {
     return () => clearTimeout(t)
   }, [reveal, sessionId])
 
-  if (!session) return <div className="side-empty">아직 세션이 없어요.</div>
+  if (!session) return <div className="side-empty">{u.feed.noSession}</div>
 
   const copy = (id: string, text: string): void => {
     window.desk?.clipboard.writeText(text)
@@ -63,16 +66,16 @@ export function FeedLog({ session }: { session: SessionState | null }) {
   return (
     <div ref={list}>
       <div className="log-tools">
-        <input className="log-search" placeholder="말풍선 검색" value={q} onChange={(e) => setQ(e.target.value)} aria-label="말풍선 로그 검색" />
-        <span className="seg" role="radiogroup" aria-label="종류">
-          {FILTERS.map((f) => (
+        <input className="log-search" placeholder={u.feed.search} value={q} onChange={(e) => setQ(e.target.value)} aria-label={u.feed.searchLabel} />
+        <span className="seg" role="radiogroup" aria-label={u.feed.kind}>
+          {filters(u).map((f) => (
             <button key={f.value} className={`seg-btn ${filter === f.value ? 'is-on' : ''}`} role="radio" aria-checked={filter === f.value} onClick={() => setFilter(f.value)}>
               {f.label}
             </button>
           ))}
         </span>
       </div>
-      {rows.length === 0 && <div className="side-empty">{session.log.length === 0 ? '아직 기록이 없어요.' : '찾는 말이 없어요.'}</div>}
+      {rows.length === 0 && <div className="side-empty">{session.log.length === 0 ? u.feed.noLog : u.feed.noMatch}</div>}
       {rows.map((l, i) => {
         const gone = !session.hamsters[l.hid]
         const open = openId === l.id
@@ -82,7 +85,7 @@ export function FeedLog({ session }: { session: SessionState | null }) {
               className={`log-row kind-${l.kind} tone-${l.tone} ${gone ? 'is-gone' : ''}`}
               data-debug-click={`log-${i}`}
               aria-expanded={open}
-              title={open ? '접기' : '클릭: 자세히 보기'}
+              title={open ? u.feed.fold : u.feed.unfoldTip}
               onClick={() => setOpenId(open ? null : l.id)}
             >
               <span className="log-time">{timeOf(l.ts)}</span>
@@ -93,16 +96,16 @@ export function FeedLog({ session }: { session: SessionState | null }) {
             {open && (
               <div className="log-detail">
                 <div className="log-meta">
-                  {l.hidName} · {timeOf(l.ts)} · {l.kind === 'say' ? '말' : '활동'}
-                  {l.count > 1 ? ` · ${l.count}번` : ''}
-                  {gone ? ' · 퇴근한 동료' : ''}
+                  {l.hidName} · {timeOf(l.ts)} · {l.kind === 'say' ? u.feed.say : u.feed.act}
+                  {l.count > 1 ? u.feed.times(l.count) : ''}
+                  {gone ? u.feed.gone : ''}
                 </div>
                 <pre className="log-raw">{l.raw || l.text}</pre>
                 <div className="log-actions">
-                  <button disabled={gone} title={gone ? '이미 퇴근한 동료예요' : '스튜디오 카메라를 이 햄스터에게'} onClick={() => requestHamsterFocus(session.info.sessionId, l.hid)}>
-                    햄스터 보기
+                  <button disabled={gone} title={gone ? u.feed.goneTip : u.feed.focusTip} onClick={() => requestHamsterFocus(session.info.sessionId, l.hid)}>
+                    {u.feed.showHamster}
                   </button>
-                  <button onClick={() => copy(l.id, l.raw || l.text)}>{copied === l.id ? '복사됨' : '복사'}</button>
+                  <button onClick={() => copy(l.id, l.raw || l.text)}>{copied === l.id ? u.common.copied : u.common.copy}</button>
                 </div>
               </div>
             )}

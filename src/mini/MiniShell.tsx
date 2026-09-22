@@ -11,7 +11,7 @@
 import { useEffect, useRef, useState } from 'react'
 import './mini.css'
 import { DeskStudio } from '../desk/DeskStudio'
-import { formatDuration, t } from '../i18n'
+import { formatDuration, t, useUi } from '../i18n'
 import { shortName, useDesk, type SessionState } from '../store'
 import type { TurnSummary } from '@shared/events'
 
@@ -34,6 +34,7 @@ function useFreshTurn(turn: TurnSummary | null): TurnSummary | null {
 }
 
 export function MiniShell({ session }: { session: SessionState | null }) {
+  const u = useUi()
   const toggleMini = useDesk((s) => s.toggleMini)
   const prefs = useDesk((s) => s.prefs)
   const setPrefs = useDesk((s) => s.setPrefs)
@@ -72,14 +73,14 @@ export function MiniShell({ session }: { session: SessionState | null }) {
           {turn ? t().turnSummary(turn.files, turn.added, turn.removed, formatDuration(turn.durationMs)) : title}
         </span>
         <span className="mb-chips">
-          <span className="mb-chip" title="일하는 중인 햄스터">
-            작업 {working}
+          <span className="mb-chip" title={u.mini.workingTip}>
+            {u.mini.working} {working}
           </span>
-          <span className={`mb-chip ${waiting > 0 ? 'is-wait' : ''}`} title="답을 기다리는 터미널">
-            확인 {waiting}
+          <span className={`mb-chip ${waiting > 0 ? 'is-wait' : ''}`} title={u.mini.waitingTip}>
+            {u.mini.waiting} {waiting}
           </span>
           {pct !== null && (
-            <span className={`mb-chip ${pct >= 90 ? 'is-hot' : pct >= 70 ? 'is-warm' : ''}`} title="컨텍스트 사용률">
+            <span className={`mb-chip ${pct >= 90 ? 'is-hot' : pct >= 70 ? 'is-warm' : ''}`} title={u.mini.contextTip}>
               {Math.round(pct)}%
             </span>
           )}
@@ -88,13 +89,13 @@ export function MiniShell({ session }: { session: SessionState | null }) {
           className="mb-btn"
           data-debug-click="mini-sound"
           aria-pressed={sound}
-          title={sound ? '알림 소리 끄기' : '알림 소리 켜기'}
+          title={sound ? u.mini.soundOff : u.mini.soundOn}
           onClick={() => setPrefs({ notify: { ...prefs.notify, sound: !sound } })}
         >
           {sound ? '🔔' : '🔕'}
         </button>
-        <button className="mb-btn mb-exit" data-debug-click="mini-exit" onClick={toggleMini} title="원래 크기로 (Ctrl+Shift+M)" aria-label="원래 크기로">
-          ⤢ 복귀
+        <button className="mb-btn mb-exit" data-debug-click="mini-exit" onClick={toggleMini} title={u.mini.restoreTip} aria-label={u.mini.restoreLabel}>
+          ⤢ {u.mini.restore}
         </button>
       </div>
     </div>

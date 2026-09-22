@@ -14,6 +14,7 @@
 import type { ReactNode } from 'react'
 import { DEFAULT_PROFILE_ID, EFFORT_LEVELS, type EffortLevel } from '@shared/events'
 import { modelSkin } from '../desk/skins'
+import { useUi } from '../i18n'
 import { runInTerminal, useDesk, type SessionState, type Workspace } from '../store'
 import { IconCheck, IconChevron } from '../widgets/icons'
 import { Popover } from '../widgets/Popover'
@@ -24,13 +25,12 @@ import { MODEL_CHOICES, modelAliasOf } from './models'
 import { TranscriptList } from './TranscriptList'
 import './session.css'
 
-const WAITING = '프롬프트에 답한 뒤 쓸 수 있어요.'
-const NEXT_TURN = '지금은 작업 중이라 다음 턴부터 적용돼요.'
-const NO_STATUS = '사용량 연동 시 컨텍스트가 보여요.'
-/** `/effort` is not per-session: the CLI answers "saved as your default for new sessions", so say so */
-const EFFORT_TIP = '노력 수준 (/effort)\n새 세션의 기본값으로도 저장돼요 (Claude Code 동작).'
-/** `/model` does the same ("Model set to … and saved as your default for new sessions"), so the same line */
-const SAVED_DEFAULT = '새 세션의 기본값으로도 저장돼요 (Claude Code 동작).'
+// Every word on the bar is read from the dictionary at render time (`useUi`), so a language change
+// applies to the open bar. Two of them say something the CLI itself says:
+//   - `session.effortTip`: `/effort` is not per-session — the CLI answers "saved as your default
+//     for new sessions", so the tooltip says so;
+//   - `session.savedDefault`: `/model` does the same ("Model set to … and saved as your default
+//     for new sessions"), so the same line.
 
 /** One plain button on the bar; `pill` keeps it the same shape as everything in the top bar. */
 function BarButton({
@@ -56,6 +56,7 @@ function BarButton({
 }
 
 export function SessionBar({ ws, session }: { ws: Workspace | null; session: SessionState | null }) {
+  const u = useUi()
   const ptyWaiting = useDesk((s) => s.ptyWaiting)
   const setSessionEffort = useDesk((s) => s.setSessionEffort)
   const setSessionModel = useDesk((s) => s.setSessionModel)
@@ -78,13 +79,14 @@ export function SessionBar({ ws, session }: { ws: Workspace | null; session: Ses
   }
 
   const pct = contextPct(session)
-  const model = modelSkin(session.model).label || '모델'
+  const model = modelSkin(session.model).label || u.session.model
   const alias = modelAliasOf(session.model)
   const effort = session.effort
-  const modelTip = `모델: ${session.model ?? '알 수 없음'} (/model)\n${SAVED_DEFAULT}`
+  const { waiting: waitingNote, nextTurn, noStatus, effortTip, savedDefault } = u.session
+  const modelTip = `${u.session.modelTip(session.model ?? u.common.unknown)}\n${savedDefault}`
 
   return (
-    <div className={`session-bar ${waiting ? 'is-waiting' : ''}`} title={waiting ? WAITING : pct === null ? NO_STATUS : undefined}>
+    <div className={`session-bar ${waiting ? 'is-waiting' : ''}`} title={waiting ? waitingNote : pct === null ? noStatus : undefined}>
       {/* `/model <alias>` does more than change this session: Claude Code writes the choice back as
           the user's saved default model, exactly as `/effort` does. Until 0.1.13 that kept the model
           off the bar; now the tooltip and the menu's last line say it, and the effort segment set the
@@ -93,20 +95,20 @@ export function SessionBar({ ws, session }: { ws: Workspace | null; session: Ses
         className="pill sb-btn sb-model"
         label={
           <>
-            {model}
+            <span className="sb-model-name">{model}</span>
             <IconChevron dir="down" size={12} className="sb-caret" />
           </>
         }
-        title={busy ? `${modelTip}\n${NEXT_TURN}` : modelTip}
-        ariaLabel="모델 바꾸기"
+        title={busy ? `${modelTip}\n${nextTurn}` : modelTip}
+        ariaLabel={u.session.changeModel}
         width={236}
         disabled={off}
         debugClick="bar-model"
       >
         {(close) => (
           <div className="pop-body">
-            <div className="pop-head">모델 (/model)</div>
-            <div className="sb-model-list" role="group" aria-label="모델">
+            <div className="pop-head">{u.session.modelHead}</div>
+            <div className="sb-model-list" role="group" aria-label={u.session.model}>
               {MODEL_CHOICES.map((c) => {
                 const on = c.alias === alias
                 return (
@@ -124,19 +126,19 @@ export function SessionBar({ ws, session }: { ws: Workspace | null; session: Ses
                   >
                     <span className="pop-tick">{on && <IconCheck size={14} />}</span>
                     <span className="pop-label">{modelSkin(c.id).label}</span>
-                    <span className="dim">{c.hint}</span>
+                    <span className="dim">{u.session.modelHints[c.alias]}</span>
                   </button>
                 )
               })}
             </div>
-            <p className="pop-note">{busy ? `${SAVED_DEFAULT} ${NEXT_TURN}` : SAVED_DEFAULT}</p>
+            <p className="pop-note">{busy ? `${savedDefault} ${nextTurn}` : savedDefault}</p>
           </div>
         )}
       </Popover>
 
       <span className="sb-sep" />
 
-      <span className="seg sb-effort" role="radiogroup" aria-label="노력 수준" title={busy ? `${EFFORT_TIP}\n${NEXT_TURN}` : EFFORT_TIP}>
+      <span className="seg sb-effort" role="radiogroup" aria-label={u.session.effortLabel} title={busy ? `${effortTip}\n${nextTurn}` : effortTip}>
         {EFFORT_LEVELS.map((lv: EffortLevel) => (
           <button
             key={lv}
@@ -160,26 +162,26 @@ export function SessionBar({ ws, session }: { ws: Workspace | null; session: Ses
       {/* not a slash command: it edits the account's CLAUDE.md, so it stays live while a prompt waits */}
       <DelegationControl profileId={ws.profileId ?? DEFAULT_PROFILE_ID} />
 
-      {waiting && <span className="sb-note">{WAITING}</span>}
+      {waiting && <span className="sb-note">{waitingNote}</span>}
 
       <span className="sb-gap" />
 
       <ContextMeter session={session} />
-      {pct !== null && pct >= 90 && <span className="sb-hint">압축 권장</span>}
+      {pct !== null && pct >= 90 && <span className="sb-hint">{u.session.compactHint}</span>}
 
       <BarButton
         name="bar-compact"
         label="/compact"
-        title={pct !== null && pct >= 70 ? `컨텍스트가 ${Math.round(pct)}% 찼어요. 대화를 압축합니다.` : '대화를 압축해 컨텍스트를 비웁니다.'}
+        title={pct !== null && pct >= 70 ? u.session.compactTipFull(Math.round(pct)) : u.session.compactTip}
         alert={pct !== null && pct >= 70}
         disabled={off}
         onClick={() => run('/compact')}
       />
 
-      <Popover className="pill sb-btn" label="/clear" title="대화를 지우고 새로 시작합니다" ariaLabel="대화 지우기" width={236} disabled={off} debugClick="bar-clear">
+      <Popover className="pill sb-btn" label="/clear" title={u.session.clearTip} ariaLabel={u.session.clearLabel} width={236} disabled={off} debugClick="bar-clear">
         {(close) => (
           <div className="pop-body">
-            <p>지금까지의 대화를 지우고 새로 시작해요. 되돌릴 수 없지만, 지난 대화는 파일로 남아 있어 다시 열 수 있어요.</p>
+            <p>{u.session.clearNote}</p>
             <button
               className="pop-primary"
               data-debug-click="bar-clear-yes"
@@ -188,13 +190,14 @@ export function SessionBar({ ws, session }: { ws: Workspace | null; session: Ses
                 run('/clear')
               }}
             >
-              대화 지우기
+              {u.session.clear}
             </button>
           </div>
         )}
       </Popover>
 
-      <Popover className="pill sb-btn" label="지난 대화" title="이 폴더에서 나눈 지난 대화 열기" ariaLabel="지난 대화" width={320} debugClick="bar-history">
+      {/* 360 rather than 320: the `--continue` row at the bottom of the list has to hold its English wording on one line */}
+      <Popover className="pill sb-btn" label={u.session.history} title={u.session.historyTip} ariaLabel={u.session.history} width={360} debugClick="bar-history">
         {(close) => <TranscriptList cwd={ws.cwd} profileId={ws.profileId} onPick={close} />}
       </Popover>
     </div>

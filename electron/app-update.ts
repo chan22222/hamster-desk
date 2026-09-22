@@ -2,6 +2,7 @@ import { execFile, spawn } from 'node:child_process'
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs'
 import { dirname, join } from 'node:path'
 import type { AppUpdateInfo } from '../shared/events'
+import { tr } from './lang'
 import { logUpdate } from './update-log'
 
 /**
@@ -101,7 +102,7 @@ async function compareWithApi(commit: string): Promise<Pick<AppUpdateInfo, 'behi
   })
   // 404: GitHub has never seen this commit — a build of local work that was not pushed
   if (res.status === 404) return { behind: 0, commits: [], error: 'unknown commit' }
-  if (res.status === 403 || res.status === 429) throw new Error(`GitHub 호출 한도 초과(${res.status}) — 한 시간 뒤에 다시 됩니다`)
+  if (res.status === 403 || res.status === 429) throw new Error(tr().main.githubLimit(res.status))
   if (!res.ok) throw new Error(`github ${res.status}`)
   return { ...parseCompare(await res.json()), error: null }
 }
@@ -137,21 +138,33 @@ export function checkAppUpdate(force: boolean, canSelfUpdate: boolean, repoDir: 
   return inflight
 }
 
-// PowerShell 5.1 reads a .ps1 without a BOM in the ANSI code page, which garbles the Korean below
+// PowerShell 5.1 reads a .ps1 without a BOM in the ANSI code page, which garbles every non-ASCII
+// character in the messages below
 const BOM = String.fromCharCode(0xfeff)
-export const UPDATE_SCRIPT = `${BOM}param([int]$AppPid, [string]$Repo, [string]$Exe)
-$Host.UI.RawUI.WindowTitle = 'Hamster Desk 업데이트'
-Write-Host 'Hamster Desk 를 업데이트합니다. 끝나면 앱이 스스로 다시 열립니다.' -ForegroundColor Green
-Write-Host '그동안 작업 표시줄 아이콘은 누르지 마세요 - 실행 파일을 새로 만드는 중이라 "경로가 존재하지 않습니다" 가 나옵니다.'
+/**
+ * Text inside a single-quoted PowerShell literal. PowerShell's tokenizer takes the typographic single
+ * quotes (U+2018 ‘, U+2019 ’, U+201A ‚, U+201B ‛) as delimiters just like `'`, so a translation holding
+ * one would end the `Write-Host '…'` early: every one of them becomes the doubled plain quote.
+ */
+export const psLiteral = (s: string): string => s.replace(/['‘’‚‛]/g, "''")
+const ps = psLiteral
+
+/** The self-update script, worded in main's language at the moment it is written (electron/lang.ts). */
+export function updateScript(): string {
+  const m = tr().main
+  return `${BOM}param([int]$AppPid, [string]$Repo, [string]$Exe)
+$Host.UI.RawUI.WindowTitle = '${ps(m.updWindowTitle)}'
+Write-Host '${ps(m.updIntro)}' -ForegroundColor Green
+Write-Host '${ps(m.updNoTaskbar)}'
 Write-Host ''
-Write-Host 'Hamster Desk 가 닫히기를 기다리는 중...'
+Write-Host '${ps(m.updWaiting)}'
 try { Wait-Process -Id $AppPid -Timeout 30 -ErrorAction Stop } catch {}
 Set-Location -LiteralPath $Repo
 # "npm install" without --legacy-peer-deps rewrites package-lock.json, and a pull refuses to run over
 # it. When that file is the only thing changed, it is not anybody's work: put it back.
 $dirty = @(git status --porcelain)
 if ($dirty.Count -eq 1 -and $dirty[0] -match 'package-lock[.]json$') {
-  Write-Host '> git checkout -- package-lock.json  (npm 이 바꿔 놓은 것을 되돌림)' -ForegroundColor Cyan
+  Write-Host '> git checkout -- package-lock.json  ${ps(m.updLockNote)}' -ForegroundColor Cyan
   git checkout -- package-lock.json
 }
 $ok = $true
@@ -163,13 +176,14 @@ foreach ($step in 'git pull --ff-only', 'npm install --legacy-peer-deps', 'npm r
 }
 Write-Host ''
 if ($ok) {
-  Write-Host '업데이트 완료. 앱을 다시 엽니다.' -ForegroundColor Green
+  Write-Host '${ps(m.updDone)}' -ForegroundColor Green
 } else {
-  Write-Host '업데이트에 실패했습니다. 위 오류를 확인하세요.' -ForegroundColor Red
-  Read-Host 'Enter 를 누르면 앱을 다시 열고 이 창을 닫습니다'
+  Write-Host '${ps(m.updFailed)}' -ForegroundColor Red
+  Read-Host '${ps(m.updPressEnter)}'
 }
 try { Start-Process -FilePath $Exe } catch { Write-Host $_; Read-Host 'Enter' }
 `
+}
 
 /**
  * Pull, install and rebuild in a console window of its own, then reopen the app. The build
@@ -181,7 +195,7 @@ export function startSelfUpdate(opts: { repoDir: string; exe: string; pid: numbe
   try {
     const script = join(opts.home, 'update.ps1')
     mkdirSync(opts.home, { recursive: true })
-    writeFileSync(script, UPDATE_SCRIPT, 'utf8')
+    writeFileSync(script, updateScript(), 'utf8')
     const child = spawn(
       'powershell.exe',
       ['-NoProfile', '-ExecutionPolicy', 'Bypass', '-File', script, '-AppPid', String(opts.pid), '-Repo', opts.repoDir, '-Exe', opts.exe],

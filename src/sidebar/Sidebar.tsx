@@ -1,5 +1,6 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
 import type { ProjectActionGroup, ProjectInfo } from '@shared/events'
+import { useUi } from '../i18n'
 import { explorerDir, favDirs, isFav, lastCwd, toggleFav } from './recent'
 import { changedFiles, FileLog } from '../log/FileLog'
 import { FeedLog } from '../log/FeedLog'
@@ -59,14 +60,8 @@ function crumbs(p: string): { label: string; path: string }[] {
   return out
 }
 
-/** the 실행 menu's headings, in the order they come */
-const RUN_GROUPS: { id: ProjectActionGroup; label: string }[] = [
-  { id: 'dev', label: '개발' },
-  { id: 'build', label: '빌드' },
-  { id: 'test', label: '테스트' },
-  { id: 'install', label: '설치' },
-  { id: 'other', label: '기타' },
-]
+/** the 실행 menu's headings, in the order they come (worded by `u.run.groups`) */
+const RUN_GROUPS: ProjectActionGroup[] = ['dev', 'build', 'test', 'install', 'other']
 
 /**
  * `.venv\Scripts\Activate.ps1; python manage.py runserver` → the environment step and the command
@@ -87,23 +82,25 @@ function splitCommand(command: string): [string, string] {
  * it above the groups, and each row is the label with the exact command to be typed on the right.
  */
 function RunMenu({ project, onRun }: { project: ProjectInfo; onRun: (command: string) => void }) {
+  const u = useUi()
   // a folder that is two things at once: `Node · pnpm · Vite + Make`
   const badge = project.kinds.map((k) => k.badge).join(' + ')
   let n = 0
-  const groups = RUN_GROUPS.map((g) => ({
-    ...g,
-    rows: project.kinds.flatMap((k) => k.actions.filter((a) => a.group === g.id)).map((a) => ({ ...a, n: n++ })),
+  const groups = RUN_GROUPS.map((id) => ({
+    id,
+    label: u.run.groups[id],
+    rows: project.kinds.flatMap((k) => k.actions.filter((a) => a.group === id)).map((a) => ({ ...a, n: n++ })),
   })).filter((g) => g.rows.length > 0)
   const label = (
     <>
       <IconPlay size={14} />
-      <span className="side-run-name">실행</span>
+      <span className="side-run-name">{u.run.run}</span>
       <span className="side-run-badge">{badge}</span>
       <IconChevron dir="down" size={12} />
     </>
   )
   return (
-    <Popover className="side-run-btn" label={label} title={`이 폴더에서 실행할 명령 · ${badge}`} ariaLabel="실행" width={320} debugClick="run">
+    <Popover className="side-run-btn" label={label} title={u.run.tip(badge)} ariaLabel={u.run.run} width={320} debugClick="run">
       {(close) => (
         <div className="pop-body run-menu">
           <p className="pop-note run-badge">{badge}</p>
@@ -117,13 +114,14 @@ function RunMenu({ project, onRun }: { project: ProjectInfo; onRun: (command: st
                     key={a.id}
                     className="pop-item run-row"
                     data-debug-click={`run-${a.n}`}
-                    title={`${a.command}\n새 터미널 탭에서 실행해요.`}
+                    title={u.run.rowTip(a.command)}
                     onClick={() => {
                       onRun(a.command)
                       close()
                     }}
                   >
-                    <span className="run-label">{a.label}</span>
+                    {/* a known command is worded by the UI; a script the app does not know keeps its own name */}
+                    <span className="run-label">{a.labelKey ? u.run.actions[a.labelKey] + (a.detail ? ` (${a.detail})` : '') : a.label}</span>
                     <span className="run-cmd dim">
                       {step && <span className="run-cmd-step">{step}</span>}
                       <span className="run-cmd-main">{cmd}</span>
@@ -174,6 +172,7 @@ function Section({
   children: React.ReactNode
 }) {
   if (empty) open = false
+  const u = useUi()
   const height = useDesk((s) => (heightKey ? s.prefs[heightKey] : null))
   const setPrefs = useDesk((s) => s.setPrefs)
   const ref = useRef<HTMLElement>(null)
@@ -225,8 +224,8 @@ function Section({
           className="side-split"
           role="separator"
           aria-orientation="horizontal"
-          aria-label={`${title} 높이`}
-          title="끌어서 높이 조절 · 더블클릭: 자동"
+          aria-label={u.sidebar.heightOf(title)}
+          title={u.sidebar.heightTip}
           onMouseDown={onDrag}
           onDoubleClick={() => setPrefs({ [heightKey]: null })}
         />
@@ -268,6 +267,7 @@ export function Sidebar({
   moveWhy: string | null
   onRun?: (dir: string, command: string) => void
 }) {
+  const u = useUi()
   const prefs = useDesk((s) => s.prefs)
   const setPrefs = useDesk((s) => s.setPrefs)
   const [listing, setListing] = useState<Listing | null>(null)
@@ -386,11 +386,11 @@ export function Sidebar({
     <aside className="sidebar" style={{ width: prefs.sidebarW }}>
       <div className="side-search">
         <IconSearch size={14} />
-        <input className="side-filter" placeholder="이 폴더에서 검색" value={filter} onChange={(e) => setFilter(e.target.value)} aria-label="폴더·파일 검색" />
+        <input className="side-filter" placeholder={u.sidebar.searchHere} value={filter} onChange={(e) => setFilter(e.target.value)} aria-label={u.sidebar.searchLabel} />
       </div>
 
       <Section
-        title="바뀐 파일"
+        title={u.sidebar.changedFiles}
         count={changed}
         className="side-changed"
         heightKey="sideChangedH"
@@ -402,7 +402,7 @@ export function Sidebar({
       </Section>
 
       <Section
-        title="말풍선 로그"
+        title={u.sidebar.feedLog}
         count={logged}
         className="side-feedlog"
         heightKey="sideFeedH"
@@ -413,10 +413,10 @@ export function Sidebar({
         <FeedLog session={session} />
       </Section>
 
-      <Section title="탐색" className="side-browse" open={prefs.showExplorer} onToggle={() => setPrefs({ showExplorer: !prefs.showExplorer })}>
+      <Section title={u.sidebar.explore} className="side-browse" open={prefs.showExplorer} onToggle={() => setPrefs({ showExplorer: !prefs.showExplorer })}>
         <div className="side-crumbs">
           {drives.length > 1 && (
-            <select value={cur.slice(0, 3).toUpperCase()} onChange={(e) => void go(e.target.value)} aria-label="드라이브">
+            <select value={cur.slice(0, 3).toUpperCase()} onChange={(e) => void go(e.target.value)} aria-label={u.sidebar.drive}>
               {drives.map((d) => (
                 <option key={d} value={d.toUpperCase()}>
                   {d}
@@ -439,19 +439,19 @@ export function Sidebar({
               `터미널 새 탭`: a terminal of the folder's own. The move is the accent one — it is what
               the browser is mostly for — and the one that is sometimes not possible (a shell with
               claude running in it), which its title then says. */}
-          <button className="side-primary" onClick={() => onMove(cur)} disabled={!!moveWhy} title={moveWhy ?? `${cur}\n앞에 있는 터미널을 이 폴더로 옮겨요 (cd)`}>
-            터미널 이동
+          <button className="side-primary" onClick={() => onMove(cur)} disabled={!!moveWhy} title={moveWhy ?? u.sidebar.moveTip(cur)}>
+            {u.sidebar.moveTerminal}
           </button>
-          <button className="side-second" onClick={() => onOpen(cur)} title={`${cur}\n이 폴더의 터미널을 새 탭으로 열어요`}>
-            터미널 새 탭
+          <button className="side-second" onClick={() => onOpen(cur)} title={u.sidebar.newTabTip(cur)}>
+            {u.sidebar.newTab}
           </button>
-          <button className="side-mini" onClick={() => listing?.parent && void go(listing.parent)} disabled={!listing?.parent} title="상위 폴더" aria-label="상위 폴더">
+          <button className="side-mini" onClick={() => listing?.parent && void go(listing.parent)} disabled={!listing?.parent} title={u.sidebar.parent} aria-label={u.sidebar.parent}>
             <IconChevron dir="up" size={14} />
           </button>
-          <button className={`side-mini ${isFav(cur, favs) ? 'is-on' : ''}`} onClick={() => star(cur)} title="즐겨찾기" aria-label="즐겨찾기">
+          <button className={`side-mini ${isFav(cur, favs) ? 'is-on' : ''}`} onClick={() => star(cur)} title={u.sidebar.favorite} aria-label={u.sidebar.favorite}>
             <IconStar size={14} filled={isFav(cur, favs)} />
           </button>
-          <button className="side-mini" onClick={() => void browse()} title="폴더 찾아보기" aria-label="폴더 찾아보기">
+          <button className="side-mini" onClick={() => void browse()} title={u.sidebar.browse} aria-label={u.sidebar.browse}>
             <IconMore size={14} />
           </button>
         </div>
@@ -462,13 +462,13 @@ export function Sidebar({
           </div>
         )}
 
-        {loading && <div className="side-empty">읽는 중…</div>}
+        {loading && <div className="side-empty">{u.common.reading}</div>}
         {listing?.error && <div className="side-empty warn-line">{listing.error}</div>}
         {notice && <div className="side-empty warn-line">{notice}</div>}
-        {!loading && !listing?.error && dirs.length === 0 && files.length === 0 && <div className="side-empty">비어 있어요.</div>}
+        {!loading && !listing?.error && dirs.length === 0 && files.length === 0 && <div className="side-empty">{u.common.empty}</div>}
 
         {dirs.map((d) => (
-          <div key={d.path} className="fs-row" title={`${d.path}\n클릭: 들어가기 · 더블클릭: 터미널 열기`} onClick={() => void go(d.path)} onDoubleClick={() => onOpen(d.path)}>
+          <div key={d.path} className="fs-row" title={u.sidebar.dirTip(d.path)} onClick={() => void go(d.path)} onDoubleClick={() => onOpen(d.path)}>
             <span className="fs-ico">{dirIcon(d)}</span>
             <span className="fs-name">{d.name}</span>
             <button
@@ -478,7 +478,7 @@ export function Sidebar({
                 onOpen(d.path)
               }}
             >
-              열기
+              {u.common.open}
             </button>
           </div>
         ))}
@@ -486,7 +486,7 @@ export function Sidebar({
           <div
             key={f.path}
             className="fs-row is-file"
-            title={`${f.path}\n더블클릭: 기본 앱으로 열기 · 우클릭: 메뉴`}
+            title={u.sidebar.fileTip(f.path)}
             onDoubleClick={() => void openFile(f.path)}
             onContextMenu={(e) => {
               e.preventDefault()
@@ -505,8 +505,8 @@ export function Sidebar({
         className="side-resize"
         role="separator"
         aria-orientation="vertical"
-        aria-label="사이드바 폭"
-        title="끌어서 폭 조절 · 더블클릭: 기본값"
+        aria-label={u.sidebar.width}
+        title={u.sidebar.widthTip}
         onMouseDown={onResize}
         onDoubleClick={() => setPrefs({ sidebarW: SIDEBAR_DEFAULT })}
       />
@@ -520,7 +520,7 @@ export function Sidebar({
               setMenu(null)
             }}
           >
-            경로 복사
+            {u.sidebar.copyPath}
           </button>
           <button
             role="menuitem"
@@ -529,7 +529,7 @@ export function Sidebar({
               setMenu(null)
             }}
           >
-            탐색기에서 보기
+            {u.sidebar.showInExplorer}
           </button>
           <button
             role="menuitem"
@@ -538,7 +538,7 @@ export function Sidebar({
               setMenu(null)
             }}
           >
-            기본 앱으로 열기
+            {u.sidebar.openDefault}
           </button>
         </div>
       )}

@@ -2,6 +2,7 @@ import { existsSync } from 'node:fs'
 import { basename, dirname, join } from 'node:path'
 import type { AppUpdateInfo } from '../shared/events'
 import { REPO } from './app-update'
+import { tr } from './lang'
 import { logUpdate } from './update-log'
 
 /**
@@ -72,7 +73,7 @@ type AutoUpdater = typeof import('electron-updater').autoUpdater
 export function pickAutoUpdater(mod: unknown): AutoUpdater {
   const m = mod as { autoUpdater?: AutoUpdater; default?: { autoUpdater?: AutoUpdater } } | null
   const found = m?.autoUpdater ?? m?.default?.autoUpdater
-  if (!found) throw new Error('electron-updater 를 불러왔지만 autoUpdater 가 없습니다')
+  if (!found) throw new Error(tr().main.noAutoUpdater)
   return found
 }
 

@@ -14,8 +14,11 @@ import { join } from 'node:path'
 
 const HOME = mkdtempSync(join(tmpdir(), 'hd-update-home-'))
 process.env.HAMSTER_HOME = HOME
+// the self-update script is worded in main's language (electron/lang.ts); the Korean asserted below
+// must not depend on the machine's locale
+process.env.HAMSTER_LANG = 'ko'
 
-import { UPDATE_SCRIPT, buildCommit, checkAppUpdate, parseCompare, parseGitLog, repoDirOf } from '../../electron/app-update'
+import { buildCommit, checkAppUpdate, parseCompare, parseGitLog, psLiteral, repoDirOf, updateScript } from '../../electron/app-update'
 import { RELEASE_FEEDS, attach, checkOverFeeds, downloadRelease, installRelease, isInstalled, pickAutoUpdater, releaseInfo, uninstallerOf, type FeedChecker } from '../../electron/app-release'
 
 const commit = (n: number, message: string): unknown => ({ sha: String(n).repeat(40).slice(0, 40), commit: { message } })
@@ -116,10 +119,20 @@ test('parseGitLog reads what `git log --format=%h%x09%s` prints, tabs in a subje
 })
 
 test('the self-update script starts with a BOM, rebuilds the folder only, and says not to click the icon', () => {
+  const UPDATE_SCRIPT = updateScript()
   assert.equal(UPDATE_SCRIPT.charCodeAt(0), 0xfeff) // PowerShell 5.1 reads a .ps1 without one as ANSI: garbled Korean
   assert.ok(UPDATE_SCRIPT.includes("'git pull --ff-only', 'npm install --legacy-peer-deps', 'npm run build:dir'"))
   assert.ok(UPDATE_SCRIPT.includes('git checkout -- package-lock.json'))
   assert.ok(UPDATE_SCRIPT.includes('작업 표시줄 아이콘은 누르지 마세요'))
+  // worded in main's language when it is written, inside single-quoted PowerShell strings — which the
+  // typographic single quotes would end as surely as the plain one
+  assert.equal(psLiteral("it's ‘here’ and ‚there‛"), "it''s ''here'' and ''there''")
+  process.env.HAMSTER_LANG = 'en'
+  try {
+    assert.ok(updateScript().includes("Write-Host 'Do not click the taskbar icon meanwhile"))
+  } finally {
+    process.env.HAMSTER_LANG = 'ko'
+  }
 })
 
 test('every update check leaves a line in update.log', async () => {

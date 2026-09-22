@@ -172,7 +172,7 @@ button:focus-visible, select:focus-visible, input:focus-visible { outline: 2px s
 .um { flex-direction: column; align-items: stretch; justify-content: center; gap: 0; height: auto; min-height: 28px; padding: 1px 8px; }
 .um-line { display: flex; align-items: center; gap: 5px; height: 14px; line-height: 14px; font-size: 11px; }
 /* the label and the number have fixed widths so the two lines read as columns */
-.um-label { flex: none; width: 15px; color: var(--text-3); font-size: 11px; }
+.um-label { flex: none; min-width: 15px; color: var(--text-3); font-size: 11px; } /* min, not width: `wk` and `Wo` are wider than `주` */
 .um-pct { flex: none; min-width: 30px; text-align: right; color: var(--text); font-size: 11px; font-variant-numeric: tabular-nums; }
 .um-pct.is-warm { color: var(--warn); }
 .um-pct.is-hot { color: var(--danger); }
@@ -215,8 +215,9 @@ button:focus-visible, select:focus-visible, input:focus-visible { outline: 2px s
 .upd-why { overflow-wrap: anywhere; }
 .pop-commits { margin: 0; padding: 0 0 0 16px; max-height: 168px; overflow-y: auto; font-size: 12px; line-height: 1.7; color: var(--text); }
 .pop-commits li { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.pop-row { display: flex; gap: 6px; }
-.pop-row > * { flex: 1; }
+/* two buttons side by side; a label too long for its half (`Install update v2.1.32`) takes the next line instead of wrapping inside the button */
+.pop-row { display: flex; flex-wrap: wrap; gap: 6px; }
+.pop-row > * { flex: 1 1 auto; white-space: nowrap; }
 .pop-primary { display: inline-flex; align-items: center; justify-content: center; gap: 6px; height: 32px; padding: 0 12px; border-radius: var(--radius); background: var(--accent); color: var(--on-accent); font-size: 13px; font-weight: 500; }
 .pop-primary:hover:not(:disabled) { background: var(--accent-hover); }
 .pop-primary:disabled { opacity: 0.5; cursor: default; }
@@ -251,7 +252,7 @@ button:focus-visible, select:focus-visible, input:focus-visible { outline: 2px s
 .pop-item-sub { font-size: 11px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 
 /* usage detail rows */
-.u-row { display: grid; grid-template-columns: 78px 1fr 38px; /* wide enough for `주간 (Fable)` on one line */ gap: 2px 8px; align-items: center; padding: 5px 6px; margin: 0 -6px; border-radius: var(--radius); font-size: 12px; }
+.u-row { display: grid; grid-template-columns: minmax(78px, max-content) 1fr 38px; /* `주간 (Fable)` on one line, and `Weekly (Sonnet)` too */ gap: 2px 8px; align-items: center; padding: 5px 6px; margin: 0 -6px; border-radius: var(--radius); font-size: 12px; }
 .u-name { color: var(--text-2); }
 .u-track { height: 6px; border-radius: 3px; background: var(--surface-3); overflow: hidden; }
 .u-fill { display: block; height: 100%; background: var(--ok); }
@@ -281,6 +282,8 @@ button:focus-visible, select:focus-visible, input:focus-visible { outline: 2px s
 .start-pane { flex: 1; min-height: 0; display: flex; align-items: center; justify-content: center; background: var(--bg); padding: 24px; overflow: auto; }
 .start-card { width: 340px; max-width: 100%; padding: 12px; border: 1px solid var(--line); border-radius: var(--radius-lg); background: var(--surface); box-shadow: var(--shadow-pop); }
 .desk-wrap { position: relative; overflow: hidden; background: var(--bg); flex: none; }
+/* while a fold story plays the pane slides shut / open instead of popping (src/desk/useFold.ts); never during a splitter drag */
+.desk-wrap.is-story { transition: height 0.5s cubic-bezier(0.4, 0, 0.2, 1), width 0.5s cubic-bezier(0.4, 0, 0.2, 1); }
 .desk-canvas { display: block; }
 
 /* ---- sidebar -------------------------------------------------------------------------- */
@@ -397,7 +400,7 @@ body.is-row-resizing * { cursor: row-resize !important; }
 .fs-open { visibility: hidden; padding: 2px 7px; border-radius: var(--radius); border: 1px solid var(--line-strong); color: var(--text-2); font-size: 11px; }
 .fs-open:hover { background: var(--surface-3); color: var(--text); }
 .fs-row:hover .fs-open { visibility: visible; }
-.ctx-menu { position: fixed; z-index: 50; min-width: 168px; padding: 6px; border: 1px solid var(--line); border-radius: var(--radius-lg); background: var(--surface); box-shadow: var(--shadow-pop); }
+.ctx-menu { position: fixed; z-index: 50; min-width: 190px; /* `Open with default app` at 13px */ padding: 6px; border: 1px solid var(--line); border-radius: var(--radius-lg); background: var(--surface); box-shadow: var(--shadow-pop); }
 .ctx-menu button { display: flex; align-items: center; width: 100%; height: 32px; padding: 0 8px; border-radius: var(--radius); text-align: left; font-size: 13px; color: var(--text-2); }
 .ctx-menu button:hover { background: var(--surface-2); color: var(--text); }
 
@@ -422,9 +425,20 @@ body.is-row-resizing * { cursor: row-resize !important; }
 /* ---- the studio: light chrome floating over a bright voxel island ---------------------- */
 /* Everything here sits on sand and sea, so a white panel needs a hairline and a shadow of its
    own — a flat white card would dissolve into the beach. */
-.desk-studio { background: #dbe9f2; cursor: grab; touch-action: none; isolation: isolate; }
+/* The left button only takes hold of things (a hamster, a print): the cursor says so over them
+   and is plain elsewhere. The middle button pans and the right one orbits; both drag. */
+.desk-studio { background: #dbe9f2; cursor: default; touch-action: none; isolation: isolate; }
 .desk-studio.is-dragging { cursor: grabbing; }
 .desk-canvas-host { position: absolute; inset: 0; }
+/* while the pane slides shut or open the picture keeps its full size and is clipped by the pane, rather than the
+   WebGL buffer being reallocated every frame of the slide (which painted the pane's background for a beat) */
+.desk-wrap.is-story .desk-canvas-host { inset: auto; top: 0; left: 0; width: var(--keep-w, 100%); height: var(--keep-h, 100%); }
+/* and the chrome over the picture (header, welcome card, controls, help) fades out for the slide rather than piling up in the closing gap */
+.desk-wrap.is-story > :not(.desk-canvas-host):not(.office-flash) { transition: opacity 0.25s; }
+.desk-wrap.is-story.is-shut > :not(.desk-canvas-host):not(.office-flash) { opacity: 0; pointer-events: none; }
+/* The blast's white-out (src/desk/blast.ts): over the canvas and every overlay, its opacity
+   written by the render loop frame by frame. Nothing under it is meant to be readable while it is up. */
+.office-flash { position: absolute; inset: 0; background: #fff; opacity: 0; pointer-events: none; z-index: 5; }
 .desk-studio .desk-canvas { display: block; width: 100%; height: 100%; }
 .office-nogl { position: absolute; inset: 0; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 4px; text-align: center; line-height: 1.7; background: var(--bg); color: var(--text-2); font-size: 13px; }
 /* Name plates, bubbles and thought glyphs float in the DOM over the canvas, positioned by

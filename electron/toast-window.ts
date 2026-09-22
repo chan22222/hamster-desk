@@ -18,6 +18,7 @@ import { BrowserWindow, ipcMain, nativeTheme, screen } from 'electron'
 import type { WebContents } from 'electron'
 import { join } from 'node:path'
 import type { NotifyRequest } from '../shared/events'
+import { mainLangCode, tr } from './lang'
 import { ToastStack, toastBounds, type Rect, type ToastItem } from './toast-stack'
 import type { ToastState } from './toast-preload'
 
@@ -133,7 +134,7 @@ export class ToastHost {
       maximizable: false,
       fullscreenable: false,
       show: false,
-      title: 'Hamster Desk 알림',
+      title: tr().toast.windowTitle,
       webPreferences: {
         preload: join(__dirname, '../preload/toast-preload.js'),
         contextIsolation: true,
@@ -175,7 +176,7 @@ export class ToastHost {
     win.setBounds(toastBounds(this.stack.size, screen.getPrimaryDisplay().workArea, this.opts.avoid()))
     if (this.pageReady) {
       const theme: ToastTheme = this.theme ?? (nativeTheme.shouldUseDarkColors ? 'dark' : 'light')
-      win.webContents.send('toast:state', { items: this.stack.items(), theme } satisfies ToastState)
+      win.webContents.send('toast:state', { items: this.stack.items(), theme, lang: mainLangCode() } satisfies ToastState)
       if (!win.isVisible()) {
         win.showInactive()
         const b = win.getBounds()

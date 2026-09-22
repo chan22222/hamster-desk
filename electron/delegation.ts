@@ -1,6 +1,7 @@
 import { existsSync, mkdirSync, readFileSync, renameSync, rmSync, writeFileSync } from 'node:fs'
 import { join } from 'node:path'
-import { DELEGATION_CAPS, DELEGATION_PRESETS, type DelegationConfig, type DelegationFileState, type DelegationPreset, type DelegationState } from '../shared/events'
+import { DELEGATION_MODELS, DELEGATION_PRESETS, EFFORT_LEVELS, type DelegationConfig, type DelegationEffort, type DelegationFileState, type DelegationModel, type DelegationPreset, type DelegationState } from '../shared/events'
+import { tr } from './lang'
 import { loadUi, saveUi } from './ui-store'
 import { claudeDir } from './watcher/paths'
 
@@ -15,6 +16,10 @@ import { claudeDir } from './watcher/paths'
  * the status line this is the second thing the app writes into an account's folder — and it is on
  * by default, because the user asked for it to be; the block says in its first line who owns it.
  *
+ * The block is worded in main's language (electron/lang.ts, `delegation.block` in shared/i18n) at
+ * the moment it is built, never at module load, so it follows the language setting the same way
+ * the UI does. The two markers are fixed bytes in every language: they are what finds the block.
+ *
  * A running session does not see a change until the next `claude` (the CLI caches its memory files
  * for the session; the terminal's /memory clears that cache by hand).
  *
@@ -23,33 +28,28 @@ import { claudeDir } from './watcher/paths'
 
 const START = '<!-- hamster-desk:delegation start -->'
 const END = '<!-- hamster-desk:delegation end -->'
-const OWNER = '<!-- Hamster Desk 의 `멀티 에이전트` 설정이 관리하는 블록이에요. 앱에서 끄면 통째로 사라지니 손으로 고치지 마세요. -->'
 const UI_KEY = 'delegation'
 const CUSTOM_MAX = 2000
 
 const PRESETS = DELEGATION_PRESETS
-const CAPS: readonly number[] = DELEGATION_CAPS
 
-// One short line each — what the user would type at the end of a prompt, no more. A longer brief
-// (report formats, test discipline, when not to) made Claude over-test and over-report; the model
-// knows how to split work, it only needs to be told to.
-const LINES: Record<Exclude<DelegationPreset, 'custom'>, string[]> = {
-  'when-needed': ['독립적으로 나뉘는 작업은 서브에이전트(Agent 도구)로 나눠 병렬로 처리해.'],
-  eager: ['가능하면 언제나 서브에이전트(Agent 도구)로 나눠 병렬로 처리해.'],
-  'plan-review': ['서브에이전트(Agent 도구)로 나눠 병렬로 처리하고, 끝나면 검토 서브에이전트에게 한 번 확인시켜.'],
-}
+export const DEFAULT_DELEGATION: DelegationConfig = { on: true, preset: 'when-needed', custom: '', model: 'inherit', effort: 'inherit' }
 
-export const DEFAULT_DELEGATION: DelegationConfig = { on: true, preset: 'when-needed', cap: 0, custom: '' }
-
+/**
+ * Whatever ui.json holds, made into a config. A `cap` (how many sub-agents at once, 0.1.16–0.1.18)
+ * in an older file is simply not read — nothing of it survives into the result.
+ */
 export function sanitizeConfig(raw: unknown): DelegationConfig {
   const c = (raw && typeof raw === 'object' ? raw : {}) as Partial<Record<keyof DelegationConfig, unknown>>
   const preset = PRESETS.some((p) => p.id === c.preset) ? (c.preset as DelegationPreset) : DEFAULT_DELEGATION.preset
-  const cap = typeof c.cap === 'number' && CAPS.includes(c.cap) ? c.cap : 0
+  const model = (DELEGATION_MODELS as readonly unknown[]).includes(c.model) ? (c.model as DelegationModel) : DEFAULT_DELEGATION.model
+  const effort = c.effort === 'inherit' || (EFFORT_LEVELS as readonly unknown[]).includes(c.effort) ? (c.effort as DelegationEffort) : DEFAULT_DELEGATION.effort
   return {
     on: c.on === undefined ? DEFAULT_DELEGATION.on : c.on === true,
     preset,
-    cap,
     custom: typeof c.custom === 'string' ? c.custom.replace(/\r\n?/g, '\n').slice(0, CUSTOM_MAX) : '',
+    model,
+    effort,
   }
 }
 
@@ -63,17 +63,30 @@ export function storeConfig(c: DelegationConfig): DelegationConfig {
   return clean
 }
 
-/** The block as it goes into the file (LF; the writer converts when the file is CRLF). */
+/**
+ * The block as it goes into the file (LF; the writer converts when the file is CRLF), in main's
+ * language as of now: the owner line, the heading, the preset's line and — when set — the lines
+ * that say what the sub-agents run with all come from `tr().delegation.block`.
+ *
+ * One short line per preset — what the user would type at the end of a prompt, no more. A longer
+ * brief (report formats, test discipline, when not to) made Claude over-test and over-report; the
+ * model knows how to split work, it only needs to be told to.
+ */
 export function blockFor(c: DelegationConfig): string {
+  const b = tr().delegation.block
+  const owner = `<!-- ${b.owner} -->`
   const body: string[] = []
   if (c.preset === 'custom') {
     for (const l of c.custom.split('\n')) if (l.trim()) body.push(l.trim().startsWith('-') ? l.trim() : `- ${l.trim()}`)
-    if (body.length === 0) body.push(`- ${LINES['when-needed'][0]}`)
+    if (body.length === 0) body.push(`- ${b.lines['when-needed']}`)
   } else {
-    for (const l of LINES[c.preset]) body.push(`- ${l}`)
+    body.push(`- ${b.lines[c.preset]}`)
   }
-  if (c.cap > 0) body.push(`- 동시에 띄우는 서브에이전트는 최대 ${c.cap}개까지만.`)
-  return [START, OWNER, '## 작업 분담 (Hamster Desk)', ...body, END].join('\n')
+  // the Agent tool's `model` / `effort` options, spelled out; `inherit` is the CLI's own default and says nothing
+  if (c.model === 'lower') body.push(`- ${b.modelLower}`)
+  else if (c.model !== 'inherit') body.push(`- ${b.model(c.model)}`)
+  if (c.effort !== 'inherit') body.push(`- ${b.effort(c.effort)}`)
+  return [START, owner, b.heading, ...body, END].join('\n')
 }
 
 const BLOCK_RE = new RegExp(`\\n*${START.replace(/[-[\]/{}()*+?.\\^$|]/g, '\\$&')}[\\s\\S]*?${END.replace(/[-[\]/{}()*+?.\\^$|]/g, '\\$&')}\\n*`, 'g')
@@ -109,7 +122,11 @@ function readText(file: string): string {
   }
 }
 
-/** What the file says about this config, without touching it. */
+/**
+ * What the file says about this config, without touching it. The block in the file is compared to
+ * `blockFor(c)` as worded right now, so after a language change a block written in the old language
+ * counts as 'stale' — and the next sync (app start, any change in the menu) rewrites it in the new one.
+ */
 export function fileState(file: string, c: DelegationConfig): DelegationFileState {
   const text = readText(file)
   const m = text.match(BLOCK_RE)

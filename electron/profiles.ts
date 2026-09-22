@@ -2,6 +2,7 @@ import { closeSync, existsSync, mkdirSync, openSync, readFileSync, readSync, rea
 import { homedir } from 'node:os'
 import { dirname, join, resolve } from 'node:path'
 import { DEFAULT_PROFILE_ID, type Profile, type ProfilesState } from '../shared/events'
+import { tr } from './lang'
 import { loadUi, saveUi } from './ui-store'
 import { claudeDir } from './watcher/paths'
 
@@ -18,6 +19,7 @@ import { claudeDir } from './watcher/paths'
  */
 
 const NAME_MAX = 24
+/** what is *stored* for the CLI's own account while nobody has named it (never shown as is: see `withEmails`) */
 const DEFAULT_NAME = '기본'
 /** left inside an account folder whose delete could not finish, so that nothing takes it for a live account */
 const TOMBSTONE = '.hamster-deleted'
@@ -98,7 +100,7 @@ export function addProfile(name: string): { state: ProfilesState; added: Profile
   const id = nextProfileId(state.list.map((p) => p.id), (x) => existsSync(join(profilesRoot(), x)))
   const dir = join(profilesRoot(), id)
   mkdirSync(dir, { recursive: true })
-  const added: Profile = { id, name: cleanName(name, `계정 ${state.list.length + 1}`), dir }
+  const added: Profile = { id, name: cleanName(name, tr().main.accountN(state.list.length + 1)), dir }
   return { state: store({ ...state, list: [...state.list, added] }), added }
 }
 
@@ -184,7 +186,7 @@ export function adoptOrphanProfiles(): Profile[] {
     }
     if (!existsSync(join(dir, '.credentials.json')) && !existsSync(join(dir, '.claude.json'))) continue
     const email = emailOf({ id, name: id, dir })
-    adopted.push({ id, name: cleanName(email?.split('@')[0], `계정 ${state.list.length + adopted.length + 1}`), dir })
+    adopted.push({ id, name: cleanName(email?.split('@')[0], tr().main.accountN(state.list.length + adopted.length + 1)), dir })
   }
   if (adopted.length) store({ ...state, list: [...state.list, ...adopted] })
   return adopted
@@ -255,14 +257,33 @@ export function emailOf(p: Profile): string | null {
  * the others — it only differs in where it lives — so until the user names it, it is called what
  * the others are called when they are recovered: the first part of the login's email. `기본` stays
  * what is *stored* for "never named", so a file written by an older version reads the same.
+ *
+ * And when the CLI's own folder is logged in as the same person as an account the app added, the
+ * list shows that account only (`mergedDefaultInto`). Two rows for one login were two rows for one
+ * rate limit, and the CLI's row could only be *hidden*, not deleted, which read as a limitation
+ * rather than what it is. The added account is the one kept because it is the one that can be
+ * deleted — and deleting it brings the CLI's own back by itself. Nothing is stored for this.
  */
 export function withEmails(state: ProfilesState): ProfilesState {
+  const list = state.list.map((p) => {
+    const email = emailOf(p)
+    const unnamed = p.id === DEFAULT_PROFILE_ID && p.name === DEFAULT_NAME
+    return { ...p, email, name: unnamed ? cleanName(email?.split('@')[0], tr().main.accountN(1)) : p.name }
+  })
+  const twin = twinOfDefault(list)
+  if (!twin) return { ...state, list }
   return {
     ...state,
-    list: state.list.map((p) => {
-      const email = emailOf(p)
-      const unnamed = p.id === DEFAULT_PROFILE_ID && p.name === DEFAULT_NAME
-      return { ...p, email, name: unnamed ? cleanName(email?.split('@')[0], '계정 1') : p.name }
-    }),
+    list: list.filter((p) => p.id !== DEFAULT_PROFILE_ID),
+    currentId: state.currentId === DEFAULT_PROFILE_ID ? twin.id : state.currentId,
+    mergedDefaultInto: twin.id,
   }
+}
+
+/** the first added account logged in as the same person as the CLI's own folder, if any */
+function twinOfDefault(list: Profile[]): Profile | undefined {
+  const cli = list.find((p) => p.id === DEFAULT_PROFILE_ID)
+  const email = cli?.email?.trim().toLowerCase()
+  if (!email) return undefined
+  return list.find((p) => p.id !== DEFAULT_PROFILE_ID && p.email?.trim().toLowerCase() === email)
 }

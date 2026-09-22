@@ -11,11 +11,14 @@
 //   - `opusplan` is a mode, not a model (Opus while planning, Sonnet otherwise): the transcript and
 //     the status line report the model actually used, so a tick on it could never be honest.
 // `/model opusplan` typed in the terminal still works.
+//
+// The one-line description of each family (the CLI's own `/model` picker wording) is worded by the
+// UI in its language: `ui().session.modelHints[alias]` (shared/i18n), read where the menu renders.
 
 export type ModelAlias = 'fable' | 'opus' | 'sonnet' | 'haiku'
 
 export interface ModelChoice {
-  /** what `/model <alias>` is given */
+  /** what `/model <alias>` is given; also the key of its hint in `session.modelHints` */
   alias: ModelAlias
   /**
    * The id the alias resolves to in Claude Code 2.1.278 (`latest_per_family`). The bar shows this
@@ -23,15 +26,13 @@ export interface ModelChoice {
    * really switched to — an org restriction can make that a different model.
    */
   id: string
-  /** the CLI's own one-line description of the family (`/model` picker), in Korean */
-  hint: string
 }
 
 export const MODEL_CHOICES: ModelChoice[] = [
-  { alias: 'fable', id: 'claude-fable-5-1', hint: '가장 어렵고 긴 작업' },
-  { alias: 'opus', id: 'claude-opus-5', hint: '복잡한 일상 작업' },
-  { alias: 'sonnet', id: 'claude-sonnet-5', hint: '단순 작업에 효율적' },
-  { alias: 'haiku', id: 'claude-haiku-4-5', hint: '짧은 질문에 가장 빠름' },
+  { alias: 'fable', id: 'claude-fable-5-1' },
+  { alias: 'opus', id: 'claude-opus-5' },
+  { alias: 'sonnet', id: 'claude-sonnet-5' },
+  { alias: 'haiku', id: 'claude-haiku-4-5' },
 ]
 
 /**

@@ -4,6 +4,7 @@
 // own prompt history (`~/.claude/history.jsonl`), which meant the list was full of folders the user
 // had never opened here; that file is no longer read anywhere in the app.
 
+import { ui } from '../i18n'
 import { uiGet, uiSet } from '../store'
 
 const MAX_RECENT = 40
@@ -129,10 +130,11 @@ export function recentEntries(limit = MAX_RECENT): RecentEntry[] {
 export function relTime(ts: number): string {
   if (!ts) return ''
   const diff = Date.now() - ts
-  if (diff < 60_000) return '방금'
-  if (diff < 3600_000) return `${Math.floor(diff / 60_000)}분 전`
-  if (diff < 86400_000) return `${Math.floor(diff / 3600_000)}시간 전`
-  if (diff < 172800_000) return '어제'
+  const u = ui().time
+  if (diff < 60_000) return u.justNow
+  if (diff < 3600_000) return u.minutesAgo(Math.floor(diff / 60_000))
+  if (diff < 86400_000) return u.hoursAgo(Math.floor(diff / 3600_000))
+  if (diff < 172800_000) return u.yesterday
   const d = new Date(ts)
   return `${d.getMonth() + 1}/${d.getDate()}`
 }

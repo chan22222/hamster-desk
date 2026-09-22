@@ -1,3 +1,5 @@
+import type { UiStrings } from './i18n/ko'
+
 // Normalized events flowing from the watcher (Electron main / CLI) to the desk renderer.
 // Everything here is derived from files Claude Code already writes; no hooks, no CLI patching.
 
@@ -54,6 +56,13 @@ export interface ProfilesState {
    * is not this app's — so "remove" on it only hides it, and this is what lets the UI offer it back.
    */
   hiddenDefault?: boolean
+  /**
+   * The CLI's own account is logged in as the same person as this account (same email), so the
+   * list shows only this one, and what runs under ~/.claude counts as this account's. Decided by
+   * `withEmails` each time the list is read, never stored: delete this account and the CLI's own
+   * is back on the list by itself.
+   */
+  mergedDefaultInto?: string
 }
 
 export interface RateWindow {
@@ -119,23 +128,30 @@ export type FiveHourState = Record<string, FiveHourAccount>
 /**
  * "멀티 에이전트" — a standing instruction block the app keeps in each account's CLAUDE.md that tells
  * Claude when to split work across sub-agents (electron/delegation.ts). `preset` picks the harness
- * text, `cap` limits the agents run at once (0 = no line about it), `custom` is the user's own text.
+ * text, `custom` is the user's own text, `model` and `effort` say what the sub-agents run with.
  */
 export type DelegationPreset = 'when-needed' | 'eager' | 'plan-review' | 'custom'
-/** the harnesses on offer, in menu order (the texts themselves live in electron/delegation.ts) */
-export const DELEGATION_PRESETS: { id: DelegationPreset; label: string; hint: string }[] = [
-  { id: 'when-needed', label: '필요할 때만', hint: '독립적인 부분으로 나뉠 때만 병렬로' },
-  { id: 'eager', label: '적극 분담', hint: '부분이 둘 이상이면 언제나 나눠서' },
-  { id: 'plan-review', label: '계획 → 분담 → 검토', hint: '나눠 맡긴 뒤 검토 에이전트가 확인' },
-  { id: 'custom', label: '직접 입력', hint: '내가 쓴 지시문 그대로' },
-]
-/** how many sub-agents at once; 0 = no limit line */
-export const DELEGATION_CAPS = [0, 2, 3, 4, 6] as const
+/**
+ * the harnesses on offer, in menu order. The UI words each row from `delegation.presets[id]`
+ * (shared/i18n); the lines the block itself carries live in electron/delegation.ts.
+ */
+export const DELEGATION_PRESETS: { id: DelegationPreset }[] = [{ id: 'when-needed' }, { id: 'eager' }, { id: 'plan-review' }, { id: 'custom' }]
+/**
+ * What the sub-agents run with — the Agent tool's `model` and `effort` options, which the block
+ * spells out for Claude. `inherit` adds no line (the CLI's own default: the main session's). `lower`
+ * is one family below the main model; the CLI has no word for that, so the block lists the mapping
+ * itself. The four fixed ones are the family aliases the session bar offers (src/session/models.ts).
+ */
+export type DelegationModel = 'inherit' | 'lower' | 'fable' | 'opus' | 'sonnet' | 'haiku'
+export const DELEGATION_MODELS: readonly DelegationModel[] = ['inherit', 'lower', 'fable', 'opus', 'sonnet', 'haiku']
+/** `inherit` or one of EFFORT_LEVELS (below) */
+export type DelegationEffort = 'inherit' | EffortLevel
 export interface DelegationConfig {
   on: boolean
   preset: DelegationPreset
-  cap: number
   custom: string
+  model: DelegationModel
+  effort: DelegationEffort
 }
 /** 'installed' = this config's block is in the file; 'stale' = a block is there but says something else */
 export type DelegationFileState = 'installed' | 'stale' | 'none' | 'error'
@@ -272,10 +288,18 @@ export type ProjectKind = 'node' | 'python' | 'rust' | 'go' | 'dotnet' | 'maven'
 /** the headings the sidebar's 실행 menu sorts the commands under */
 export type ProjectActionGroup = 'dev' | 'build' | 'test' | 'install' | 'other'
 
+/** the commands the UI has a word for, in every language (shared/i18n/ko.ts `run.actions`) */
+export type ProjectActionLabel = keyof UiStrings['run']['actions']
+
 export interface ProjectAction {
   /** `<kind>:<name>`, unique within one folder */
   id: string
+  /** a known command, worded by the UI in its language (`ui().run.actions[labelKey]`)… */
+  labelKey: ProjectActionLabel | null
+  /** …or, for a script the app does not know, its own name (what `labelKey: null` rows show) */
   label: string
+  /** what follows the label in brackets: `실행 (main.py)`, `테스트 (pytest)` */
+  detail?: string
   /** exactly what gets typed into the new terminal */
   command: string
   group: ProjectActionGroup

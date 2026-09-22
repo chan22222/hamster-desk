@@ -2,6 +2,7 @@ import { execFile } from 'node:child_process'
 import { EventEmitter } from 'node:events'
 import { homedir } from 'node:os'
 import { claudeInvocation, cleanEnv, findClaude } from './env'
+import { tr } from './lang'
 import { loadUi, saveUi } from './ui-store'
 import type { FiveHourAccount, FiveHourState, RateWindow } from '../shared/events'
 
@@ -39,7 +40,6 @@ const TIMEOUT_MS = 90_000
 /** after the n-th failure in a row (a sleeping network, a login that expired) */
 const BACKOFF_MIN = [2, 5, 15, 30, 60]
 const UI_KEY = 'fiveHourStart'
-const NO_CLAUDE = 'claude 명령을 찾을 수 없어요'
 
 const SYSTEM = 'Reply with the single word OK.'
 const MESSAGE = 'hi'
@@ -136,9 +136,10 @@ export function parsePing(stdout: string): PingResult {
     }
   }
   const base = { resetsAt, blockedUntil, blockedBy, noLimits: false }
-  if (!result) return { ...base, error: blockedUntil ? null : '응답을 읽지 못했어요' }
+  // worded in main's language at the moment the answer is read (electron/lang.ts)
+  if (!result) return { ...base, error: blockedUntil ? null : tr().main.noReply }
   if (result.is_error === true) {
-    const why = typeof result.result === 'string' && result.result.trim() ? result.result.trim().split(/\r?\n/)[0].slice(0, 160) : String(result.subtype ?? '실패')
+    const why = typeof result.result === 'string' && result.result.trim() ? result.result.trim().split(/\r?\n/)[0].slice(0, 160) : String(result.subtype ?? tr().common.failed)
     return { ...base, error: why }
   }
   return { ...base, noLimits: !sawLimits, error: null }
@@ -149,7 +150,7 @@ export type PingExec = (configDir: string | null, signal: AbortSignal) => Promis
 
 function runClaude(configDir: string | null, signal: AbortSignal): Promise<string> {
   const bin = findClaude()
-  if (!bin) return Promise.reject(new Error(NO_CLAUDE))
+  if (!bin) return Promise.reject(new Error(tr().main.noClaude))
   const argv = [
     '-p',
     '--model',
@@ -319,7 +320,7 @@ export class FiveHourStarter extends EventEmitter {
         // A limit that has to run out first; asking sooner changes nothing. The 5-hour one means its
         // window is running (and used up) — nothing is wrong. Never sooner than a backoff: a lift
         // time that is already past must not turn into a message on every tick.
-        e.error = r.blockedBy === 'five_hour' ? null : '사용 한도에 걸려 있어요'
+        e.error = r.blockedBy === 'five_hour' ? null : tr().main.rateLimited
         e.retryAt = Math.max(r.blockedUntil + GRACE_MS, at + backoffMs(1))
         e.failures = 0
       } else if (r.error) {
@@ -327,14 +328,14 @@ export class FiveHourStarter extends EventEmitter {
       } else {
         e.failures = 0
         e.retryAt = null
-        e.error = r.noLimits ? '5시간 한도 정보가 오지 않았어요 — 구독(Pro/Max) 로그인인지 확인해 주세요' : null
+        e.error = r.noLimits ? tr().main.noLimits : null
         // said by the CLI when it can; otherwise the window this message just opened ends five hours from now
         e.resetsAt = r.resetsAt !== null && r.resetsAt > at ? r.resetsAt : at + WINDOW_MS
       }
     } catch (err) {
       if (ctrl.signal.aborted && !timedOut) return // stop(): the app is quitting
       e.failures++
-      e.error = timedOut ? '응답이 없어요 (시간 초과)' : ((err as Error)?.message ?? '실패')
+      e.error = timedOut ? tr().main.timedOut : ((err as Error)?.message ?? tr().common.failed)
       e.retryAt = at + backoffMs(e.failures)
     } finally {
       clearTimeout(timer)

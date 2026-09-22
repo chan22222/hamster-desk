@@ -1,6 +1,8 @@
 import { useEffect, useState } from 'react'
 import type { AppUpdateInfo } from '@shared/events'
 import { useDesk } from '../store'
+import { useUi } from '../i18n'
+import { rich } from '../rich'
 import { Popover } from './Popover'
 import { IconDownload, IconRefresh } from './icons'
 
@@ -25,6 +27,7 @@ function pending(u: AppUpdateInfo | null): { release: NonNullable<AppUpdateInfo[
 
 /** The same body in the dialog and in the pill's popover. `close`: hide whatever is showing it. */
 function UpdateBody({ u, close }: { u: AppUpdateInfo; close: () => void }) {
+  const txt = useUi()
   const [busy, setBusy] = useState(false)
   const run = (): void => {
     setBusy(true)
@@ -45,15 +48,15 @@ function UpdateBody({ u, close }: { u: AppUpdateInfo; close: () => void }) {
       <div className="pop-body">
         <div className="pop-head">
           Hamster Desk {rel.version}
-          {u.version ? <span className="dim"> · 지금 {u.version}</span> : null}
+          {u.version ? <span className="dim">{txt.update.now(u.version)}</span> : null}
         </div>
         {ready ? (
-          <p>새 버전을 받아 두었어요. 다시 시작하면 설치 창이 잠깐 떴다가 앱이 스스로 다시 열립니다.</p>
+          <p>{txt.update.readyNote}</p>
         ) : available ? (
-          <p>누르면 새 버전을 받기 시작해요. 받는 동안에도 앱은 그대로 쓸 수 있고, 다 받으면 다시 시작할지 한 번 더 묻습니다.</p>
+          <p>{txt.update.availableNote}</p>
         ) : (
           <>
-            <p>새 버전을 받는 중이에요. 다 받으면 아래 버튼이 켜집니다.</p>
+            <p>{txt.update.downloadingNote}</p>
             <div className="upd-bar" role="progressbar" aria-valuemin={0} aria-valuemax={100} aria-valuenow={rel.percent}>
               <i style={{ width: `${rel.percent}%` }} />
             </div>
@@ -61,35 +64,31 @@ function UpdateBody({ u, close }: { u: AppUpdateInfo; close: () => void }) {
         )}
         {available && u.error && (
           <p className="pop-note upd-why" title={u.error}>
-            {u.error} — 다시 눌러 보세요. 기록: <code>~/.hamster-desk/update.log</code>
+            {rich(txt.update.errorNote(u.error))}
           </p>
         )}
-        <p className="pop-note">다시 시작할 때 열려 있는 터미널과 그 안의 Claude 는 모두 종료됩니다. 설치가 끝날 때까지 작업 표시줄 아이콘은 누르지 마세요.</p>
+        <p className="pop-note">{txt.update.restartWarn}</p>
         <button className="pop-primary" disabled={busy || rel.state === 'downloading'} onClick={run}>
-          {ready ? '다시 시작해서 업데이트' : available ? '업데이트 받기' : `받는 중 ${rel.percent}%`}
+          {ready ? txt.update.restartToUpdate : available ? txt.update.download : txt.update.downloading(rel.percent)}
         </button>
       </div>
     )
   }
   return (
     <div className="pop-body">
-      <div className="pop-head">Hamster Desk 새 버전 · 변경 {u.behind}개</div>
+      <div className="pop-head">{txt.update.devHead(u.behind)}</div>
       <ul className="pop-commits">
         {u.commits.map((c) => (
           <li key={c.sha} title={c.sha}>
             {c.title}
           </li>
         ))}
-        {u.behind > u.commits.length && <li className="dim">… 외 {u.behind - u.commits.length}개</li>}
+        {u.behind > u.commits.length && <li className="dim">{txt.update.moreCommits(u.behind - u.commits.length)}</li>}
       </ul>
-      {u.canSelfUpdate ? (
-        <p>앱을 닫고 받아서 다시 빌드한 뒤 스스로 다시 엽니다(1분쯤). 진행 상황은 검은 창에 나옵니다.</p>
-      ) : (
-        <p>이 실행 파일은 git 저장소 밖에 있어 스스로 업데이트할 수 없어요. 변경 내역을 열어 드릴게요.</p>
-      )}
-      {u.canSelfUpdate && <p className="pop-note">열려 있는 터미널과 그 안의 Claude 는 모두 종료됩니다. 끝날 때까지 작업 표시줄 아이콘은 누르지 마세요.</p>}
+      {u.canSelfUpdate ? <p>{txt.update.devSelfNote}</p> : <p>{txt.update.devNoGitNote}</p>}
+      {u.canSelfUpdate && <p className="pop-note">{txt.update.devSelfWarn}</p>}
       <button className="pop-primary" disabled={busy} onClick={run}>
-        {u.canSelfUpdate ? '닫고 업데이트' : 'GitHub 에서 보기'}
+        {u.canSelfUpdate ? txt.update.closeAndUpdate : txt.update.viewOnGitHub}
       </button>
     </div>
   )
@@ -97,6 +96,7 @@ function UpdateBody({ u, close }: { u: AppUpdateInfo; close: () => void }) {
 
 /** Only appears when there is something to install. */
 export function AppUpdatePill() {
+  const txt = useUi()
   const u = useDesk((s) => s.appUpdate)
   const what = pending(u)
   if (!u || !what) return null
@@ -107,11 +107,11 @@ export function AppUpdatePill() {
       label={
         <>
           <IconDownload size={14} />
-          {rel?.state === 'downloading' ? `업데이트 받는 중 ${rel.percent}%` : '앱 업데이트'}
+          {rel?.state === 'downloading' ? txt.update.pillDownloading(rel.percent) : txt.update.pill}
         </>
       }
-      ariaLabel="Hamster Desk 업데이트"
-      title={rel ? `Hamster Desk ${rel.version}` : `Hamster Desk 새 버전 (변경 ${u.behind}개)`}
+      ariaLabel={txt.update.appUpdate}
+      title={rel ? `Hamster Desk ${rel.version}` : txt.update.pillTipDev(u.behind)}
       width={300}
     >
       {(close) => <UpdateBody u={u} close={close} />}
@@ -124,6 +124,7 @@ export function AppUpdatePill() {
  * (the pill stays), and a newer version found while the app is open asks again.
  */
 export function AppUpdatePrompt() {
+  const txt = useUi()
   const u = useDesk((s) => s.appUpdate)
   const [dismissed, setDismissed] = useState<string | null>(null)
   const what = pending(u)
@@ -143,11 +144,11 @@ export function AppUpdatePrompt() {
   const later = (): void => setDismissed(key)
   return (
     <div className="upd-veil" onMouseDown={(e) => e.target === e.currentTarget && later()}>
-      <div className="upd-dialog" role="dialog" aria-modal="true" aria-label="Hamster Desk 업데이트">
-        <div className="upd-title">새 버전이 나왔어요</div>
+      <div className="upd-dialog" role="dialog" aria-modal="true" aria-label={txt.update.appUpdate}>
+        <div className="upd-title">{txt.update.dialogTitle}</div>
         <UpdateBody u={u} close={later} />
         <button className="pop-ghost upd-later" onClick={later}>
-          나중에
+          {txt.common.later}
         </button>
       </div>
     </div>
@@ -156,6 +157,7 @@ export function AppUpdatePrompt() {
 
 /** The "Hamster Desk" block inside the ⋯ menu: which build this is and whether it is current. */
 export function AppUpdateSection() {
+  const txt = useUi()
   const u = useDesk((s) => s.appUpdate)
   const [checking, setChecking] = useState(false)
   const recheck = (): void => {
@@ -170,33 +172,33 @@ export function AppUpdateSection() {
         <span>
           {u?.version ? `v${u.version}` : ''}
           {u?.version && u.commit ? ' · ' : ''}
-          {u?.commit ? u.commit.slice(0, 7) : u?.version ? '' : '로컬 빌드'}
+          {u?.commit ? u.commit.slice(0, 7) : u?.version ? '' : txt.update.localBuild}
         </span>
         {rel?.state === 'ready' ? (
-          <span className="dim"> · 새 버전 {rel.version} 준비됨</span>
+          <span className="dim">{txt.update.ready(rel.version)}</span>
         ) : rel?.state === 'downloading' ? (
-          <span className="dim"> · 새 버전 {rel.version} 받는 중 {rel.percent}%</span>
+          <span className="dim">{txt.update.downloadingVersion(rel.version, rel.percent)}</span>
         ) : checking ? (
-          <span className="dim"> · 확인 중…</span>
+          <span className="dim">{txt.update.checking}</span>
         ) : failed ? (
-          <span className="dim"> · 확인 실패</span>
+          <span className="dim">{txt.update.checkFailed}</span>
         ) : rel?.state === 'available' ? (
-          <span className="dim"> · 새 버전 {rel.version} 있음</span>
+          <span className="dim">{txt.update.available(rel.version)}</span>
         ) : u?.behind ? (
-          <span className="dim"> · 새 변경 {u.behind}개</span>
+          <span className="dim">{txt.update.newChanges(u.behind)}</span>
         ) : u && !u.error ? (
-          <span className="ok"> · 최신</span>
+          <span className="ok">{txt.update.upToDate}</span>
         ) : null}
       </div>
       {failed && !checking && (
         <p className="pop-note upd-why" title={u?.error ?? ''}>
-          {u?.error} — 잠시 뒤 자동으로 다시 확인해요. 기록: <code>~/.hamster-desk/update.log</code>
+          {rich(txt.update.autoRetry(u?.error ?? ''))}
         </p>
       )}
       <div className="pop-row">
         <button className="pop-ghost" onClick={recheck} disabled={checking}>
           <IconRefresh size={14} />
-          다시 확인
+          {txt.common.recheck}
         </button>
       </div>
     </>

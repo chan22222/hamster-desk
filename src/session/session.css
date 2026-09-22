@@ -23,7 +23,8 @@
 /* While Claude Code is asking something, every control that types into the terminal is disabled and
    dims itself (below); the bar says why in words rather than fading as a whole, because the meter
    and `지난 대화` — which never touch this terminal — stay live. */
-.sb-note { flex: none; font-size: 11px; color: var(--text-3); white-space: nowrap; }
+/* The note may shrink and clip (the English one is long); the tooltip on the bar repeats it in full. */
+.sb-note { flex: 0 1 auto; min-width: 0; font-size: 11px; color: var(--text-3); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 
 .sb-sep { width: 1px; height: 16px; flex: none; background: var(--line); }
 .sb-gap { flex: 1; min-width: 4px; }
@@ -35,6 +36,9 @@
    colour of a name rather than a command, and the caret on its right is what says "this opens" —
    until 0.1.13 the same text was a label, so nothing else may look different. */
 .pill.sb-btn.sb-model { gap: 2px; padding: 0 4px 0 8px; font-weight: 500; color: var(--text); }
+/* the name in it (a model, a preset) is clipped rather than letting one long label — `Plan → split →
+   review` in English — push the rest of the bar off screen; the full name is in the tooltip and the menu */
+.sb-model-name { display: block; min-width: 0; max-width: 152px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .pill.sb-btn.sb-model:disabled { color: var(--text-3); }
 .pill.sb-btn.sb-model .sb-caret { flex: none; color: var(--text-3); }
 .pill.sb-btn.sb-model:hover:not(:disabled) .sb-caret, .pill.sb-btn.sb-model.is-open .sb-caret { color: var(--text-2); }
@@ -48,12 +52,18 @@
 .pill.sb-btn.sb-deleg.on .sb-deleg-mark { background: var(--accent); border-color: transparent; }
 .sb-deleg-custom { width: 100%; min-height: 64px; resize: vertical; padding: 6px 8px; border: 1px solid var(--line); border-radius: var(--radius); background: var(--surface); color: var(--text); font: inherit; font-size: 12px; line-height: 1.5; }
 .sb-deleg-custom:focus { outline: none; border-color: var(--line-strong); }
+/* the sub-agents' model and effort: a label over a segmented control of six buttons — too wide to
+   share one line with its label in every language, so the two stack, and the seg itself may wrap
+   where a language's words are long (the buttons stay whole; `.seg-btn` is nowrap) */
+.sb-deleg-row { display: flex; flex-direction: column; align-items: flex-start; gap: 4px; font-size: 12px; color: var(--text-2); }
+.sb-deleg-row .seg { flex-wrap: wrap; max-width: 100%; }
+.sb-deleg-row .seg-btn { padding: 2px 7px; font-size: 11px; }
 
 .seg.sb-effort { flex: none; padding: 1px; }
 .seg.sb-effort .seg-btn { padding: 2px 6px; font-size: 11px; }
 .seg.sb-effort .seg-btn:disabled { opacity: 0.45; cursor: default; }
 
-.sb-hint { flex: none; font-size: 11px; color: var(--danger); }
+.sb-hint { flex: none; font-size: 11px; color: var(--danger); white-space: nowrap; }
 
 /* ---- context ---------------------------------------------------------------------------- */
 
@@ -74,6 +84,9 @@
 
 .pop-body.tl { gap: 6px; }
 .side-search.tl-search { margin: 0 0 2px; }
+/* the `--continue` row: one line whatever the language says, clipped rather than wrapped, so the
+   height the list's room is computed from (BELOW_LIST in TranscriptList.tsx) stays true */
+.pop-body.tl .pop-ghost { display: block; min-width: 0; padding: 0 10px; line-height: 30px; font-size: 12px; text-align: center; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .tl-list { display: flex; flex-direction: column; gap: 2px; max-height: 320px; overflow-y: auto; margin: 0 -4px; padding: 0 4px; }
 
 .tl-row {

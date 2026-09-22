@@ -13,6 +13,7 @@ import assert from 'node:assert/strict'
 
 const HOME = mkdtempSync(join(tmpdir(), 'hd-profiles-'))
 process.env.HAMSTER_HOME = HOME
+process.env.HAMSTER_LANG = 'ko' // the fallback names asserted below are the Korean ones, whatever this machine speaks
 delete process.env.CLAUDE_CONFIG_DIR
 
 import { flushUi } from '../../electron/ui-store'
@@ -217,6 +218,36 @@ test('on screen the CLI account is one account among the others: named after its
     renameProfile('default', '개인')
     assert.equal(withEmails(loadProfiles()).list[0].name, '개인') // a name the user chose always wins
     renameProfile('default', '기본')
+  } finally {
+    delete process.env.CLAUDE_CONFIG_DIR
+    flushUi()
+  }
+})
+
+test('the CLI account logged in as the same person as an added one shows as that one only', () => {
+  for (const p of loadProfiles().list) if (p.id !== 'default') deleteProfileDir(removeProfile(p.id).removed) // what earlier tests left
+  const cli = mkdtempSync(join(tmpdir(), 'hd-cli-'))
+  process.env.CLAUDE_CONFIG_DIR = cli
+  try {
+    writeFileSync(join(cli, '.claude.json'), JSON.stringify({ oauthAccount: { emailAddress: 'Me@Example.com' } }))
+    const { added } = addProfile('회사')
+    setCurrentProfile('default')
+    // two logins, two rows
+    assert.deepEqual(withEmails(loadProfiles()).list.map((p) => p.id), ['default', added.id])
+    assert.equal(withEmails(loadProfiles()).mergedDefaultInto, undefined)
+    // the same login in the added folder: one row, the added one, and the active account follows it
+    writeFileSync(join(added.dir as string, '.claude.json'), JSON.stringify({ oauthAccount: { emailAddress: 'me@example.com' } }))
+    const shown = withEmails(loadProfiles())
+    assert.deepEqual(shown.list.map((p) => p.id), [added.id])
+    assert.equal(shown.mergedDefaultInto, added.id)
+    assert.equal(shown.currentId, added.id)
+    assert.equal(loadProfiles().currentId, 'default') // nothing of this is stored
+    assert.equal(loadProfiles().hiddenDefault, undefined)
+    // delete the added one and the CLI's own is simply back
+    deleteProfileDir(removeProfile(added.id).removed)
+    const back = withEmails(loadProfiles())
+    assert.deepEqual(back.list.map((p) => p.id), ['default'])
+    assert.equal(back.mergedDefaultInto, undefined)
   } finally {
     delete process.env.CLAUDE_CONFIG_DIR
     flushUi()
