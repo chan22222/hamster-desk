@@ -170,7 +170,10 @@ export function Sidebar({ start, session, onOpen }: { start: string; session: Se
   const setPrefs = useDesk((s) => s.setPrefs)
   const [listing, setListing] = useState<Listing | null>(null)
   const [drives, setDrives] = useState<string[]>([])
-  const [favs, setFavs] = useState<string[]>(() => favDirs())
+  // derived from the settings bag, again whenever it changes — the sidebar can be up before the
+  // file has been read, and a star pressed in the `+` menu has to show on the button here too
+  const rev = useDesk((s) => s.uiRev)
+  const favs = useMemo(() => favDirs(), [rev])
   const [filter, setFilter] = useState('')
   const [loading, setLoading] = useState(false)
   const [menu, setMenu] = useState<{ x: number; y: number; path: string } | null>(null)
@@ -229,7 +232,7 @@ export function Sidebar({ start, session, onOpen }: { start: string; session: Se
     }
   }, [menu])
 
-  const star = (dir: string): void => setFavs(toggleFav(dir))
+  const star = (dir: string): void => void toggleFav(dir) // the bag changes → `favs` is derived again
 
   const browse = async (): Promise<void> => {
     const d = await window.desk?.dialog.pickFolder(listing?.path)

@@ -3,27 +3,35 @@
 // sidebar no longer carries a copy, because "recent" is something you want when you are starting
 // something, not something you want in the way all day.
 
-import { useEffect, useState } from 'react'
+import { useEffect, useMemo, useState } from 'react'
 import { dirKey, forgetRecent, middlePath, missingDirs, recentEntries, relTime, toggleFav, type RecentEntry } from '../sidebar/recent'
+import { useDesk } from '../store'
 import { IconClose, IconFolder, IconSearch, IconStar } from './icons'
 
 const GONE = '폴더를 찾을 수 없어요.'
 
 export function RecentList({ onOpen, maxHeight = 300 }: { onOpen: (dir: string) => void; maxHeight?: number }) {
-  const [rows, setRows] = useState<RecentEntry[]>(() => recentEntries())
+  // Derived from the settings bag, again whenever it changes (`uiRev`). The start card mounts
+  // before the file has been read, so a list taken once at mount was empty for the rest of the
+  // run — "no projects yet" on every launch, over a file that had them. A star or × in the
+  // sidebar changes the bag too, and shows here without a remount.
+  const rev = useDesk((s) => s.uiRev)
+  const rows = useMemo<RecentEntry[]>(() => recentEntries(), [rev])
   const [missing, setMissing] = useState<Set<string>>(() => new Set())
   const [filter, setFilter] = useState('')
   const [notice, setNotice] = useState<string | null>(null)
 
+  // one existence check per distinct set of folders, not per change to the bag (a tab switch is one)
+  const folders = rows.map((r) => r.path).join('\n')
   useEffect(() => {
     let alive = true
-    void missingDirs(rows.map((r) => r.path)).then((s) => {
+    void missingDirs(folders ? folders.split('\n') : []).then((s) => {
       if (alive) setMissing(s)
     })
     return () => {
       alive = false
     }
-  }, [rows])
+  }, [folders])
 
   const q = filter.trim().toLowerCase()
   const shown = q ? rows.filter((r) => r.name.toLowerCase().includes(q) || r.path.toLowerCase().includes(q)) : rows
@@ -69,8 +77,7 @@ export function RecentList({ onOpen, maxHeight = 300 }: { onOpen: (dir: string) 
                 aria-label={r.fav ? '즐겨찾기 해제' : '즐겨찾기'}
                 onClick={(e) => {
                   e.stopPropagation()
-                  toggleFav(r.path)
-                  setRows(recentEntries())
+                  toggleFav(r.path) // the bag changes → `rows` is derived again
                 }}
               >
                 <IconStar size={13} filled={r.fav} />
@@ -83,7 +90,6 @@ export function RecentList({ onOpen, maxHeight = 300 }: { onOpen: (dir: string) 
                   e.stopPropagation()
                   forgetRecent(r.path)
                   setNotice(null)
-                  setRows(recentEntries())
                 }}
               >
                 <IconClose size={12} />

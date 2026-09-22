@@ -102,10 +102,13 @@ export interface DeskBridge {
    * UI settings kept in ~/.hamster-desk/ui.json — not localStorage, which lives in the Electron
    * profile and therefore differs between the portable exe, `npm run dev` and the smoke runs.
    * `save` shallow-merges the patch (a `null` value deletes the key) and resolves to the merged state.
+   * `base` is what this renderer's copy held before the patch, per key (`null` for none): for a
+   * list it lets the main process write the *difference* into a file another process may have
+   * added to meanwhile (electron/ui-store.ts).
    */
   ui: {
     load(): Promise<UiState>
-    save(patch: UiState): Promise<UiState>
+    save(patch: UiState, base?: UiState): Promise<UiState>
   }
   win: {
     alwaysOnTop(on: boolean): void
@@ -224,7 +227,7 @@ const bridge: DeskBridge = {
   },
   ui: {
     load: () => ipcRenderer.invoke('ui:load'),
-    save: (patch) => ipcRenderer.invoke('ui:save', patch),
+    save: (patch, base) => ipcRenderer.invoke('ui:save', patch, base),
   },
   win: {
     alwaysOnTop: (on) => ipcRenderer.send('win:alwaysOnTop', on),

@@ -232,6 +232,15 @@ interface DeskStore {
   /** this app against `main` on GitHub; null until the first check comes back */
   appUpdate: AppUpdateInfo | null
   prefs: Prefs
+  /**
+   * Bumped whenever the settings bag behind `uiGet`/`uiSet` changes: once the file has been read
+   * at boot, and on every `uiSet`. What is derived from the bag — the recent projects, the
+   * favourites — keys on it. The start card is on screen before the file has been read, and a
+   * list taken once in `useState` at that moment is the empty bag for good: every launch then
+   * said "no projects yet" over a file full of them, until the `+` menu (mounted later) showed
+   * they had never gone.
+   */
+  uiRev: number
   /** the small always-on-top window; not remembered across restarts */
   mini: boolean
   /** what the last finished turn came to, while the card is still up */
@@ -323,11 +332,22 @@ export function uiGet<T>(key: string, fallback: T): T {
   return v === undefined || v === null ? fallback : (v as T)
 }
 
-/** Remember `value` under `key`; the main process debounces and writes it atomically. */
+/**
+ * Remember `value` under `key`; the main process debounces and writes it atomically.
+ *
+ * The value this copy is replacing goes along (`null` when it held none). The lists here —
+ * `recents`, `favs` — are whole values as far as the renderer is concerned, but the file they land
+ * in is shared with whatever other copy of the app is running (`npm run dev` beside the installed
+ * one), and that copy may have added to the same list since this one was read at boot. Given the
+ * old value, the main process can tell what this call added and removed, and apply *that* to the
+ * file instead of replacing the list with a snapshot that never saw the other side's additions.
+ */
 export function uiSet(key: string, value: unknown): void {
+  const prev = uiBag[key]
   uiBag = { ...uiBag, [key]: value }
+  bumpUiRev()
   if (window.desk) {
-    void window.desk.ui.save({ [key]: value })
+    void window.desk.ui.save({ [key]: value }, { [key]: prev === undefined ? null : prev })
     return
   }
   try {
@@ -336,6 +356,9 @@ export function uiSet(key: string, value: unknown): void {
     /* a preference we cannot store is not worth an exception */
   }
 }
+
+/** the bag changed: whoever derives a list from it computes it again (see `DeskState.uiRev`) */
+const bumpUiRev = (): void => useDesk.setState((s) => ({ uiRev: s.uiRev + 1 }))
 
 /** Stop persisting preferences: this renderer is running with forced (debug) ones. */
 export function freezePrefs(): void {
@@ -454,7 +477,7 @@ export async function hydrateUi(): Promise<void> {
   }
   uiBag = bag
   const prefs = adoptPrefs(uiBag.prefs)
-  useDesk.setState({ prefs })
+  useDesk.setState((s) => ({ prefs, uiRev: s.uiRev + 1 })) // the lists can be derived now
   // the accounts have to be known before the stored tabs come back: each tab names its own
   try {
     useDesk.getState().setProfiles(await bridge.profiles.list())
@@ -751,6 +774,7 @@ export const useDesk = create<DeskStore>((set, get) => {
     version: null,
     appUpdate: null,
     prefs: loadPrefs(),
+    uiRev: 0,
     mini: false,
     toast: null,
     focusTerminal: null,

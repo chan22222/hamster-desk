@@ -7,7 +7,7 @@ import { spawnPty, PromptDetector, type PtyHandle } from './pty'
 import { WaitingGate } from './prompt'
 import { HAMSTER_HOME, StatusWatcher, installStatusLine, uninstallStatusLine, statusLineState, refreshStatusScripts } from './statusline'
 import { addProfile, adoptOrphanProfiles, baseDirOf, configDirOf, deleteProfileDir, loadProfiles, profileOfConfigDir, removeProfile, renameProfile, setCurrentProfile, showDefaultProfile, withEmails } from './profiles'
-import { flushUi, loadUi, saveUi, uiPath } from './ui-store'
+import { flushUi, loadUi, saveUi, setUiReadOnly, uiPath } from './ui-store'
 import { checkVersion } from './version'
 import { BubbleSummarizer } from './summarize'
 import { FiveHourStarter } from './five-hour'
@@ -48,6 +48,12 @@ if (!app.isPackaged) {
   if (capture) {
     sweepSmokeProfiles(app.getPath('temp'))
     process.on('exit', () => removeDir(profile))
+    // The profile is private to this run; ~/.hamster-desk/ui.json is not — it is the same file the
+    // installed app beside this run keeps its accounts and favourites in (README's recipes are run
+    // without a HAMSTER_HOME of their own more often than not). A capture run restores from it and
+    // never writes to it: not the tabs, not the window, and not a preference the renderer migrates
+    // or a folder a scripted click opens either — this switch covers every key at the source.
+    setUiReadOnly(true)
   }
 }
 
@@ -805,7 +811,9 @@ ipcMain.handle('fiveHour:set', (_e, profileId: string, on: boolean) => fiveHour?
 // ---- IPC: UI settings (~/.hamster-desk/ui.json — outside the per-run-mode Electron profile)
 
 ipcMain.handle('ui:load', () => loadUi())
-ipcMain.handle('ui:save', (_e, patch: UiState) => saveUi(patch))
+// `base`: what the renderer's copy held before this patch, so a list it changed is merged into the
+// file by difference (electron/ui-store.ts) instead of replacing what another process added
+ipcMain.handle('ui:save', (_e, patch: UiState, base?: UiState) => saveUi(patch, base))
 
 ipcMain.handle('dialog:pickFolder', async (_e, defaultPath?: string) => {
   if (!win) return null
