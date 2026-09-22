@@ -682,7 +682,7 @@ const SKIP_DIRS = new Set(['node_modules', '$recycle.bin', 'system volume inform
 ipcMain.handle('fs:listDirs', async (_e, p: string) => {
   const { promises: fsp, existsSync } = await import('node:fs')
   const { join, dirname, resolve } = await import('node:path')
-  const path = resolve(String(p || ''))
+  const path = p ? resolve(String(p)) : browseHome()
   const parentRaw = dirname(path)
   const parent = parentRaw === path ? null : parentRaw
   try {
@@ -701,11 +701,19 @@ ipcMain.handle('fs:listDirs', async (_e, p: string) => {
   }
 })
 
+/**
+ * Where a listing of "no folder in particular" goes. `path.resolve('')` is the process's working
+ * directory, and that is the install folder for the packaged app and the repository for `npx
+ * electron .` — the sidebar's 탐색 used to open there whenever it came up before the first tab did,
+ * and that is a place nobody chose. Home is.
+ */
+const browseHome = (): string => app.getPath('home')
+
 /** Like fs:listDirs but folders *and* files — the folder panel doubles as a small file browser. */
 ipcMain.handle('fs:list', async (_e, p: string) => {
   const { promises: fsp, existsSync } = await import('node:fs')
   const { extname, join, dirname, resolve } = await import('node:path')
-  const path = resolve(String(p || ''))
+  const path = p ? resolve(String(p)) : browseHome()
   const parentRaw = dirname(path)
   const parent = parentRaw === path ? null : parentRaw
   const byName = (a: { name: string }, b: { name: string }): number =>

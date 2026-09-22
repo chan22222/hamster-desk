@@ -92,6 +92,17 @@ export function setLastCwd(dir: string): void {
   uiSet('lastCwd', dir)
 }
 
+/**
+ * The folder the sidebar's file browser (탐색) shows: the terminal in front, and while there is no
+ * terminal at all (the start card) the folder the next one would open in, then home. An empty
+ * result means "leave it where it is" — that is what closing the last tab does. It never falls
+ * back to the process's working directory: for the installed app that is its install folder, for
+ * `npx electron .` the repository, and neither is a place the user chose.
+ */
+export function explorerDir(activeCwd: string | null | undefined, last: string, home: string): string {
+  return activeCwd || last || home
+}
+
 /** Favourites first, then newest. Starred folders that were never opened here still show up. */
 export function recentEntries(limit = MAX_RECENT): RecentEntry[] {
   const favs = favDirs()

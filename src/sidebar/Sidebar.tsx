@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
-import { favDirs, isFav, toggleFav } from './recent'
+import { explorerDir, favDirs, isFav, lastCwd, toggleFav } from './recent'
 import { changedFiles, FileLog } from '../log/FileLog'
 import { FeedLog } from '../log/FeedLog'
 import { useDesk, type SessionState } from '../store'
@@ -156,6 +156,14 @@ function Section({
 /**
  * The left sidebar: what this session changed, and a plain file browser under it. Recent projects
  * used to sit on top; they moved to the `+` menu, where you are actually starting something.
+ *
+ * `start` is the folder of the terminal in front ('' while there is none), and the browser follows
+ * it: a terminal opened through the folder picker, a recent project, a favourite, `여기서 터미널
+ * 열기` or a double-clicked folder moves the browser there, and so does switching to a tab of
+ * another folder. It used to read `start` once, when it mounted — and it mounts with the start
+ * card, before any tab exists, so `start` was '' and the listing of '' is the process's working
+ * directory: the install folder of the packaged app, the repository of `npx electron .`. The
+ * user's own words: "cli 는 그 폴더로 켜지는데 왼쪽은 계속 hamster 데스크 설치쪽으로 감".
  */
 export function Sidebar({ start, session, onOpen }: { start: string; session: SessionState | null; onOpen: (dir: string) => void }) {
   const prefs = useDesk((s) => s.prefs)
@@ -172,7 +180,7 @@ export function Sidebar({ start, session, onOpen }: { start: string; session: Se
   const logged = session?.log.length ?? 0
 
   const go = async (p: string): Promise<void> => {
-    if (!window.desk) return
+    if (!window.desk || !p) return
     setLoading(true)
     try {
       setListing(await window.desk.fs.list(p))
@@ -182,10 +190,28 @@ export function Sidebar({ start, session, onOpen }: { start: string; session: Se
   }
 
   useEffect(() => {
-    void go(start)
     void window.desk?.fs.drives().then(setDrives)
-    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [])
+
+  // Follow the terminal in front (see the component's comment). With no terminal — the start card,
+  // or the last tab just closed — the browser is not moved, except when it has nowhere yet: then it
+  // opens where the next terminal would, or home.
+  useEffect(() => {
+    if (start) {
+      void go(start)
+      return
+    }
+    if (listing) return
+    let alive = true
+    void (async () => {
+      const home = (await window.desk?.info())?.home ?? ''
+      if (alive) void go(explorerDir(null, lastCwd(), home))
+    })()
+    return () => {
+      alive = false
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [start])
 
   useEffect(() => {
     if (!menu) return
