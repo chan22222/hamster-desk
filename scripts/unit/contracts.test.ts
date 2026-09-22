@@ -4,7 +4,8 @@ import assert from 'node:assert/strict'
 import { DEFAULT_PREFS, adoptPrefs } from '../../src/store'
 
 test('DEFAULT_PREFS carries the keys the new features read', () => {
-  assert.deepEqual(DEFAULT_PREFS.notify, { permission: true, question: true, turnEnd: true, sound: false })
+  // a turn ending is not worth a notification by default; a prompt waiting for an answer is
+  assert.deepEqual(DEFAULT_PREFS.notify, { permission: true, question: true, turnEnd: false, sound: false })
   assert.equal(DEFAULT_PREFS.termFont, 14)
   assert.equal(DEFAULT_PREFS.showFeedLog, true)
   // the sidebar's dragged section heights: null = the automatic layout
@@ -34,7 +35,15 @@ test('adoptPrefs keeps a dragged sidebar height and gives an older file the auto
 test('adoptPrefs fills a partial notify group from the defaults', () => {
   // a user who only ever turned the sound on must not lose the other three toggles
   const p = adoptPrefs({ v: 2, notify: { sound: true } })
-  assert.deepEqual(p.notify, { permission: true, question: true, turnEnd: true, sound: true })
+  assert.deepEqual(p.notify, { permission: true, question: true, turnEnd: false, sound: true })
+})
+
+test('adoptPrefs: a file from before v4 takes the new turn-end default once; a later choice is kept', () => {
+  // written while turnEnd defaulted to on — the stored true is the old default, not a choice
+  assert.equal(adoptPrefs({ v: 3, notify: { permission: true, question: true, turnEnd: true, sound: false } }).notify.turnEnd, false)
+  assert.equal(adoptPrefs({ v: 3, notify: { turnEnd: true, sound: true } }).notify.sound, true, 'the other toggles are untouched')
+  // switched on since: stays on
+  assert.equal(adoptPrefs({ v: 4, notify: { turnEnd: true } }).notify.turnEnd, true)
 })
 
 test('adoptPrefs gives a settings file written before notify existed the whole group', () => {

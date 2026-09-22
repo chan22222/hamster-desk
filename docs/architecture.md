@@ -102,7 +102,7 @@ scripts/unit/           단위 테스트(app-update · contracts · delegation �
 |---|---|---|
 | `workspaces` | `{ tabs: [{ cwd, title }], active }` | 마지막 터미널 탭들과 활성 탭. 렌더러가 400ms 디바운스로 쓴다(`src/workspaces-persist.ts`). 업데이트 탭은 빠진다. **저장은 늘 하지만 되살리는 것은 `prefs.restoreTabs` 가 켜져 있을 때뿐이다** |
 | `window` | `{ x, y, width, height, maximized }` | 창 위치. 메인이 resize/move 500ms 디바운스 + 닫는 순간에 쓴다(`electron/window-state.ts`) |
-| `prefs.notify` | `{ permission, question, turnEnd, sound }` | 알림 종류별 on/off. 기본 `true, true, true, false`. 옛 파일에 일부만 있어도 기본값과 깊은 병합 |
+| `prefs.notify` | `{ permission, question, turnEnd, sound }` | 알림 종류별 on/off. 기본 `true, true, false, false`(턴 완료는 꺼짐 — `PREFS_VERSION` 4 에서 옛 파일의 `true` 를 한 번 버린다). 옛 파일에 일부만 있어도 기본값과 깊은 병합 |
 | `prefs.bubbleSummary` | 기본 `false` | `⋯ > 말풍선 > 요약해서 말하기`. 요약 한 번이 구독으로 Haiku 를 한 번 부르는 것이라 켤 때만 돈다 |
 | `prefs.termFont` | 10~24, 기본 14 | 터미널 글꼴 크기 |
 | `prefs.showFeedLog` | 기본 `true` | 사이드바 `말풍선 로그` 섹션 펼침 |

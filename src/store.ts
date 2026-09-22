@@ -205,7 +205,8 @@ export const DEFAULT_PREFS: Prefs = {
   lang: 'auto',
   theme: 'light',
   autoCam: true,
-  notify: { permission: true, question: true, turnEnd: true, sound: false },
+  // a turn ending is not something to be pulled away from another window for: off by default
+  notify: { permission: true, question: true, turnEnd: false, sound: false },
   termFont: 14,
   showFeedLog: true,
   sideChangedH: null,
@@ -377,8 +378,10 @@ export function freezePrefs(): void {
  * 3 — `bubbleSummary` went from on to off by default. Every file so far was written while it was
  *     on, so a stored `true` says what the default was, not what the user chose: it takes the new
  *     default once, and whatever is switched on after that is kept.
+ * 4 — `notify.turnEnd` went from on to off by default, for the same reason: a stored `true` is
+ *     the old default, not a choice, and takes the new default once.
  */
-const PREFS_VERSION = 3
+const PREFS_VERSION = 4
 
 /** which version wrote this bag; anything without a stamp predates the field */
 const prefsVersionOf = (raw: unknown): number => {
@@ -399,6 +402,7 @@ export function adoptPrefs(raw: unknown): Prefs {
   const { showFolders, v: _v, ...rest } = (raw && typeof raw === 'object' ? raw : {}) as Partial<Prefs> & { showFolders?: boolean; v?: number }
   if (prefsVersionOf(raw) < 2) delete rest.showLog // meaning changed: take the new default instead
   if (prefsVersionOf(raw) < 3) delete rest.bubbleSummary // the default changed: see PREFS_VERSION
+  if (prefsVersionOf(raw) < 4 && rest.notify && typeof rest.notify === 'object') delete (rest.notify as Partial<Prefs['notify']>).turnEnd
   const prefs: Prefs = { ...DEFAULT_PREFS, ...rest }
   // `notify` is the one nested group: a spread would replace it wholesale, so a file written
   // before a toggle existed would come back missing that key instead of taking its default.
