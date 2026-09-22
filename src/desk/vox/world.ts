@@ -7,7 +7,7 @@
 // the DOM, so the node test can build the whole world and measure it.
 import * as THREE from 'three'
 import { VoxBuilder, W1, S3, type BoxOpt, type BoxSink, type HideFaces } from './builder'
-import { PROPS, DESK_PARTS, BOSS_DESK_PARTS, type LocalBox } from './props'
+import { PROPS, DESK_PARTS, BOSS_DESK_PARTS, SIGN_H, SIGN_W, type LocalBox } from './props'
 import { OFFICE, OFFICE_TILE, H_OFFICE, T, tileToWorld } from '../office-world'
 
 export const COLS = 40
@@ -19,8 +19,28 @@ export const SEED = 20260920
 export const CHUNK = T * 8
 /** the two walls rise this far above the deck */
 export const WALL_H = 120
+/** north-wall fixtures, as office tile columns: each is centred on the tile's east edge */
+export const WINDOWS = [3, 11, 18]
+export const WHITEBOARDS = [7, 15]
 
 export type WorldBox = LocalBox
+
+/**
+ * A framed picture on a wall. The voxel frame and backing are in the chunks; the picture itself is
+ * a textured plane the renderer hangs at exactly this spot (src/desk/signs.ts) — the one thing in
+ * the room the world builder cannot make, because it needs an Image and a Material.
+ */
+export interface WallSign {
+  id: 'spritfy'
+  /** centre of the picture surface, already offset in front of the frame's backing */
+  x: number
+  y: number
+  z: number
+  w: number
+  h: number
+  /** which way the picture faces, in the props' 90° steps: 0 = +z (north wall), 1 = +x (west wall) */
+  rot: 0 | 1 | 2 | 3
+}
 
 export interface DeskParts {
   slot: number
@@ -40,6 +60,8 @@ export interface StudioWorld {
   deskParts: DeskParts[]
   /** world positions of the scattered trees, for tests and for keeping the deck clear */
   trees: { x: number; z: number }[]
+  /** framed pictures whose surface the renderer textures (the frames are already in the chunks) */
+  signs: WallSign[]
   boxCount: number
 }
 
@@ -259,7 +281,6 @@ export function buildStudioWorld(): StudioWorld {
   const doorZ = tileToWorld(OFFICE.door.i, OFFICE.door.j).z
   const WIN_Y0 = deck + 41
   const WIN_Y1 = deck + 111
-  const WINDOWS = [3, 11, 18]
   /**
    * A wall with holes in it. The windows are real openings rather than painted glass: from the
    * default camera you look straight through them at the shore and the sea, which is the only way
@@ -299,9 +320,20 @@ export function buildStudioWorld(): StudioWorld {
   const WALL_IN_Z = OZ0 + 13 // inner face of the north wall, plus a hair
   const WALL_IN_X = OX0 + 13
   for (const i of WINDOWS) put('window', (OFFICE_TILE.i + i + 1) * T, WALL_IN_Z, deck + 76, 0)
-  for (const i of [7, 15]) put('whiteboard', (OFFICE_TILE.i + i + 1) * T, WALL_IN_Z, deck + 76, 0)
+  for (const i of WHITEBOARDS) put('whiteboard', (OFFICE_TILE.i + i + 1) * T, WALL_IN_Z, deck + 76, 0)
   put('clock', WALL_IN_X, tileToWorld(0, 2.6).z, deck + 92, 1)
   for (const j of [4.8, 12, 16]) put('poster', WALL_IN_X, tileToWorld(0, j).z, deck + 76, 1)
+
+  // The Spritfy print: the north wall's bay between the second window and the second whiteboard,
+  // east of the boss's desk. The bay right behind the boss is where the main hamster's speech
+  // bubbles stack, so a picture there would spend its life under them; this one is in the default
+  // close-up (at its right edge) and in full view whenever colleagues widen the framing, and
+  // nothing stands in front of it — the plant beside the boss's desk is under the window.
+  // Its top lines up with the window heads and whiteboards (deck + 111).
+  const signX = (OFFICE_TILE.i + 14) * T
+  const signY = deck + 78
+  put('signFrame', signX, WALL_IN_Z, signY, 0)
+  const signs: WallSign[] = [{ id: 'spritfy', x: signX, y: signY, z: WALL_IN_Z + 0.85, w: SIGN_W, h: SIGN_H, rot: 0 }]
 
   // desks, chairs, rugs — slot 0 is the boss's set along the north wall, the rest the staff grid
   const deskParts: DeskParts[] = []
@@ -429,6 +461,7 @@ export function buildStudioWorld(): StudioWorld {
     bounds: { minX, maxX, minZ, maxZ },
     deskParts,
     trees,
+    signs,
     boxCount,
   }
 }

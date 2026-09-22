@@ -1,11 +1,12 @@
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
 import * as THREE from 'three'
-import { H_OFFICE, OFFICE, advanceWalker, makeWalker, reconcileSeats, tileToWorld, walkTo } from '../src/desk/office-world'
+import { H_OFFICE, OFFICE, OFFICE_TILE, T, advanceWalker, makeWalker, reconcileSeats, tileToWorld, walkTo } from '../src/desk/office-world'
 import { FEED_LINE_PX, FRAME_MAX_SCALE, FRAME_MIN_SCALE, FRAME_PAD, HEADER_PAD, autoFrameCamera, createCamera, feedLines, feedTopY, focusCamera, frameCamera, frameHeadPad, frameSubject, groundHit, feedAnchorY, overviewCamera, worldToScreen, zoomCamera } from '../src/desk/office-camera'
 import { HAMSTER_H, LEG_Y, buildHamster } from '../src/desk/vox/hamster'
 import { voxMaterial } from '../src/desk/vox/material'
-import { buildStudioWorld, COLS, ROWS } from '../src/desk/vox/world'
+import { WHITEBOARDS, WINDOWS, buildStudioWorld, COLS, ROWS } from '../src/desk/vox/world'
+import { SIGN_H, SIGN_W } from '../src/desk/vox/props'
 import { modelSkin } from '../src/desk/skins'
 import { tintFor } from '../src/desk/anim'
 
@@ -410,4 +411,33 @@ test('the island is deterministic, keeps the office on its deck and the trees ou
   assert.equal(inside.length, 0, 'a tree grew through the office floor')
   assert.equal(a.mapColors.length, ROWS)
   assert.equal(a.mapColors[0].length, COLS)
+})
+
+test('the Spritfy print hangs on the north wall, in a bay of its own, clear of the windows and whiteboards', () => {
+  const world = buildStudioWorld()
+  assert.equal(world.signs.length, 1)
+  const s = world.signs[0]
+  assert.equal(s.id, 'spritfy')
+  assert.equal(s.rot, 0, 'a north-wall piece faces +z')
+  assert.deepEqual([s.w, s.h], [SIGN_W, SIGN_H])
+  // just in front of the plaster's inner face (OZ0 + 12), like every other wall piece
+  const wallFace = OFFICE_TILE.j * T + 12
+  assert.ok(s.z > wallFace && s.z < wallFace + 3, `the print floats ${s.z - wallFace} in front of the wall`)
+  // inside the room's width, above the wainscot (deck + 40) and under the trim (deck + 114)
+  const x0 = OFFICE_TILE.i * T, x1 = (OFFICE_TILE.i + OFFICE.W) * T
+  assert.ok(s.x - s.w / 2 > x0 + 12 && s.x + s.w / 2 < x1, `the print leaves the wall: ${s.x} ± ${s.w / 2}`)
+  assert.ok(s.y - s.h / 2 - 3 > H_OFFICE + 40, `the frame reaches into the wainscot: bottom at ${s.y - s.h / 2 - 3}`)
+  assert.ok(s.y + s.h / 2 + 3 <= H_OFFICE + 114, `the frame reaches into the trim: top at ${s.y + s.h / 2 + 3}`)
+  // and its frame (3 wide) shares no wall with a window (frame 130 wide) or a whiteboard (122 wide)
+  const left = s.x - s.w / 2 - 3, right = s.x + s.w / 2 + 3
+  const fixtures = [
+    ...WINDOWS.map((i) => ({ at: (OFFICE_TILE.i + i + 1) * T, half: 65, what: 'window' })),
+    ...WHITEBOARDS.map((i) => ({ at: (OFFICE_TILE.i + i + 1) * T, half: 61, what: 'whiteboard' })),
+  ]
+  for (const f of fixtures) {
+    assert.ok(right < f.at - f.half || left > f.at + f.half, `the print overlaps the ${f.what} at ${f.at}`)
+  }
+  // east of the boss's desk, not behind it: that bay is where the main hamster's bubbles stack
+  const boss = tileToWorld(OFFICE.slots[0].seat.i, OFFICE.slots[0].seat.j)
+  assert.ok(left > boss.x + 80, `the print hangs over the boss's desk (left edge ${left}, seat ${boss.x})`)
 })

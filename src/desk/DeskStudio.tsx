@@ -36,6 +36,7 @@ import { skyDome, swayDepthMaterial, voxMaterial, waterMaterial } from './vox/ma
 import { buildHamster, FEED_ANCHOR, MAIN_SCALE, type HamsterRig } from './vox/hamster'
 import { buildStudioWorld, COLS, ROWS, WATER_Y, WORLD_D, WORLD_W, type StudioWorld } from './vox/world'
 import { BOSS_DESK_W, DESK_W } from './vox/props'
+import { hangSign, type HungSign } from './signs'
 
 const STATE_LABEL: Record<Hamster['state'], string> = {
   idle: '쉬는 중', thinking: '생각 중', reading: '읽는 중', searching: '찾는 중', writing: '작성 중',
@@ -125,6 +126,8 @@ interface Studio {
   /** per-session groups of hamster rigs; only the active session's group is visible */
   sessionGroups: Map<string, THREE.Group>
   deskDynamic: { screen: THREE.Mesh; keys: THREE.Mesh; lamp: THREE.Mesh; spill: THREE.Mesh }[]
+  /** the framed prints on the walls — the one thing in the room a click does something with */
+  signs: HungSign[]
   minimapUrl: string
 }
 let studio: Studio | null = null
@@ -278,6 +281,9 @@ function createStudio(): Studio | null {
     scene.add(screen, keys, lamp, spill)
     return { screen, keys, lamp, spill }
   })
+  // the pictures in the world's frames: textured planes, the frames themselves are in the chunks
+  const signs = world.signs.map((sign) => hangSign(sign, renderer))
+  for (const s of signs) scene.add(s.mesh)
 
   const camera = new THREE.PerspectiveCamera(42, 1, 1, 6000)
   return {
@@ -290,6 +296,7 @@ function createStudio(): Studio | null {
     hamsterMat: voxMaterial({ localDetail: true }),
     sessionGroups: new Map(),
     deskDynamic,
+    signs,
     minimapUrl: minimapDataUrl(world),
   }
 }
@@ -627,7 +634,22 @@ export function DeskStudio({ session, height }: { session: SessionState | null; 
       st.camera.updateProjectionMatrix()
     })
     ro.observe(el)
-    let drag: { id: number; x: number; y: number; orbit: boolean } | null = null
+    // `x0, y0` is where the button went down: a release within a few pixels of it is a click, and
+    // the only thing in the scene a click means anything to is a print on the wall
+    let drag: { id: number; x: number; y: number; x0: number; y0: number; orbit: boolean } | null = null
+    const raycaster = new THREE.Raycaster()
+    const overUi = (e: Event): boolean => !!(e.target as HTMLElement).closest('[data-office-ui]')
+    /** the wall print under the pointer, if any — a plane is one-sided, so nothing hits from behind the wall */
+    const signUnder = (e: { clientX: number; clientY: number }): HungSign | null => {
+      const st = getStudio()
+      if (!st || !st.signs.length) return null
+      const rect = el.getBoundingClientRect()
+      const nx = ((e.clientX - rect.left) / Math.max(1, rect.width)) * 2 - 1
+      const ny = 1 - ((e.clientY - rect.top) / Math.max(1, rect.height)) * 2
+      raycaster.setFromCamera(new THREE.Vector2(nx, ny), st.camera)
+      const hit = raycaster.intersectObjects(st.signs.map((s) => s.mesh), false)[0]
+      return hit ? st.signs.find((s) => s.mesh === hit.object) ?? null : null
+    }
     const wheel = (e: WheelEvent): void => {
       if ((e.target as HTMLElement).closest('[data-office-ui]')) return
       e.preventDefault()
@@ -638,13 +660,19 @@ export function DeskStudio({ session, height }: { session: SessionState | null; 
       updateZoom()
     }
     const down = (e: PointerEvent): void => {
-      if ((e.button !== 0 && e.button !== 2) || (e.target as HTMLElement).closest('[data-office-ui]')) return
-      drag = { id: e.pointerId, x: e.clientX, y: e.clientY, orbit: e.button === 2 || e.shiftKey }
+      if ((e.button !== 0 && e.button !== 2) || overUi(e)) return
+      drag = { id: e.pointerId, x: e.clientX, y: e.clientY, x0: e.clientX, y0: e.clientY, orbit: e.button === 2 || e.shiftKey }
+      el.style.cursor = '' // the class's grab/grabbing takes over for the drag
       el.setPointerCapture(e.pointerId)
       setDragging(true)
     }
     const move = (e: PointerEvent): void => {
-      if (!drag || e.pointerId !== drag.id) return
+      if (!drag) {
+        // the print on the wall is a link; the cursor is the only way a canvas can say so
+        el.style.cursor = !overUi(e) && signUnder(e) ? 'pointer' : ''
+        return
+      }
+      if (e.pointerId !== drag.id) return
       const rect = el.getBoundingClientRect()
       const c = sceneFor().camera
       if (e.clientX !== drag.x || e.clientY !== drag.y) manual()
@@ -655,9 +683,20 @@ export function DeskStudio({ session, height }: { session: SessionState | null; 
       drag.x = e.clientX
       drag.y = e.clientY
     }
-    const up = (): void => { drag = null; setDragging(false) }
+    const up = (e: PointerEvent): void => {
+      const d = drag
+      drag = null
+      setDragging(false)
+      // A left click that did not drag, on the print: open its site. `window.open` is how every
+      // external link leaves the app — electron/main.ts hands it to the default browser through
+      // setWindowOpenHandler, so this needs no bridge of its own.
+      if (d && e.type === 'pointerup' && e.button === 0 && Math.hypot(e.clientX - d.x0, e.clientY - d.y0) < 4) {
+        const sign = signUnder(e)
+        if (sign) window.open(sign.url, '_blank', 'noopener')
+      }
+    }
     const dbl = (e: MouseEvent): void => {
-      if (!(e.target as HTMLElement).closest('[data-office-ui]')) focus()
+      if (!overUi(e) && !signUnder(e)) focus()
     }
     const menu = (e: Event): void => e.preventDefault()
     el.addEventListener('wheel', wheel, { passive: false })
