@@ -53,8 +53,9 @@ if (!app.isPackaged) {
     sweepSmokeProfiles(app.getPath('temp'))
     process.on('exit', () => removeDir(profile))
     // The profile is private to this run; ~/.hamster-desk/ui.json is not — it is the same file the
-    // installed app beside this run keeps its accounts and favourites in (README's recipes are run
-    // without a HAMSTER_HOME of their own more often than not). A capture run restores from it and
+    // installed app beside this run keeps its accounts and favourites in (the capture recipes in
+    // docs/development.md are run without a HAMSTER_HOME of their own more often than not). A
+    // capture run restores from it and
     // never writes to it: not the tabs, not the window, and not a preference the renderer migrates
     // or a folder a scripted click opens either — this switch covers every key at the source.
     setUiReadOnly(true)
@@ -960,7 +961,7 @@ ipcMain.handle('app:info', () => {
 // Saves a screenshot of the window without anyone looking at the screen (used by the smoke test).
 // A comma-separated delay list takes several shots in one run — `shot.png` then becomes
 // `shot-1.png`, `shot-2.png`, … so before/after can be compared. A single delay keeps the plain
-// file name, which is what every existing script and README command expects.
+// file name, which is what every existing script and every recipe in docs/development.md expects.
 // HAMSTER_CAPTURE_TOAST=<png path> photographs the notification window at the same moments
 // (nothing is written while it has no cards up).
 function scheduleCapture(): void {

@@ -2,7 +2,7 @@
 // and one click to carry one on in a new terminal — plan §3.4. Owner: B.
 //
 // The rows come straight from the transcript files (electron/transcripts.ts); nothing here talks to
-// `~/.claude/history.jsonl`, which the README promises never to read.
+// `~/.claude/history.jsonl`, which docs/architecture.md ("읽기만 한다") promises never to read.
 
 import { useEffect, useLayoutEffect, useRef, useState } from 'react'
 import type { TranscriptEntry } from '@shared/events'

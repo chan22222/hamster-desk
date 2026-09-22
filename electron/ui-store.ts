@@ -350,8 +350,8 @@ export function flushUi(): void {
 /**
  * A capture run (HAMSTER_CAPTURE) restores what the file says — that is what it photographs — but
  * nothing it does may reach the file: it shares ~/.hamster-desk/ui.json with the installed app that
- * is usually running beside it, and the README's recipes are run without a HAMSTER_HOME of their
- * own more often than not. Changes are kept in memory so the run itself stays consistent (the
+ * is usually running beside it, and the capture recipes in docs/development.md are run without a
+ * HAMSTER_HOME of their own more often than not. Changes are kept in memory so the run itself stays consistent (the
  * account it adds, the folder it opens) and are forgotten with it.
  */
 export function setUiReadOnly(on: boolean): void {
