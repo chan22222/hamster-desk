@@ -5,8 +5,6 @@ import { Popover } from './Popover'
 import '../accounts/accounts.css'
 
 type SLState = 'installed' | 'foreign' | 'none' | 'unknown'
-/** which window a chip stands for; the popover shows them all and highlights this one */
-type Which = string
 
 export function fmtReset(ms: number | null): string {
   if (!ms) return ''
@@ -60,11 +58,11 @@ export function Meter({ pct }: { pct: number }) {
   )
 }
 
-function Row({ label, w, current }: { label: string; w: RateWindow | null; current: boolean }) {
+function Row({ label, w }: { label: string; w: RateWindow | null }) {
   if (!w) return null
   const pct = clamp(w)
   return (
-    <div className="u-row" aria-current={current ? 'true' : undefined}>
+    <div className="u-row">
       <span className="u-name">{label}</span>
       <span className={`u-track ${step(pct)}`}>
         <span className="u-fill" style={{ width: `${pct}%` }} />
@@ -78,7 +76,7 @@ function Row({ label, w, current }: { label: string; w: RateWindow | null; curre
 }
 
 interface WindowRow {
-  key: Which
+  key: string
   /** the long name, for the popover */
   name: string
   /** the short name, for the chip */
@@ -185,28 +183,45 @@ function AccountUsageList({ shownId }: { shownId: string }) {
   )
 }
 
-/** One gauge. Clicking it opens the same detail panel, scrolled to this window. */
-function Chip({ row, rows, extra, shownId, onUninstall }: { row: WindowRow; rows: WindowRow[]; extra: string; shownId: string; onUninstall: () => void }) {
+/** One line of the chip: `5h ▰▰▰▰▱ 81% · 2시간 10분`. */
+function Line({ row }: { row: WindowRow }) {
   const pct = clamp(row.w)
-  const reset = fmtReset(row.w.resetsAt)
-  const title = `${row.name} 사용량 ${pct.toFixed(0)}%${reset ? ` · ${reset} 초기화 (${remaining(row.w.resetsAt)} 남음)` : ''}`
-  const label = (
-    <>
+  return (
+    <span className="um-line">
       <span className="um-label">{row.short}</span>
       <Meter pct={pct} />
       <span className={`um-pct ${step(pct)}`}>{pct.toFixed(0)}%</span>
       {/* "얼마나 썼나" 만큼이나 "언제 다시 차나" 가 궁금한 숫자라, 남은 시간은 늘 붙어 있다.
           초기화 *시각* 은 title 과 팝오버에 있다. 좁은 창에서는 이 조각이 가장 먼저 접힌다. */}
       {row.w.resetsAt && <span className="um-reset">· {countdown(row.w.resetsAt)}</span>}
-    </>
+    </span>
   )
+}
+
+/** One window in words, for the tooltip and the screen reader: `5시간 사용량 81% · 18:20 초기화 (2시간 10분 남음)`. */
+function describe(row: WindowRow): string {
+  const pct = clamp(row.w)
+  const reset = fmtReset(row.w.resetsAt)
+  return `${row.name} 사용량 ${pct.toFixed(0)}%${reset ? ` · ${reset} 초기화 (${remaining(row.w.resetsAt)} 남음)` : ''}`
+}
+
+/**
+ * The gauge chip: the 5-hour window on the upper line, the weekly one on the lower, in one pill.
+ * They used to be two pills side by side and were the widest thing in the bar; stacked, the pair
+ * costs about half the width and the bar does not grow (two 11px lines fit inside its 44px).
+ * Clicking anywhere on it opens the one detail panel with every window in it.
+ */
+function UsageChip({ lines, rows, shownId, onUninstall }: { lines: WindowRow[]; rows: WindowRow[]; shownId: string; onUninstall: () => void }) {
+  const label = lines.map((r) => <Line key={r.key} row={r} />)
+  // the tooltip gets one line per window; the accessible name is the same words on one line
+  const words = lines.map(describe)
   return (
-    <Popover className={`pill um ${extra}`} label={label} title={title} ariaLabel={title} width={252}>
+    <Popover className="pill um" label={label} title={words.join('\n')} ariaLabel={words.join(', ')} width={252} debugClick="usage">
       {(close) => (
         <div className="pop-body">
           <div className="pop-head">사용량</div>
           {rows.map((r) => (
-            <Row key={r.key} label={r.name} w={r.w} current={r.key === row.key} />
+            <Row key={r.key} label={r.name} w={r.w} />
           ))}
           <AccountUsageList shownId={shownId} />
           <button
@@ -224,7 +239,7 @@ function Chip({ row, rows, extra, shownId, onUninstall }: { row: WindowRow; rows
   )
 }
 
-/** 5-hour and weekly usage as two separate gauges, with the one-click opt-in behind them. */
+/** 5-hour and weekly usage as one two-line gauge chip, with the one-click opt-in behind it. */
 export function UsageMeters() {
   // Rate limits belong to an account, so the gauges follow the tab in front: its account's numbers,
   // and its account's status line. With nothing open, the account new terminals would use.
@@ -338,9 +353,9 @@ export function UsageMeters() {
   if (five) rows.push({ key: 'five', name: '5시간', short: '5h', w: five })
   if (week) rows.push({ key: 'week', name: '주간', short: '주', w: week })
   for (const [k, w] of others) rows.push({ key: `other:${k}`, name: k, short: k, w })
-
-  const fiveRow = rows.find((r) => r.key === 'five')
-  const weekRow = rows.find((r) => r.key === 'week')
+  // the chip has a line for each of the two windows every account has; any extra window the CLI
+  // reports is only in the panel (there is no room for a third line, and nobody has seen one yet)
+  const lines = rows.filter((r) => r.key === 'five' || r.key === 'week')
 
   return (
     <div className="usage">
@@ -350,9 +365,7 @@ export function UsageMeters() {
           {shown.name}
         </span>
       )}
-      {fiveRow && <Chip row={fiveRow} rows={rows} extra="um-5h" shownId={shownId} onUninstall={() => void uninstall()} />}
-      {fiveRow && weekRow && <span className="bar-sep" />}
-      {weekRow && <Chip row={weekRow} rows={rows} extra="um-week" shownId={shownId} onUninstall={() => void uninstall()} />}
+      <UsageChip lines={lines} rows={rows} shownId={shownId} onUninstall={() => void uninstall()} />
     </div>
   )
 }

@@ -149,12 +149,15 @@ button:focus-visible, select:focus-visible, input:focus-visible { outline: 2px s
 .pill.alert { background: var(--accent); border-color: transparent; color: var(--on-accent); }
 .pill.alert:hover { background: var(--accent-hover); color: var(--on-accent); }
 
-/* ---- usage: two independent gauges, each with its own popover ------------------------- */
+/* ---- usage: the 5-hour and weekly gauges stacked in one chip -------------------------- */
 .usage { display: flex; align-items: center; gap: 6px; flex: none; }
-.usage .bar-sep { margin: 0 1px; }
-.um { gap: 7px; }
-.um-label { color: var(--text-3); font-size: 11px; }
-.um-pct { color: var(--text); font-size: 12px; font-variant-numeric: tabular-nums; }
+/* One pill, two 11px lines (5h above, 주 below). It runs 32px against the 28px of the pills next
+   to it, still well inside the 44px bar — and about half the width of the two pills it replaces. */
+.um { flex-direction: column; align-items: stretch; justify-content: center; gap: 0; height: auto; min-height: 28px; padding: 1px 8px; }
+.um-line { display: flex; align-items: center; gap: 5px; height: 14px; line-height: 14px; font-size: 11px; }
+/* the label and the number have fixed widths so the two lines read as columns */
+.um-label { flex: none; width: 15px; color: var(--text-3); font-size: 11px; }
+.um-pct { flex: none; min-width: 30px; text-align: right; color: var(--text); font-size: 11px; font-variant-numeric: tabular-nums; }
 .um-pct.is-warm { color: var(--warn); }
 .um-pct.is-hot { color: var(--danger); }
 .um-reset { color: var(--text-3); font-size: 11px; font-variant-numeric: tabular-nums; }
@@ -163,6 +166,8 @@ button:focus-visible, select:focus-visible, input:focus-visible { outline: 2px s
 /* five segments, so the level reads at a glance; the number next to it is the real answer */
 .meter { display: inline-flex; gap: 2px; flex: none; }
 .meter i { width: 7px; height: 8px; border-radius: 2px; background: var(--surface-3); }
+/* a size down inside the chip, where it has to sit in a 14px line */
+.um .meter i { width: 6px; height: 7px; }
 .meter.is-ok i.is-full { background: var(--accent); }
 .meter.is-warm i.is-full { background: var(--warn); }
 .meter.is-hot i.is-full { background: var(--danger); }
@@ -224,8 +229,6 @@ button:focus-visible, select:focus-visible, input:focus-visible { outline: 2px s
 
 /* usage detail rows */
 .u-row { display: grid; grid-template-columns: 46px 1fr 38px; gap: 2px 8px; align-items: center; padding: 5px 6px; margin: 0 -6px; border-radius: var(--radius); font-size: 12px; }
-.u-row[aria-current='true'] { background: var(--accent-soft); }
-.u-row[aria-current='true'] .u-when { color: var(--text-2); }
 .u-name { color: var(--text-2); }
 .u-track { height: 6px; border-radius: 3px; background: var(--surface-3); overflow: hidden; }
 .u-fill { display: block; height: 100%; background: var(--accent); }
@@ -458,19 +461,18 @@ body.is-row-resizing * { cursor: row-resize !important; }
 .ob-count { flex: none; padding: 0 5px; border-radius: 999px; background: var(--overlay-bg); color: var(--bubble-dim); font-size: 10px; line-height: 15px; font-variant-numeric: tabular-nums; }
 
 /* ---- narrow windows -------------------------------------------------------------------- */
-/* The chips give up their parts in order of how much each one adds: the countdown first (it is the
-   longest and the popover still has it), then the segments (redundant with the number next to
-   them), then the weekly chip. Nothing is ever lost — every chip opens the same popover. */
-@media (max-width: 1180px) {
-  .um-reset { display: none; }
-}
+/* The usage chip gives up its parts in order of how much each one adds: the countdown first (it
+   is the longest piece and the popover still has it), then the segments (redundant with the
+   number next to them). Both lines stay whatever the width — stacked, the weekly one costs no
+   room — and the chip is only ever as wide as its longer line, so the steps sit lower than the
+   1180/1020/900 the two side-by-side pills needed. Nothing is ever lost: the popover has it all. */
 @media (max-width: 1020px) {
-  .meter { display: none; }
+  .um-reset { display: none; }
+  /* the session bar's context meter has always folded here too; its number stays */
+  .sb-ctx .meter { display: none; }
 }
 @media (max-width: 900px) {
-  /* the weekly chip folds away only when the 5h one is there to carry the row; both windows
-     are still in the popover either chip opens */
-  .usage .um-5h ~ .bar-sep, .usage .um-5h ~ .um-week { display: none; }
+  .um .meter { display: none; }
 }
 @media (max-width: 1100px) {
   .topbar { gap: 6px; padding: 0 8px; }
