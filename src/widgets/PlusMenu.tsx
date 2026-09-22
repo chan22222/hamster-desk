@@ -42,7 +42,7 @@ function Actions({ onOpen, onShowSidebar, close }: { onOpen: (dir: string) => vo
 /** The `+` next to the tabs: the whole "new terminal" screen — search, every recent project, browse. */
 export function PlusMenu({ onOpen, onShowSidebar }: { onOpen: (dir: string) => void; onShowSidebar: () => void }) {
   return (
-    <Popover className="tab-plus" label={<IconPlus />} ariaLabel="새 터미널" title="새 터미널 열기" width={320}>
+    <Popover className="tab-plus" label={<IconPlus />} ariaLabel="새 터미널" title="새 터미널 열기" width={320} debugClick="plus">
       {(close) => (
         <div className="pop-body">
           <div className="pop-head">새 터미널</div>

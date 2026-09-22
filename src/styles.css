@@ -1,5 +1,5 @@
-/* One light palette for the whole app: paper surfaces, a deep forest accent, and exactly one dark
-   panel — the terminal, because Claude Code paints it with its own colours. */
+/* One light palette for the whole app: paper surfaces, a Claude-orange accent, and exactly one
+   dark panel — the terminal, because Claude Code paints it with its own colours. */
 :root {
   color-scheme: light;
   --bg: #f4f6f4;         /* app background, between panels */
@@ -11,13 +11,19 @@
   --text: #17201a;
   --text-2: #55605a;
   --text-3: #6b756e;     /* 4.9:1 on white — never go fainter than this */
-  --accent: #2f6b4f;     /* deep forest: primary action, active */
-  --accent-soft: #e8f1ea;
+  /* Claude's terra-cotta (#d97757), taken down to where it carries text: the same hue and
+     saturation, but #d97757 itself is only 3.1:1 against white, and this token is also the
+     colour of 11px badges and icons on white. Here: 5.3:1 on white, 4.6:1 on --accent-soft. */
+  --accent: #b04f2c;     /* primary action, active, focus, "Claude is working" */
+  --accent-soft: #faede8;
+  /* Status green — usage under 70 %, added lines. Not the accent any more: a healthy gauge must
+     not look like a button, and orange next to the amber of --warn would read as the same step. */
+  --ok: #559a70;
   --warn: #8a5a08;  --warn-soft: #fbf0da;
   --danger: #a33a25; --danger-soft: #fae7e2;
   --info: #2c5f7a;
   --on-accent: #ffffff;  /* text that sits *on* --accent */
-  --accent-hover: #27593f;
+  --accent-hover: #98421f;
   --term-bg: #121814;    /* the terminal panel */
   --diff-old-bg: #fae7e2; --diff-old-text: #6d2417;
   --diff-new-bg: #e3f1e7; --diff-new-text: #1c4a31;
@@ -62,13 +68,16 @@
   --text: #eef1ec;
   --text-2: #b6c0b8;
   --text-3: #8c968e;     /* 4.9:1 on --surface — never go fainter than this */
-  --accent: #79c79a;
-  --accent-soft: #1e3329;
+  /* a touch lighter than Claude's own orange so it reads on dark surfaces: 6.5:1 on --surface,
+     5.0:1 on --accent-soft */
+  --accent: #e0855f;
+  --accent-soft: #3a2b23;
+  --ok: #6dbb8c;
   --warn: #e3b168;  --warn-soft: #342a1a;
   --danger: #f0a08c; --danger-soft: #3a241e;
   --info: #93c6df;
-  --on-accent: #10241a;  /* white on this accent would be 1.9:1 */
-  --accent-hover: #93d6ac;
+  --on-accent: #2a1710;  /* white on this accent would be 2.6:1; this warm near-black is 6.3:1 */
+  --accent-hover: #ea9a78;
   --term-bg: #0e1310;
   --diff-old-bg: #3a201a; --diff-old-text: #f5c6b8;
   --diff-new-bg: #16331f; --diff-new-text: #a8dcbb;
@@ -177,7 +186,7 @@ button:focus-visible, select:focus-visible, input:focus-visible { outline: 2px s
 .meter i { width: 7px; height: 8px; border-radius: 2px; background: var(--surface-3); }
 /* a size down inside the chip, where it has to sit in a 14px line */
 .um .meter i { width: 6px; height: 7px; }
-.meter.is-ok i.is-full { background: var(--accent); }
+.meter.is-ok i.is-full { background: var(--ok); }
 .meter.is-warm i.is-full { background: var(--warn); }
 .meter.is-hot i.is-full { background: var(--danger); }
 
@@ -240,7 +249,7 @@ button:focus-visible, select:focus-visible, input:focus-visible { outline: 2px s
 .u-row { display: grid; grid-template-columns: 78px 1fr 38px; /* wide enough for `주간 (Fable)` on one line */ gap: 2px 8px; align-items: center; padding: 5px 6px; margin: 0 -6px; border-radius: var(--radius); font-size: 12px; }
 .u-name { color: var(--text-2); }
 .u-track { height: 6px; border-radius: 3px; background: var(--surface-3); overflow: hidden; }
-.u-fill { display: block; height: 100%; background: var(--accent); }
+.u-fill { display: block; height: 100%; background: var(--ok); }
 .u-track.is-warm .u-fill { background: var(--warn); }
 .u-track.is-hot .u-fill { background: var(--danger); }
 .u-pct { color: var(--text); text-align: right; font-variant-numeric: tabular-nums; }
@@ -368,7 +377,7 @@ body.is-row-resizing * { cursor: row-resize !important; }
 /* rtl keeps the *end* of the path (the folder you are in), which is the half that identifies it */
 .file-dir { font-size: 11px; color: var(--text-3); font-family: ui-monospace, Consolas, monospace; max-width: 100%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; direction: rtl; text-align: left; }
 .file-meta { flex: none; font-size: 11px; color: var(--text-3); font-variant-numeric: tabular-nums; }
-.file-meta .add { color: var(--accent); }
+.file-meta .add { color: var(--ok); }
 .file-meta .rem { color: var(--danger); }
 .file-preview { padding: 0 8px 10px; }
 .pv-label { font-size: 11px; color: var(--text-3); margin: 6px 0; }
@@ -448,7 +457,7 @@ body.is-row-resizing * { cursor: row-resize !important; }
 .office-welcome-actions button { flex: 1 1 auto; min-width: 0; height: 28px; padding: 0 10px; border-radius: var(--radius); border: 1px solid var(--line-strong); background: var(--surface); color: var(--text-2); font-size: 12px; font-weight: 500; white-space: nowrap; }
 .office-welcome-actions button:hover { background: var(--surface-2); color: var(--text); }
 .office-welcome-actions button code { padding: 0 2px; background: none; color: inherit; font-size: 11px; opacity: .7; }
-/* `--on-accent`, not #fff: the dark accent is a pale green and white on it is 1.9:1 */
+/* `--on-accent`, not #fff: the dark accent is a light orange and white on it is 2.6:1 */
 .office-welcome-actions .owa-run { background: var(--accent); border-color: transparent; color: var(--on-accent); }
 .office-welcome-actions .owa-run:hover { background: var(--accent-hover); color: var(--on-accent); }
 

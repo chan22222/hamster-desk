@@ -21,13 +21,15 @@ export type TermSearcher = SearchAddon
  * Match colours. `onDidChangeResults` only fires when decorations are on, so the count in the find
  * box depends on this object being passed with every call. The two `…OverviewRuler` fields are
  * required by the add-on's types, and they paint the thin strip down the right edge of the pane.
+ * Orange like the rest of the accent: the other matches sit on a deep one (the pane's light text
+ * stays 5:1 on it), the current match on Claude's own #d97757 with a light border.
  */
 const DECORATIONS = {
-  matchBackground: '#3f7a5a',
-  matchOverviewRuler: '#3f7a5a',
-  activeMatchBackground: '#7fd4a3',
+  matchBackground: '#8a4a30',
+  matchOverviewRuler: '#8a4a30',
+  activeMatchBackground: '#d97757',
   activeMatchBorder: '#e3eade',
-  activeMatchColorOverviewRuler: '#7fd4a3',
+  activeMatchColorOverviewRuler: '#d97757',
 }
 
 export function searchOptions(caseSensitive: boolean, incremental: boolean): Parameters<SearchAddon['findNext']>[1] {

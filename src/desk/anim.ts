@@ -48,8 +48,14 @@ export function screenColor(state: HamsterState, t: number): { bg: string; fg: s
   }
 }
 
+/**
+ * The dot on a nameplate. These are the same three colours the studio header's `작업 · 휴식 · 확인`
+ * dots and the tab dots wear (styles.css), so a hamster reads the same everywhere: the accent
+ * while it works, red while it waits for the user, a hairline grey at rest. Token names rather
+ * than hex, so the plate follows the theme like the rest of the DOM overlay.
+ */
 export function statusDot(state: HamsterState): string {
-  return state === 'idle' ? '#5b6172' : state === 'waiting' ? '#ff6b6b' : '#4cd4a4'
+  return state === 'idle' ? 'var(--line-strong)' : state === 'waiting' ? 'var(--danger)' : 'var(--accent)'
 }
 
 export const AGENT_TINT: Record<string, string> = {

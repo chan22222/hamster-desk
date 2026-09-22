@@ -11,20 +11,22 @@ import { TermSearch } from './term/TermSearch'
 // The terminal is dark in *both* themes: Claude Code paints this pane with its own palette, and a
 // light background would swallow every dim colour it uses. Dark mode only deepens the background,
 // so the pane stops being the one dark rectangle and simply matches the app around it (--term-bg).
+// The cursor and the selection are the app's accent (styles.css --accent, the dark value in both
+// because the pane is dark in both), not a colour of Claude Code's own.
 const THEME: Record<Painted, Record<string, string>> = {
   light: {
     background: '#121814',
     foreground: '#dfe6da',
-    cursor: '#7fd4a3',
-    selectionBackground: '#3f7a5a66',
+    cursor: '#e0855f',
+    selectionBackground: '#b04f2c66',
     black: '#12181a',
     brightBlack: '#8b968d',
   },
   dark: {
     background: '#0e1310',
     foreground: '#e3eade',
-    cursor: '#8fdcb0',
-    selectionBackground: '#4a8a6866',
+    cursor: '#ea9a78',
+    selectionBackground: '#c25d3766',
     black: '#0d120f',
     brightBlack: '#8f9a91',
   },
