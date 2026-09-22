@@ -408,7 +408,7 @@ src/notify/             notifier.ts(store 구독 → 알림, 네 겹 게이트, 
 src/toast/              알림 창 페이지(toast.html · toast.ts · toast.css): 배너와 같은 토큰, styles.css 를 같이 읽어 라이트/다크가 같다 — React 없음
 src/mini/               MiniShell.tsx(미니 모드: 스튜디오 + 상태줄)
 src/workspaces-persist.ts 터미널 탭 저장·복원(ui.json 의 workspaces)
-scripts/unit/           단위 테스트(i18n · transcripts · turn-git · window-state · contracts · toast-stack … · project-actions …)
+scripts/unit/           단위 테스트(app-update · contracts · delegation · five-hour · i18n · model-choices · patrol · profiles · project-actions · prompt · recent · shortcuts · toast-stack · transcripts · turn-git · ui-store · usage-query · window-state)
 ```
 
 트랜스크립트 JSONL 은 Claude Code 내부 형식이라 버전이 바뀌면 파서(`electron/watcher/parse.ts`)를 손봐야 할 수 있다. 모르는 레코드는 무시한다.
