@@ -1,4 +1,4 @@
-// The "명령 하달" block in an account's CLAUDE.md (electron/delegation.ts): it goes in whole, comes
+// The "멀티 에이전트" block in an account's CLAUDE.md (electron/delegation.ts): it goes in whole, comes
 // out whole, leaves everything else exactly as it was, and never touches the real ~/.claude.
 import { existsSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'

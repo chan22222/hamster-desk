@@ -406,7 +406,7 @@ function startWatchers(): void {
   if (adopted.length) console.log(`[profiles] recovered: ${adopted.map((p) => p.id).join(', ')}`)
   for (const p of loadProfiles().list) watchProfile(p)
 
-  // every account's CLAUDE.md carries the "명령 하달" block the stored config asks for (on by default)
+  // every account's CLAUDE.md carries the "멀티 에이전트" block the stored config asks for (on by default)
   delegationSync(true)
 
   // the per-model weekly windows, asked of the CLI for every logged-in account (electron/usage-query.ts);
@@ -817,7 +817,7 @@ ipcMain.handle('bubble:summarize', (_e, req: BubbleRequest) => summarizer().summ
 ipcMain.handle('bubble:state', () => summarizer().state())
 ipcMain.handle('bubble:resetStats', () => summarizer().reset())
 
-// ---- IPC: "명령 하달" — the sub-agent instruction block in every account's CLAUDE.md (electron/delegation.ts)
+// ---- IPC: "멀티 에이전트" — the sub-agent instruction block in every account's CLAUDE.md (electron/delegation.ts)
 
 /**
  * `write` brings each account's file in line with the stored config; without it this only reports.

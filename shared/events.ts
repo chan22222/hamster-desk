@@ -117,7 +117,7 @@ export interface FiveHourAccount {
 export type FiveHourState = Record<string, FiveHourAccount>
 
 /**
- * "명령 하달" — a standing instruction block the app keeps in each account's CLAUDE.md that tells
+ * "멀티 에이전트" — a standing instruction block the app keeps in each account's CLAUDE.md that tells
  * Claude when to split work across sub-agents (electron/delegation.ts). `preset` picks the harness
  * text, `cap` limits the agents run at once (0 = no line about it), `custom` is the user's own text.
  */

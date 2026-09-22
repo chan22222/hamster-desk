@@ -5,7 +5,7 @@ import { loadUi, saveUi } from './ui-store'
 import { claudeDir } from './watcher/paths'
 
 /**
- * "명령 하달": a standing instruction that tells Claude when to hand work to sub-agents.
+ * "멀티 에이전트": a standing instruction that tells Claude when to hand work to sub-agents.
  *
  * The way a harness does it — not a sentence tacked onto every prompt, but a rule in the system
  * layer, read once per session. Claude Code reads the user's memory file (`~/.claude/CLAUDE.md`,
@@ -23,7 +23,7 @@ import { claudeDir } from './watcher/paths'
 
 const START = '<!-- hamster-desk:delegation start -->'
 const END = '<!-- hamster-desk:delegation end -->'
-const OWNER = '<!-- Hamster Desk 의 `명령 하달` 설정이 관리하는 블록이에요. 앱에서 끄면 통째로 사라지니 손으로 고치지 마세요. -->'
+const OWNER = '<!-- Hamster Desk 의 `멀티 에이전트` 설정이 관리하는 블록이에요. 앱에서 끄면 통째로 사라지니 손으로 고치지 마세요. -->'
 const UI_KEY = 'delegation'
 const CUSTOM_MAX = 2000
 

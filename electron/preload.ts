@@ -86,7 +86,7 @@ export interface DeskBridge {
     /** ask now, for one account or every logged-in one; the same answers also arrive as `usage_windows` events */
     refresh(profileId?: string): Promise<UsageWindows[]>
   }
-  /** "명령 하달": the sub-agent instruction block in every account's CLAUDE.md (electron/delegation.ts) */
+  /** "멀티 에이전트": the sub-agent instruction block in every account's CLAUDE.md (electron/delegation.ts) */
   delegation: {
     /** the stored config and what each account's file says — reads only */
     get(): Promise<DelegationState>

@@ -1,4 +1,4 @@
-// "명령 하달" on the session bar: a toggle and, next to it, which harness. Nothing here types into
+// "멀티 에이전트" on the session bar: a toggle and, next to it, which harness. Nothing here types into
 // the terminal — the choice lands in the account's CLAUDE.md (electron/delegation.ts) and Claude
 // reads it at the start of its next session. So unlike everything else on the bar, these two stay
 // live while a prompt is waiting, and the note under the menu says when the change takes effect.
@@ -8,7 +8,7 @@ import { DELEGATION_CAPS, DELEGATION_PRESETS, type DelegationConfig, type Delega
 import { IconCheck, IconChevron } from '../widgets/icons'
 import { Popover } from '../widgets/Popover'
 
-const TIP = '명령 하달: 작업을 서브에이전트에게 나눠 맡기라는 지시를 이 계정의 CLAUDE.md 에 넣어 둬요.\n다음에 여는 claude 부터 적용돼요.'
+const TIP = '멀티 에이전트: 작업을 서브에이전트에게 나눠 맡기라는 지시를 이 계정의 CLAUDE.md 에 넣어 둬요.\n다음에 여는 claude 부터 적용돼요.'
 const NOTE = '이 계정의 CLAUDE.md 에 표시된 블록으로 들어가요 (끄면 블록만 사라져요). 다음에 여는 claude 부터 적용돼요.'
 
 export function DelegationControl({ profileId }: { profileId: string }) {
@@ -47,7 +47,7 @@ export function DelegationControl({ profileId }: { profileId: string }) {
         <span className="sb-deleg-mark" aria-hidden="true">
           {c.on && <IconCheck size={11} />}
         </span>
-        명령 하달
+        멀티 에이전트
       </button>
       <Popover
         className="pill sb-btn sb-model"
@@ -58,14 +58,14 @@ export function DelegationControl({ profileId }: { profileId: string }) {
           </>
         }
         title="어떤 방식으로 나눠 맡길지"
-        ariaLabel="명령 하달 방식"
+        ariaLabel="멀티 에이전트 방식"
         width={332}
         disabled={!c.on}
         debugClick="bar-delegate-preset"
       >
         {() => (
           <div className="pop-body">
-            <div className="pop-head">명령 하달 방식</div>
+            <div className="pop-head">멀티 에이전트 방식</div>
             <div className="sb-model-list" role="group" aria-label="방식">
               {DELEGATION_PRESETS.map((p) => {
                 const on = p.id === c.preset

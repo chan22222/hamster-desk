@@ -41,7 +41,7 @@
 /* the menu's rows: a radio list, so no gap between them — the 8px of `.pop-body` is for sections */
 .sb-model-list { display: flex; flex-direction: column; gap: 1px; margin: 0 -2px; }
 
-/* "명령 하달": a switch drawn as a pill with a small box on its left, so it reads as on/off and not
+/* "멀티 에이전트": a switch drawn as a pill with a small box on its left, so it reads as on/off and not
    as one more command button. Next to it the preset opens a menu, shaped like the model pill. */
 .pill.sb-btn.sb-deleg { gap: 6px; }
 .sb-deleg-mark { display: inline-flex; align-items: center; justify-content: center; width: 13px; height: 13px; border-radius: 3px; border: 1px solid var(--line-strong); color: var(--on-accent); }
