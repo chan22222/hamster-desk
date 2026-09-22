@@ -31,8 +31,15 @@
 .pill.sb-btn { height: 24px; padding: 0 8px; font-size: 12px; flex: none; }
 .pill.sb-btn:disabled { opacity: 0.45; cursor: default; background: var(--surface); color: var(--text-3); }
 .pill.sb-btn.alert:disabled { background: var(--surface-2); border-color: var(--line); }
-/* the model is shown, not switched (see SessionBar.tsx), so it is text rather than a pill */
-.sb-model { flex: none; padding: 0 4px; font-size: 12px; font-weight: 500; color: var(--text); white-space: nowrap; cursor: default; }
+/* The model is a pill like the other buttons now that it opens a menu. It keeps the weight and
+   colour of a name rather than a command, and the caret on its right is what says "this opens" —
+   until 0.1.13 the same text was a label, so nothing else may look different. */
+.pill.sb-btn.sb-model { gap: 2px; padding: 0 4px 0 8px; font-weight: 500; color: var(--text); }
+.pill.sb-btn.sb-model:disabled { color: var(--text-3); }
+.pill.sb-btn.sb-model .sb-caret { flex: none; color: var(--text-3); }
+.pill.sb-btn.sb-model:hover:not(:disabled) .sb-caret, .pill.sb-btn.sb-model.is-open .sb-caret { color: var(--text-2); }
+/* the menu's rows: a radio list, so no gap between them — the 8px of `.pop-body` is for sections */
+.sb-model-list { display: flex; flex-direction: column; gap: 1px; margin: 0 -2px; }
 
 .seg.sb-effort { flex: none; padding: 1px; }
 .seg.sb-effort .seg-btn { padding: 2px 6px; font-size: 11px; }

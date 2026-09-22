@@ -1,5 +1,5 @@
-// The strip above the terminal: model (shown, not switched), effort, context, /compact, /clear,
-// past conversations.
+// The strip above the terminal: model (a dropdown), effort, context, /compact, /clear, past
+// conversations.
 // Plan §3.5. Owner: B.
 //
 // Everything on this bar is a slash command typed into the TUI that is already running — there is
@@ -15,9 +15,11 @@ import type { ReactNode } from 'react'
 import { EFFORT_LEVELS, type EffortLevel } from '@shared/events'
 import { modelSkin } from '../desk/skins'
 import { runInTerminal, useDesk, type SessionState, type Workspace } from '../store'
+import { IconCheck, IconChevron } from '../widgets/icons'
 import { Popover } from '../widgets/Popover'
 import { termLog } from '../term/search'
 import { ContextMeter, contextPct } from './ContextMeter'
+import { MODEL_CHOICES, modelAliasOf } from './models'
 import { TranscriptList } from './TranscriptList'
 import './session.css'
 
@@ -26,6 +28,8 @@ const NEXT_TURN = '지금은 작업 중이라 다음 턴부터 적용돼요.'
 const NO_STATUS = '사용량 연동 시 컨텍스트가 보여요.'
 /** `/effort` is not per-session: the CLI answers "saved as your default for new sessions", so say so */
 const EFFORT_TIP = '노력 수준 (/effort)\n새 세션의 기본값으로도 저장돼요 (Claude Code 동작).'
+/** `/model` does the same ("Model set to … and saved as your default for new sessions"), so the same line */
+const SAVED_DEFAULT = '새 세션의 기본값으로도 저장돼요 (Claude Code 동작).'
 
 /** One plain button on the bar; `pill` keeps it the same shape as everything in the top bar. */
 function BarButton({
@@ -53,6 +57,7 @@ function BarButton({
 export function SessionBar({ ws, session }: { ws: Workspace | null; session: SessionState | null }) {
   const ptyWaiting = useDesk((s) => s.ptyWaiting)
   const setSessionEffort = useDesk((s) => s.setSessionEffort)
+  const setSessionModel = useDesk((s) => s.setSessionModel)
 
   // the bar belongs to a terminal that has a claude in it; every other tab shows nothing
   if (!ws || ws.ptyId === null || !session) return null
@@ -73,16 +78,60 @@ export function SessionBar({ ws, session }: { ws: Workspace | null; session: Ses
 
   const pct = contextPct(session)
   const model = modelSkin(session.model).label || '모델'
+  const alias = modelAliasOf(session.model)
   const effort = session.effort
+  const modelTip = `모델: ${session.model ?? '알 수 없음'} (/model)\n${SAVED_DEFAULT}`
 
   return (
     <div className={`session-bar ${waiting ? 'is-waiting' : ''}`} title={waiting ? WAITING : pct === null ? NO_STATUS : undefined}>
-      {/* Shown, never switched. `/model <alias>` does more than change this session: Claude Code
-          writes the choice back as the user's saved default model, and that was never checked
-          against a real session — not something for a one-click button on a bar to do. */}
-      <span className="sb-model" title={`모델: ${session.model ?? '알 수 없음'}\n바꾸려면 터미널에서 /model 을 쓰세요.`}>
-        {model}
-      </span>
+      {/* `/model <alias>` does more than change this session: Claude Code writes the choice back as
+          the user's saved default model, exactly as `/effort` does. Until 0.1.13 that kept the model
+          off the bar; now the tooltip and the menu's last line say it, and the effort segment set the
+          precedent. Only the four family aliases are offered — src/session/models.ts says why. */}
+      <Popover
+        className="pill sb-btn sb-model"
+        label={
+          <>
+            {model}
+            <IconChevron dir="down" size={12} className="sb-caret" />
+          </>
+        }
+        title={busy ? `${modelTip}\n${NEXT_TURN}` : modelTip}
+        ariaLabel="모델 바꾸기"
+        width={236}
+        disabled={off}
+        debugClick="bar-model"
+      >
+        {(close) => (
+          <div className="pop-body">
+            <div className="pop-head">모델 (/model)</div>
+            <div className="sb-model-list" role="group" aria-label="모델">
+              {MODEL_CHOICES.map((c) => {
+                const on = c.alias === alias
+                return (
+                  <button
+                    key={c.alias}
+                    className={`pop-check ${on ? 'is-on' : ''}`}
+                    role="menuitemradio"
+                    aria-checked={on}
+                    data-debug-click={`bar-model-${c.alias}`}
+                    onClick={() => {
+                      close()
+                      run(`/model ${c.alias}`)
+                      setSessionModel(session.info.sessionId, c.id)
+                    }}
+                  >
+                    <span className="pop-tick">{on && <IconCheck size={14} />}</span>
+                    <span className="pop-label">{modelSkin(c.id).label}</span>
+                    <span className="dim">{c.hint}</span>
+                  </button>
+                )
+              })}
+            </div>
+            <p className="pop-note">{busy ? `${SAVED_DEFAULT} ${NEXT_TURN}` : SAVED_DEFAULT}</p>
+          </div>
+        )}
+      </Popover>
 
       <span className="sb-sep" />
 

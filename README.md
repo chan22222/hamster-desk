@@ -20,7 +20,7 @@ Claude Code CLI 를 그대로 쓰면서, 지금 누가(메인·서브에이전�
   - `.../<sessionId>/subagents/agent-*.jsonl` + `.meta.json` — 서브에이전트별 기록(종류·설명)
   - `~/.hamster-desk/status/<sessionId>.json` — (선택) 상태줄 스크립트가 남기는 사용량·컨텍스트 스냅샷
 - Max/Pro 구독 로그인 그대로. 앱은 모델을 직접 호출하지 않는다(Claude Code 자체가 돈다).
-- 앱은 Claude Code 의 설정(`~/.claude`)을 바꾸지 않는다. 예외는 사용자가 직접 켜는 사용량 연동(statusLine)뿐이다. **단, 세션 컨트롤 바의 `/effort` 는 터미널에 그 명령을 대신 쳐 주는 것인데, 그 명령을 받은 Claude Code 가 스스로 값을 `~/.claude/settings.json` 의 새 세션 기본값으로도 저장한다** — 앱이 쓰는 파일이 아니라 CLI 의 동작이지만, 버튼 한 번에 그 파일이 바뀐다는 사실은 같으므로 여기 적어 둔다. 같은 이유로 모델은 바에서 **보여 주기만** 한다(`/model <alias>` 도 저장된 기본 모델을 덮어쓴다).
+- 앱은 Claude Code 의 설정(`~/.claude`)을 바꾸지 않는다. 예외는 사용자가 직접 켜는 사용량 연동(statusLine)뿐이다. **단, 세션 컨트롤 바의 `/effort` 는 터미널에 그 명령을 대신 쳐 주는 것인데, 그 명령을 받은 Claude Code 가 스스로 값을 `~/.claude/settings.json` 의 새 세션 기본값으로도 저장한다** — 앱이 쓰는 파일이 아니라 CLI 의 동작이지만, 버튼 한 번에 그 파일이 바뀐다는 사실은 같으므로 여기 적어 둔다. 바의 **모델 드롭다운**이 쳐 주는 `/model <alias>` 도 같다 — CLI 가 `saved as your default for new sessions` 라고 답하며 저장된 기본 모델을 덮어쓴다(툴팁과 메뉴에 적혀 있다).
 - 읽는 범위도 좁게 잡았다: 지난 대화 목록은 **트랜스크립트 파일만**(파일마다 앞 64KB + 꼬리 512KB), git 은 **읽기 전용 명령만**, `~/.claude/history.jsonl` 은 읽지 않는다.
 
 ## 실행
@@ -156,10 +156,11 @@ npm run release            # 검사만: npm run release -- --check
 - **두 테마 모두 어두운 패널**이다(라이트 `--term-bg #121814` / 전경 `#dfe6da` / 커서 `#7fd4a3`, 다크 `#0e1310` / `#e3eade` / `#8fdcb0`). Claude Code 가 자기 테마 색으로 출력하므로 여기만 밝게 하면 글자가 안 보인다.
 
 **세션 컨트롤 바** (터미널 바로 위 한 줄. 그 탭에 `claude` 세션이 붙어 있을 때만 나온다)
-- 왼쪽부터 **모델 이름**(표시 전용) · **effort 세그먼트**(`low·medium·high·xhigh·max`) · 여백 · **컨텍스트 미터** · `/compact` · `/clear`(한 번 묻는다) · `지난 대화`.
+- 왼쪽부터 **모델 드롭다운**(`Fable 5.1 ▾`) · **effort 세그먼트**(`low·medium·high·xhigh·max`) · 여백 · **컨텍스트 미터** · `/compact` · `/clear`(한 번 묻는다) · `지난 대화`.
 - 버튼 뒤에 API 는 없다. **이미 떠 있는 TUI 에 슬래시 명령을 대신 쳐 주는 것**이 전부다. 입력줄에 쓰다 만 글이 있을 수 있으므로 명령 앞에 `\x15`(Ctrl+U, 입력줄 비우기)를 같은 청크로 붙이고 Enter(`\r`)는 따로 보낸다. Claude Code 가 권한 요청·질문을 띄운 동안에는 입력줄이 앱의 것이 아니므로 바 전체가 비활성이고 `프롬프트에 답한 뒤 쓸 수 있어요.` 가 뜬다. 다른 터미널에서 도는 세션(기울임체 탭)은 읽기만 하므로 명령 버튼이 꺼져 있다.
 - **`/effort` 는 그 세션만 바꾸지 않는다.** Claude Code 가 그 값을 `~/.claude/settings.json` 의 새 세션 기본값으로도 저장한다(CLI 의 동작이고, 세그먼트 툴팁에도 적혀 있다). 작업 중에 누르면 다음 턴부터 적용된다.
-- **모델은 보여 주기만 한다.** `/model <alias>` 는 사용자의 저장된 기본 모델을 덮어쓰는데 실제 세션에서 검증하지 못해 버튼을 두지 않았다. 바꾸려면 터미널에서 `/model`.
+- **모델 드롭다운**은 이름(`Fable 5.1 ▾`)을 누르면 열린다. 항목은 CLI 가 받는 네 가족 별칭 `fable · opus · sonnet · haiku` 인데, 이름은 그 별칭이 지금 가리키는 모델(`Fable 5.1 · Opus 5 · Sonnet 5 · Haiku 4.5`)이고 오른쪽에 CLI 의 한 줄 설명이 붙는다. 지금 모델의 가족에 체크가 있다(날짜 붙은 id 나 옛 세대도 가족으로 맞춘다). 고르면 effort 와 똑같이 `/model <alias>` 를 쳐 준다. **이것도 그 세션만 바꾸지 않는다** — CLI 가 `Model set to … and saved as your default for new sessions` 라고 답하며 `~/.claude/settings.json` 의 기본 모델을 덮어쓴다(툴팁과 메뉴 아래 줄에 적혀 있다). 0.1.13 까지는 이 이유로 이름만 보여 줬는데, effort 가 이미 같은 일을 하고 있어 숨길 이유가 되지 못했다. 작업 중에 누르면 다음 턴부터다. 바는 고른 별칭이 가리키는 모델을 바로 보여 주고(햄스터 스킨도 같이), 트랜스크립트나 상태줄이 실제 모델을 알려 오면 그것으로 바뀐다 — 조직 제한으로 CLI 가 거절하면 다음 답변에서 되돌아온다.
+  - 별칭 표는 CLI 2.1.278 바이너리에서 읽었다(`src/session/models.ts`): 받는 것은 `sonnet · opus · haiku · fable · best · sonnet[1m] · opus[1m] · fable[1m] · opusplan`. 셋은 일부러 뺐다 — `best` 는 등급 기본값(지금은 fable)이라 "기본"과 "fable"을 구분해 체크할 수 없고, `[1m]` 은 계정 자격을 CLI 가 확인해야 나오며, `opusplan` 은 모델이 아니라 모드(플랜 중 Opus, 그 외 Sonnet)라 CLI 가 실제 쓴 모델만 알려 주므로 체크를 정직하게 붙일 수 없다. 터미널에서 `/model opusplan` 은 그대로 된다.
 - **컨텍스트 %** 는 상태줄 스냅샷의 `contextUsedPct` 다 — **사용량 연동을 켠 사용자에게만** 보인다(미연동이면 미터도 탭의 `%` 도 없고, 바 툴팁이 `사용량 연동 시 컨텍스트가 보여요.`). 70% 부터 `/compact` 버튼이 강조되고 90% 부터 `압축 권장` 이 붙는다.
 
 **지난 대화 이어서 열기** (컨트롤 바의 `지난 대화`, 320px 팝오버)
@@ -245,6 +246,7 @@ npm run smoke:ui                   # ~/.hamster-desk/ui.json: 병합·null 삭�
 | `turn-git.test.ts` | `summarizeTurn` 이 그 턴의 편집만 세는지, `parseStatus`(`## main...origin/main [ahead 1]`, CRLF, detached, 새 저장소), `classifyDiffLine` |
 | `window-state.test.ts` | `fitBounds`(화면 밖·과소·정상·최대화), `miniPlacement`(보조 모니터 포함), 탭 직렬화(업데이트 탭 제외, 외부 세션이 앞일 때) |
 | `contracts.test.ts` | 새 prefs 기본값과 `adoptPrefs` 의 `notify` 깊은 병합 |
+| `model-choices.test.ts` | 모델 드롭다운의 별칭이 `fable·opus·sonnet·haiku` 넷뿐인지, 각 별칭이 가리키는 id 를 스킨이 알아 `Fable 5.1·Opus 5·Sonnet 5·Haiku 4.5` 로 이름 붙는지, 날짜 붙은 id·옛 세대는 가족으로 체크되고 `mythos`·없음은 체크되지 않는지 |
 
 스모크 테스트(창을 보지 않고 스크린샷만). `HAMSTER_TYPE` 은 첫 셸에 자동 입력할 텍스트(`\r` = Enter, `|` 로 단계 구분, 단계 간격 `HAMSTER_TYPE_DELAY` ms), `HAMSTER_CWD` 는 셸 시작 폴더. 긴 문장은 Claude 입력창이 붙여넣기로 보므로 Enter(`
 `)를 별도 단계로 보낸다:
@@ -278,7 +280,7 @@ HAMSTER_CAPTURE=work/ui-dark.png HAMSTER_CAPTURE_DELAY=8000 HAMSTER_CAPTURE_QUIT
 
 캡처 실행은 stdout 에 **꼬리표 달린 줄**을 남긴다 — 스크린샷에 안 찍히는 사실을 말하는 길이다: `[capture]` `[keys]` `[pty]`(create/exit) `[debug]`(events·click) `[notify]` `[mini]` `[bounds]` `[restore]` `[git]` `[transcripts]` `[bar]`(보낸 바이트) `[history]` `[shortcut]` `[term]`(search N/M · font) 그리고 렌더러의 `[renderer:error]`·`[renderer:warning]`. 렌더러 쪽 꼬리표(`[`로 시작하는 콘솔 줄)는 캡처 실행에서만 stdout 으로 넘어온다.
 
-`data-debug-click` 이름: `welcome-run` · `more` · `usage`(사용량 칩) · `mini-toggle` · `mini-exit` · `mini-sound` · `notify-permission` · `notify-question` · `notify-turn` · `notify-sound` · `notify-banner` · `bar-effort-<low|medium|high|xhigh|max>` · `bar-compact` · `bar-clear` · `bar-clear-yes` · `bar-history` · `history-<n>` · `history-continue` · `toast` · `log-<n>` · `file-<n>` · `file-<n>-diff` · `term-search-close`. (`⋯` 메뉴 안의 항목은 `more` 를 먼저 눌러 팝오버를 열어야 존재한다.)
+`data-debug-click` 이름: `welcome-run` · `more` · `usage`(사용량 칩) · `mini-toggle` · `mini-exit` · `mini-sound` · `notify-permission` · `notify-question` · `notify-turn` · `notify-sound` · `notify-banner` · `bar-model` · `bar-model-<fable|opus|sonnet|haiku>` · `bar-effort-<low|medium|high|xhigh|max>` · `bar-compact` · `bar-clear` · `bar-clear-yes` · `bar-history` · `history-<n>` · `history-continue` · `toast` · `log-<n>` · `file-<n>` · `file-<n>-diff` · `term-search-close`. (`⋯` 메뉴 안의 항목은 `more` 를 먼저 눌러 팝오버를 열어야 존재한다.)
 
 읽을 때 알아 둘 것:
 - **캡처 PNG 는 창이 아니라 콘텐츠 영역 크기다.** Windows 에서 창보다 16×39 작다 — 1280×880 창은 1264×841, 미니 480×360 은 464×321. `[mini] on 480x360` 같은 stdout 의 숫자가 창 크기다.
@@ -294,9 +296,14 @@ HAMSTER_CAPTURE=work/ui-dark.png HAMSTER_CAPTURE_DELAY=8000 HAMSTER_CAPTURE_QUIT
 HAMSTER_UNFOCUSED=1 HAMSTER_EVENTS='[{"kind":"waiting","ptyId":"$pty","reason":"permission","ts":"$now"}]' \
   HAMSTER_CAPTURE=work/f-notify.png HAMSTER_CAPTURE_DELAY=7000 HAMSTER_CAPTURE_QUIT=1 npx electron .
 
-# 컨트롤 바 + 지난 대화: 컨텍스트 92% → 탭의 빨간 92%, 강조된 /compact, 모델은 글자만. 그다음 지난 대화 목록
+# 컨트롤 바 + 지난 대화: 컨텍스트 92% → 탭의 빨간 92%, 강조된 /compact, 모델 드롭다운 `Fable 5.1 ▾`. 그다음 지난 대화 목록
 HAMSTER_CWD=C:/proj HAMSTER_EVENTS='[{"kind":"status","sessionId":"$sid","ts":"$now","model":{"id":"claude-fable-5-1","displayName":"Fable 5.1"},"effort":"high","contextUsedPct":92,"contextSize":200000,"costUSD":null,"linesAdded":null,"linesRemoved":null,"fiveHour":null,"sevenDay":null,"otherWindows":{}}]' \
   HAMSTER_CLICK='bar-history@7000' HAMSTER_CAPTURE=work/f-bar.png HAMSTER_CAPTURE_DELAY=6000,9000 HAMSTER_CAPTURE_QUIT=1 npx electron .
+
+# 모델 드롭다운: 열어서(Fable 5.1 에 체크) Sonnet 을 고른다 → stdout 에 [bar] send "\u0015/model sonnet", HAMSTER_PTY_LOG 에 `>> \x15/model sonnet` 과 `>> \r`,
+# 바와 햄스터가 바로 Sonnet 5 로. claude 없는 셸이라 /model 은 셸 오류로 끝난다 — 토큰도, 저장되는 기본 모델도 없다
+HAMSTER_CWD=C:/proj HAMSTER_EVENTS='[{"kind":"status","sessionId":"$sid","ts":"$now","model":{"id":"claude-fable-5-1","displayName":"Fable 5.1"},"effort":"high","contextUsedPct":42,"contextSize":200000,"costUSD":null,"linesAdded":null,"linesRemoved":null,"fiveHour":null,"sevenDay":null,"otherWindows":{}}]' \
+  HAMSTER_CLICK='bar-model@6000|bar-model-sonnet@8500' HAMSTER_PTY_LOG=work/f-model.log HAMSTER_CAPTURE=work/f-model.png HAMSTER_CAPTURE_DELAY=7500,10500 HAMSTER_CAPTURE_QUIT=1 npx electron .
 
 # 토스트 → 바뀐 파일 → git diff (file 은 작업 트리에서 실제로 바뀐 파일이어야 diff 가 나온다)
 HAMSTER_CWD=C:/proj HAMSTER_EVENTS='[{"kind":"prompt","sessionId":"$sid","agentId":null,"text":"t","ts":"$now"},{"kind":"edit","sessionId":"$sid","agentId":null,"toolUseId":"t1","file":"C:/proj/README.md","op":"edit","added":12,"removed":3,"preview":{"old":"a","new":"b"},"ts":"$now"},{"kind":"text","sessionId":"$sid","agentId":null,"text":"정리를 마쳤어요","ts":"$now"},{"kind":"turn_end","sessionId":"$sid","durationMs":130000,"ts":"$now"}]' \

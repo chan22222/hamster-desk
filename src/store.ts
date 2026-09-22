@@ -269,6 +269,12 @@ interface DeskStore {
   dismissFeedItem(sessionId: string, hid: string, id: string): void
   /** optimistic: the app just sent `/effort <level>` to this session */
   setSessionEffort(sessionId: string, level: EffortLevel): void
+  /**
+   * optimistic: the app just sent `/model <alias>` to this session, and `model` is the id the alias
+   * resolves to. The next assistant message or status snapshot replaces it with what the CLI
+   * really switched to.
+   */
+  setSessionModel(sessionId: string, model: string): void
 }
 
 const ARRIVE_MS = 900
@@ -801,6 +807,14 @@ export const useDesk = create<DeskStore>((set, get) => {
         ...s,
         effort: level,
         hamsters: s.hamsters.main ? { ...s.hamsters, main: { ...s.hamsters.main, effort: level } } : s.hamsters,
+      }))
+    },
+    setSessionModel(sessionId, model) {
+      // the main hamster changes skin with it, as it would on the next assistant message
+      updSession(sessionId, (s) => ({
+        ...s,
+        model,
+        hamsters: s.hamsters.main ? { ...s.hamsters, main: { ...s.hamsters.main, model } } : s.hamsters,
       }))
     },
     dismissFeedItem(sessionId, hid, id) {
