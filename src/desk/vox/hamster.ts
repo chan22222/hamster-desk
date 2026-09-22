@@ -107,6 +107,8 @@ interface Geos {
   leg: THREE.BufferGeometry
   tail: THREE.BufferGeometry
   tie: THREE.BufferGeometry
+  /** the boss's jacket; null for a colleague */
+  suit: THREE.BufferGeometry | null
   accessory: THREE.BufferGeometry | null
 }
 
@@ -114,7 +116,7 @@ const cache = new Map<string, Geos>()
 
 // Overlapping boxes are always offset by ~0.4 so two faces never land on the exact same plane —
 // coplanar faces z-fight and flicker as the camera moves (the same rule the game follows).
-function buildGeos(skin: Skin, tint: string, key: string): Geos {
+function buildGeos(skin: Skin, tint: string, key: string, main: boolean): Geos {
   const hit = cache.get(key)
   if (hit) return hit
   const P: Palette = {
@@ -171,10 +173,33 @@ function buildGeos(skin: Skin, tint: string, key: string): Geos {
     leg: leg.build(),
     tail: tail.build(),
     tie: tieGeo(tintC),
+    suit: main ? suitGeo() : null,
     accessory: buildAccessory(skin.accessory),
   }
   cache.set(key, geos)
   return geos
+}
+
+/**
+ * The boss's suit jacket, in the same upright body-group space as the tie: two front panels either
+ * side of the belly, the sides, the back, a collar and two lapels flanking the knot. Whatever model
+ * the session runs, this is what says "the one in charge" — the crown that used to do it belonged
+ * to a model skin and ended up on every hamster in the room. Every panel bites 0.2–0.4 into the
+ * torso (x ±14, y 11.5..45.5, z -11.5..10.5) or clears its bands (which reach z -13.7), so nothing
+ * shares a plane with the fur.
+ */
+function suitGeo(): THREE.BufferGeometry {
+  const b = new VoxBuilder()
+  const cloth = 0x2c3450
+  const lapel = 0x3d4a6b
+  for (const sx of [-1, 1]) {
+    b.box(sx * 11.0, 31, 10.9, 6.4, 26, 1.4, cloth) // front panel, x 7.8..14.2 — clear of the belly panel's ±7.5
+    b.box(sx * 14.4, 31, -0.4, 1.2, 26, 21.4, cloth) // side
+    b.box(sx * 4.7, 40.4, 11.9, 3.2, 6.4, 1.0, lapel) // lapel beside the knot (tie is x ±2)
+  }
+  b.box(0, 31, -14.6, 29.6, 26, 1.2, cloth) // back, just behind the two dark bands
+  b.box(0, 44.3, 11.2, 15.4, 2.2, 1.4, lapel) // collar under the chin
+  return b.build()
 }
 
 /**
@@ -199,19 +224,14 @@ function buildAccessory(kind: SkinAccessory): THREE.BufferGeometry | null {
   if (kind === 'none') return null
   const h = new VoxBuilder()
   const gold: BoxOpt = { shade: 1.25 }
-  if (kind === 'crown') {
-    // A ring of four rails perched on the front half of the skull, between the ears and the brow,
-    // so the fur shows through the middle. The back rail moved forward to z 5.3 to clear the
-    // inner ear, which now pokes out to z 3.7.
-    h.box(0, 18.6, 10.4, 15, 3.6, 2.6, 0xf5c231, gold)
-    h.box(0, 18.6, 5.3, 15, 3.6, 2.6, 0xf5c231, gold)
-    h.box(-6.2, 18.6, 7.85, 2.6, 3.6, 7.7, 0xf5c231, gold)
-    h.box(6.2, 18.6, 7.85, 2.6, 3.6, 7.7, 0xf5c231, gold)
-    h.box(-5.2, 21.2, 7.85, 3, 3, 3, 0xf5c231, gold)
-    h.box(5.2, 21.2, 7.85, 3, 3, 3, 0xf5c231, gold)
-    h.box(0, 21.2, 10.8, 3, 3, 3, 0xf5c231, gold)
-    h.box(0, 21.2, 5.3, 3, 3, 3, 0xf5c231, gold)
-    h.box(0, 18.8, 12.0, 2.6, 2.2, 1.4, 0xd8434e, { shade: 1.5 }) // jewel over the brow
+  if (kind === 'beret') {
+    // A flat cap on the front half of the skull, slumped to the wearer's left, with the little
+    // stem on top. It sits where the crown used to (z ≥ 5.3 clears the inner ear at z 3.7) and
+    // bites 0.4 into the skull top (y 17) so it never floats. Burgundy: warm, but not gold.
+    const felt = 0x8b3a4a
+    h.box(1.2, 17.8, 8.0, 18, 2.4, 9.4, felt) // brim disc, y 16.6..19, hanging a little over the side
+    h.box(2.6, 19.6, 8.0, 13, 1.8, 7.2, 0x9a4356, { shade: 1.1 }) // the slumped top
+    h.box(3.2, 21.0, 8.0, 1.6, 1.4, 1.6, 0x3a2a2a) // stem
   } else if (kind === 'glasses') {
     // lenses 0.2 in front of the eyes (eye front face z 13.1), rims a little further out; the
     // temple arms run straight back from the lens centre, straddling the skull's x ±11 side
@@ -252,7 +272,7 @@ export interface HamsterOptions {
 
 export function buildHamster({ skin, tint, main }: HamsterOptions, material: THREE.Material): HamsterRig {
   const key = `${skin.family}|${skin.accessory}|${tint}|${main}`
-  const geos = buildGeos(skin, tint, key)
+  const geos = buildGeos(skin, tint, key, main)
 
   const group = new THREE.Group()
   const mk = (geo: THREE.BufferGeometry): THREE.Mesh => {
@@ -270,6 +290,7 @@ export function buildHamster({ skin, tint, main }: HamsterOptions, material: THR
   group.add(bodyM)
   const tieG = new THREE.Group()
   tieG.add(mk(geos.tie))
+  if (geos.suit) tieG.add(mk(geos.suit)) // the jacket drops with the tie when the boss sits
   group.add(tieG)
 
   const headG = new THREE.Group()

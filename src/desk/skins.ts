@@ -2,7 +2,7 @@
 // matched by substring, the generation is read from the id for the badge, and an unknown family
 // falls back to a fur colour derived from the id's hash.
 /** Head-mounted extras a model's skin can wear. */
-export type Accessory = 'glasses' | 'crown' | 'headphones' | 'leaf'
+export type Accessory = 'glasses' | 'beret' | 'headphones' | 'leaf'
 
 export type SkinAccessory = Accessory | 'none'
 
@@ -17,7 +17,9 @@ export interface Skin {
 }
 
 const FAMILIES: { re: RegExp; family: string; colors: Record<string, string>; accessory: SkinAccessory; badge: string }[] = [
-  { re: /fable|mythos/i, family: 'Fable', colors: {}, accessory: 'crown', badge: '#e9b872' },
+  // a beret, not a crown: the crown read as "the boss", and with Fable the default model every
+  // hamster in the room wore one. The boss is told apart by its suit (hamster.ts), whatever it runs.
+  { re: /fable|mythos/i, family: 'Fable', colors: {}, accessory: 'beret', badge: '#e9b872' },
   { re: /opus/i, family: 'Opus', colors: { f: '#d9a26b', d: '#a8662d', o: '#3c2014' }, accessory: 'glasses', badge: '#c98a45' },
   { re: /sonnet/i, family: 'Sonnet', colors: { f: '#efe0cc', d: '#c7ad8e', o: '#4a3a2c' }, accessory: 'headphones', badge: '#b9a58e' },
   { re: /haiku/i, family: 'Haiku', colors: { f: '#e9e9f2', d: '#bfc2d6', o: '#3f4256' }, accessory: 'leaf', badge: '#9aa3c7' },
