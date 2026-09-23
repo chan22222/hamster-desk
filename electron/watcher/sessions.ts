@@ -109,14 +109,21 @@ export class SessionWatcher extends EventEmitter {
       let raw: string
       try {
         raw = await fsp.readFile(join(dir, n), 'utf8')
-      } catch {
+      } catch (e) {
+        // gone: that session has ended. Anything else (Windows can refuse a file being written) passes.
+        if ((e as NodeJS.ErrnoException).code !== 'ENOENT') this.holdOver(n, seen)
         continue
       }
       let j: Record<string, unknown>
       try {
         j = JSON.parse(raw)
       } catch {
-        continue // half-written; the next change event will retry
+        // Claude Code rewrites this file in place (truncate, then write) at least twice a turn, and
+        // fs.watch runs the scan right in between: empty or cut short is a session mid-write, not one
+        // that ended. Dropping it here reported it gone, then new again: untracked and re-attached,
+        // its transcript and every agent file read and sent to the renderer once more.
+        this.holdOver(n, seen)
+        continue
       }
       const pid = Number(j.pid)
       const sessionId = String(j.sessionId ?? '')
@@ -187,5 +194,16 @@ export class SessionWatcher extends EventEmitter {
         this.emit('session_gone', id)
       }
     }
+  }
+
+  /**
+   * A `<pid>.json` that cannot be read right now keeps the session it named before, as it was, for this
+   * scan; the next change event or poll reads it again. Only while that process lives: a file left
+   * broken by a claude that is gone must not keep its session on the desk.
+   */
+  private holdOver(name: string, seen: Set<string>): void {
+    const pid = Number(name.slice(0, -'.json'.length))
+    if (!pid || !processAlive(pid)) return
+    for (const [id, s] of this.sessions) if (s.pid === pid) seen.add(id)
   }
 }

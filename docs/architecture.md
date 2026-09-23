@@ -19,6 +19,9 @@
 - `electron/watcher/` 가 위 파일들을 감시한다: `sessions`(세션 파일 → 살아있는 세션, 그리고 어느 pty 가 그 세션의 부모인지) · `project`(프로젝트 폴더 재귀 감시) · `tail`(증분 읽기) · `parse`(JSONL → 이벤트). 이벤트는 순번 붙은 백로그로 렌더러에 가므로 늦게 붙어도 따라잡는다(`electron/main.ts`).
   - `tail` 은 한 번에 1MB 까지 읽고 그 사이마다 이벤트 루프에 양보한다(8MB 따라잡기가 메인 프로세스를 통째로 잡지 않게). 파일이 줄어들면(다시 쓰였으면) 0 바이트부터가 아니라 처음 열 때와 같은 꼬리 규칙으로 다시 읽고, `open()` 이 위치를 잡기 전의 `poll()` 은 아무것도 하지 않는다.
   - `model` 이벤트는 값(모델, 또는 effort)이 바뀔 때만 나가고, 같은 값이어도 500 이벤트마다 한 번 되풀이된다 — 예전에는 어시스턴트 블록마다 나가서 이벤트의 절반 가까이가 같은 모델이었다. 끝난 서브에이전트와 끝난 세션은 잊어서, 다시 오면 다시 알린다(제목도 같다).
+  - 서브에이전트가 **끝났다**(`agent_stop`, 햄스터 퇴근)고 보는 신호는 셋이다: 자기 트랜스크립트의 `end_turn`, 부모 트랜스크립트의 `<task-notification>`(그 에이전트 id 와 `completed`·`failed`·`killed`·`stopped` — 중단·실패로 끝나 `end_turn` 이 없는 에이전트는 이것뿐이다), 워크플로 에이전트의 `StructuredOutput` 이 오류 없이 돌아온 것(그 뒤로 `end_turn` 이 오지 않는다). 따라잡기는 부모를 먼저 읽고 에이전트 파일을 나중에 읽으므로 알림은 세션별로 기억해 두었다가(최대 1000개) 그 에이전트를 다 읽은 뒤에 판정하고, 알림보다 나중에 쓴 줄이 있으면 다시 불린(SendMessage) 것이라 남긴다. 알림이 8MB 따라잡기보다 앞에 있을 수도 있으므로(21MB 짜리 부모에서 15마리), 따라잡기가 시작되기 전부터 조용한 채 멈추지 않은 에이전트가 있을 때만 그 앞부분을 뒤에서 한 번 훑는다 — 1MB 씩 양보하며 바이트에서 표시를 찾고 그 줄만 파싱한다(78MB 에 0.1초 남짓, 최대 256MB, 세션이 끝나면 멈춤). 이 PC 의 서브에이전트 540개 중 `end_turn` 만으로 끝을 알 수 있던 것은 242개였고, 셋을 합치면 527개다.
+  - `prompt` 는 사람이 친 것만이다. 작업 알림, 슬래시 명령과 그 출력, `!` 셸 입력·출력, `[Request interrupted by user]`, compact 요약, `/goal` 이어 가기는 user 기록이지만 프롬프트가 아니다(새 CLI 는 `origin.kind` 로 적고, 옛 기록은 감싸는 태그로 가린다 — 사람이 붙여 넣은 글도 `<` 로 시작할 수 있어서 태그만으로는 거르지 않는다). 예전에는 알림이 올 때마다 메인 햄스터의 말풍선이 비워지고 마지막 프롬프트가 알림 글로 바뀌었다. 프롬프트 없이 시작한 턴의 요약은 CLI 가 잰 턴 길이만큼 거슬러 올라가 센다(`summarizeTurn`).
+  - `sessions` 는 `<pid>.json` 을 못 읽거나 반쯤 쓰인 것을 세션이 끝난 것으로 치지 않는다 — Claude Code 는 이 파일을 제자리에서(비우고 쓰기) 턴마다 두 번 넘게 고쳐 쓰고, 감시가 그 사이에 스캔을 부르면 예전에는 살아 있는 세션을 `session_gone` 으로 보냈다가 곧바로 새로 붙여 트랜스크립트와 에이전트 파일 전부를 다시 읽어 보냈다(쓰기 300번에 2번). 그 pid 가 살아 있는 동안만이고, 파일이 없어지거나 프로세스가 죽으면 예전처럼 끝난다.
   - 아직 트랜스크립트가 없는 세션(첫 메시지 전)은 cwd 의 슬러그 폴더를 1초마다 한 번 보고, 모든 프로젝트 폴더를 뒤지는 것은 1초 → 30초로 간격을 늘려 가며 한다(상태가 바뀌면 곧바로 한 번). 전부 비동기다.
 - 각 탭에서 띄운 `claude` 세션은 **프로세스 계보**로 그 탭에 묶인다 — 세션 파일의 pid 에서 부모를 거슬러 올라가 그 탭의 셸을 만나면 그 탭의 세션이다. 다른 터미널에서 돌아가는 세션은 기울임체 탭으로 붙고 책상만 볼 수 있다. 죽은 pid 의 세션 파일은 무시한다.
   - 부모 pid 표는 Windows 에서 PowerShell `Get-CimInstance Win32_Process` 한 번으로 얻는다(4초 캐시, 10초 타임아웃, 실패하면 30초 동안 다시 묻지 않고, 마지막 감시기가 멈출 때 돌던 조회는 죽인다). **"밖의 세션"이라는 판정은 한 번 내리면 그대로 둔다** — 이 창에 새 셸(탭)이 생길 때, 또는 그 판정을 내린 표에 그 pid 가 없었을 때만 다시 묻는다([설계 노트](design-notes.md#감시기는-조용해야-한다)).
@@ -71,16 +74,16 @@ src/desk/signs.ts        북쪽·서쪽 벽의 Spritfy 액자: 로고 PNG(src/as
 src/sidebar/            사이드바(Sidebar.tsx: 바뀐 파일·탐색·실행 메뉴·폭 핸들) · recent.ts(ui.json 의 최근/즐겨찾기·상대 시간)
 src/dev/                브라우저 재생(replay-driver.ts) · 데모 햄스터(demo.ts) · debug.ts(HAMSTER_EVENTS 재생 · HAMSTER_CLICK)
 src/Terminal.tsx        xterm 탭(복사·붙여넣기 키 처리, 파일 끌어 놓기, OSC 8 링크, 앞 탭만 WebGL, 테마 연동, 검색 애드온, 글꼴 크기, 앱 단축키는 셸로 안 보냄)
-src/term/               TermSearch.tsx(검색 오버레이) · search.ts(검색 옵션, 캡처 실행용 꼬리표 로그) · paste.ts(붙여넣기 거르기·끌어 놓은 파일 경로, 순수)
+src/term/               TermSearch.tsx(검색 오버레이) · search.ts(검색 옵션, 캡처 실행용 꼬리표 로그) · paste.ts(붙여넣기 거르기·끌어 놓은 파일 경로, 순수) · fit.ts(크기 맞추기의 스로틀, 순수)
 src/shortcuts.ts        전역 단축키 전부(창 keydown 한 곳)
 src/session/            SessionBar.tsx(컨트롤 바) · ContextMeter.tsx(탭의 % · 바의 미터) · TranscriptList.tsx(지난 대화)
-src/log/                FileLog.tsx(바뀐 파일) · FeedLog.tsx(말풍선 로그) · TurnToast.tsx(턴 요약 토스트) · turn.ts(summarizeTurn, 순수)
-src/git/                GitChip.tsx(탭 칩) · useGit.ts(10초 폴링 + 편집 디바운스) · DiffView.tsx · diff.ts(줄 분류, 순수)
+src/log/                FileLog.tsx(바뀐 파일) · FeedLog.tsx(말풍선 로그) · window.ts(두 목록의 보이는 줄만 그리기) · changed.ts(changedFiles, 순수) · TurnToast.tsx(턴 요약 토스트) · turn.ts(summarizeTurn, 순수)
+src/git/                GitChip.tsx(탭 칩) · useGit.ts(10초 폴링 + 편집 디바운스) · DiffView.tsx · diff.ts(줄 분류, 순수) · diff-cache.ts(최근 diff 8개, 그 파일의 마지막 편집이 키 — 순수)
 src/notify/             notifier.ts(store 구독 → 알림, 네 겹 게이트, 칠해진 테마를 실어 보냄) · Banner.tsx(알림 창을 못 만들 때의 배너) · kind.ts(권한·질문·완료 세 종류와 그 아이콘 경로 — 알림 창 페이지와 배너가 같이 쓴다) · src/assets/notify.wav
 src/toast/              알림 창 페이지(toast.html · toast.ts · toast.css): 배너와 같은 토큰, styles.css 를 같이 읽어 라이트/다크가 같다 — React 없음
 src/mini/               MiniShell.tsx(미니 모드: 스튜디오 + 상태줄)
 src/workspaces-persist.ts 터미널 탭 저장·복원(ui.json 의 workspaces)
-scripts/unit/           단위 테스트(app-update · atomic-write · backlog · contracts · declutter · delegation · env · five-hour · focus · i18n · layout · model-choices · pace · paste · patrol · profiles · project-actions · prompt · recent · release-guard · shortcuts · statusline · store · toast-stack · transcripts · turn-git · ui-store · usage-query · walk · watcher · window-state) · furniture.ts(걷기 테스트가 쓰는 사무실 가구 배치) · temp-home.ts(로드할 때 경로를 고정하는 모듈 앞에 `HAMSTER_HOME` 을 임시 폴더로)
+scripts/unit/           단위 테스트(app-update · atomic-write · backlog · contracts · declutter · delegation · env · five-hour · focus · i18n · layout · log-window · model-choices · pace · paste · patrol · profiles · project-actions · prompt · recent · release-guard · shortcuts · statusline · store · term-fit · toast-stack · transcripts · turn-git · ui-store · usage-query · walk · watcher · window-state) · furniture.ts(걷기 테스트가 쓰는 사무실 가구 배치) · temp-home.ts(로드할 때 경로를 고정하는 모듈 앞에 `HAMSTER_HOME` 을 임시 폴더로)
 ```
 
 ## 앱이 쓰는 파일

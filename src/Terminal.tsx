@@ -7,6 +7,7 @@ import { ui } from './i18n'
 import { runInTerminal, useDesk, type Workspace } from './store'
 import { usePainted, type Painted } from './widgets/theme'
 import { pathsForPaste, sanitizePaste } from './term/paste'
+import { throttleTrailing } from './term/fit'
 import { createSearchAddon, probeTermVerbose, searchOptions, termLog, type TermSearcher } from './term/search'
 import { TermSearch } from './term/TermSearch'
 
@@ -93,6 +94,8 @@ function isWindowShortcut(e: KeyboardEvent): boolean {
  */
 export const TerminalPane = memo(function TerminalPane({ ws, visible }: { ws: Workspace; visible: boolean }) {
   const hostRef = useRef<HTMLDivElement>(null)
+  /** where xterm mounts: the host's content box, as a box of its own (see `.term-fit` in styles.css) */
+  const boxRef = useRef<HTMLDivElement>(null)
   const bind = useDesk((s) => s.bindWorkspacePty)
   const fitRef = useRef<{ fit: () => void; focus: () => void } | null>(null)
   /** the GPU renderer's switch, which the pane's visibility flips (see the effect below) */
@@ -152,8 +155,9 @@ export const TerminalPane = memo(function TerminalPane({ ws, visible }: { ws: Wo
 
   useEffect(() => {
     const host = hostRef.current
+    const box = boxRef.current
     const bridge = window.desk
-    if (!host) return
+    if (!host || !box) return
     const term = new XTerm({
       theme: THEME[paintedRef.current],
       fontFamily: '"Cascadia Mono", "D2Coding", "JetBrains Mono", Consolas, "Malgun Gothic", monospace',
@@ -181,7 +185,7 @@ export const TerminalPane = memo(function TerminalPane({ ws, visible }: { ws: Wo
     })
     const fit = new FitAddon()
     term.loadAddon(fit)
-    term.open(host)
+    term.open(box)
     termRef.current = term
 
     // The GPU renderer, only while the pane is on screen. Chromium keeps at most 16 live WebGL
@@ -370,25 +374,22 @@ export const TerminalPane = memo(function TerminalPane({ ws, visible }: { ws: Wo
     host.addEventListener('dragover', onDragOver)
     host.addEventListener('drop', onDrop)
 
-    let fitTimer: ReturnType<typeof setTimeout> | null = null
-    let lastFit = 0
-    const ro = new ResizeObserver(() => {
-      if (fitTimer) return
-      fitTimer = setTimeout(
-        () => {
-          fitTimer = null
-          lastFit = performance.now()
-          if (host.offsetParent !== null) safeFit() // a hidden tab refits when it is shown
-        },
-        Math.max(0, FIT_EVERY_MS - (performance.now() - lastFit)),
-      )
-    })
-    ro.observe(host)
+    const refit = throttleTrailing(() => {
+      if (host.offsetParent !== null) safeFit() // a hidden tab refits when it is shown
+    }, FIT_EVERY_MS)
+    const ro = new ResizeObserver(() => refit.poke())
+    ro.observe(box)
+    // The grid itself is watched too: its cells can change size while the box stays put, and the
+    // row count then no longer fits. Moving the window to a monitor with another scale does that —
+    // xterm redraws 18px rows as 18.4px ones at 125% and keeps all 39 of them, the last one cut.
+    // A refit that lands on the same grid changes nothing, so this cannot feed itself.
+    const screen = term.element?.querySelector('.xterm-screen')
+    if (screen) ro.observe(screen)
 
     return () => {
       disposed = true
       ro.disconnect()
-      if (fitTimer) clearTimeout(fitTimer)
+      refit.cancel()
       if (firstRun) clearTimeout(firstRun)
       host.removeEventListener('contextmenu', onContextMenu)
       host.removeEventListener('dragover', onDragOver)
@@ -470,7 +471,9 @@ export const TerminalPane = memo(function TerminalPane({ ws, visible }: { ws: Wo
 
   return (
     <div className="term-wrap" style={{ display: visible ? 'flex' : 'none' }}>
-      <div ref={hostRef} className="term-host" />
+      <div ref={hostRef} className="term-host">
+        <div ref={boxRef} className="term-fit" />
+      </div>
       {find.open && searchRef.current && (
         <TermSearch
           q={find.q}

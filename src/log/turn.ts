@@ -9,7 +9,10 @@ import type { TurnSummary } from '@shared/events'
 /** the slice of a session a turn summary is made of */
 export interface TurnSource {
   edits: readonly { ts: number; file: string; added: number; removed: number }[]
-  /** when the turn's prompt arrived; null when the turn started before we were watching */
+  /**
+   * when the turn's prompt arrived; null when the turn started before we were watching, or without
+   * a prompt typed by anyone (a finished background task's notice, a /goal continuation)
+   */
   turnStartedAt: number | null
   /** the last thing the main hamster said this turn, raw */
   lastSaid: string
@@ -38,11 +41,12 @@ function trim(text: string, max: number): string {
  *
  * Only edits at or after `turnStartedAt` count — the session's `edits` list is the whole
  * conversation's, and a card that claimed forty files for a one-line fix would be worse than none.
+ * A turn with no prompt of its own is measured back from its end by the CLI's `durationMs`.
  * `durationMs` comes off the event (the CLI measures the turn properly, including its own start-up)
  * and is only computed from the timestamps when the event does not carry it.
  */
 export function summarizeTurn(session: TurnSource, e: TurnEnd): TurnSummary {
-  const from = session.turnStartedAt
+  const from = session.turnStartedAt ?? (e.durationMs ? e.ts - e.durationMs : null)
   const edits = from === null ? [] : session.edits.filter((x) => x.ts >= from)
   const files = new Set(edits.map((x) => x.file)).size
   let added = 0

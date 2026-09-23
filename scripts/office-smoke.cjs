@@ -82,8 +82,9 @@ app.whenReady().then(async () => {
     assert.deepEqual(clicked.texts, ['두 번째 문장이 아래에 쌓여야 해요'])
     await evaluate("window.__studio.feedLife({ act: 3000, say: 9000 })")
     // The speech-bubble log: bubbles expire, the log does not. Two sentences and one activity
-    // repeated three times must read as three rows with a ×3 badge, and clicking the newest row
-    // has to point the camera at whoever said it.
+    // repeated three times must read as three rows with a ×3 badge. Clicking a row opens it in
+    // place (the full text, who and when) and leaves the camera alone; the `햄스터 보기` button
+    // inside it is what points the camera at whoever said it (docs/features.md › 말풍선 로그).
     await evaluate("window.testStore.setState(s => ({ prefs: { ...s.prefs, showSidebar: true, showFeedLog: true } }))")
     // the cases above already left rows in it (that is the point of the log); start from empty so
     // the counts below are about these five pushes and nothing else
@@ -95,9 +96,26 @@ app.whenReady().then(async () => {
     const log = await evaluate("const rows = Array.from(document.querySelectorAll('.log-row')); return { count: rows.length, first: rows[0] ? rows[0].querySelector('.log-text').textContent : null, badges: rows.map(r => (r.querySelector('.log-n') || {}).textContent || null) }")
     assert.equal(log.count, 3, `the log should keep three rows: ${JSON.stringify(log)}`)
     assert.ok(log.badges.includes('×3'), `the repeated activity needs a ×3 badge in the log: ${JSON.stringify(log)}`)
-    await evaluate("document.querySelector('.log-row').click()")
+    // The follow menu above already selected studio-4, so look at somebody else first: otherwise
+    // "the camera went to studio-4" would hold whether the button did anything or not. (The list
+    // renders only the rows in view — src/log/window.ts — so rows are found by their text among
+    // the rendered ones; three short rows are all in view.)
+    await evaluate(`const select=document.querySelector('.office-follow select');select.value='studio-2';select.dispatchEvent(new Event('change',{bubbles:true}));`)
     await settle()
-    assert.ok(await evaluate(`return !!document.querySelector('.office-nameplate.is-selected[data-id="studio-4"]')`), 'clicking a log row must select that hamster in the studio')
+    const selectedPlate = () => evaluate("const e = document.querySelector('.office-nameplate.is-selected'); return e ? e.dataset.id : null")
+    assert.equal(await selectedPlate(), 'studio-2', 'the follow menu should have selected studio-2')
+    const logItem = `Array.from(document.querySelectorAll('.log-item')).find(e => e.querySelector('.log-text').textContent === '로그에 남을 첫 문장')`
+    await evaluate(`${logItem}.querySelector('.log-row').click()`)
+    await settle()
+    const opened = await evaluate(`const item = ${logItem}, raw = item.querySelector('.log-raw'); return { expanded: item.querySelector('.log-row').getAttribute('aria-expanded'), raw: raw ? raw.textContent : null, buttons: Array.from(item.querySelectorAll('.log-actions button')).map(b => b.textContent) }`)
+    assert.equal(opened.expanded, 'true', `clicking a log row must open it in place: ${JSON.stringify(opened)}`)
+    assert.equal(opened.raw, '로그에 남을 첫 문장', `the opened row must show what was said in full: ${JSON.stringify(opened)}`)
+    assert.ok(opened.buttons.includes('햄스터 보기'), `the opened row needs its 햄스터 보기 button: ${JSON.stringify(opened)}`)
+    assert.equal(await selectedPlate(), 'studio-2', 'opening a log row must leave the camera where it was')
+    await evaluate(`Array.from(${logItem}.querySelectorAll('.log-actions button')).find(b => b.textContent === '햄스터 보기').click()`)
+    await settle()
+    assert.equal(await selectedPlate(), 'studio-4', '햄스터 보기 in an opened log row must select that hamster in the studio')
+    assert.equal(await evaluate("return document.querySelector('.office-zoom').textContent"), '250%', '햄스터 보기 should frame the hamster like the follow menu does')
     await shot('studio-log')
     await evaluate("window.testStore.setState(s => ({ prefs: { ...s.prefs, showSidebar: false } }))")
     await settle()
@@ -205,8 +223,10 @@ app.whenReady().then(async () => {
     await settle()
     assert.ok(await evaluate("return document.querySelector('.office-welcome').textContent.includes('자리는 준비되어 있어요')"))
     assert.deepEqual(errors, [])
-    fs.writeFileSync(path.resolve('work/office-smoke-result.json'),JSON.stringify({passed:true,checks:['webgl context','voxel hamster rig','feed stacking, merging, expiry, click-to-dismiss and the zoom row budget','speech-bubble log rows, merge badge and click-to-focus','add/remove/reorder stability','stationary animation','drag pan','minimap click','zoom','wheel','overview','locate agent','session camera isolation','fold camera persistence','compact viewport','48-agent overflow','empty office','no renderer errors'],art},null,2))
+    fs.writeFileSync(path.resolve('work/office-smoke-result.json'),JSON.stringify({passed:true,checks:['webgl context','voxel hamster rig','feed stacking, merging, expiry, right-click-to-dismiss and the zoom row budget','speech-bubble log rows, merge badge, click-to-open and its show-hamster focus','add/remove/reorder stability','stationary animation','drag pan','minimap click','zoom','wheel','overview','locate agent','session camera isolation','fold camera persistence','compact viewport','48-agent overflow','empty office','no renderer errors'],art},null,2))
     console.log('PASS: renderer, voxel rig, chat feed (stack/merge/expiry/dismiss), speech-bubble log, occupancy changes, navigation, session switches, folding, compact layout')
   } catch(e) { console.error(e); process.exitCode=1 }
-  finally { win.destroy(); app.quit() }
+  // app.quit() ends Electron with 0 whatever process.exitCode says, so a failed run looked like a
+  // pass to `npm run test:office:ui` and CI; app.exit hands the code on.
+  finally { win.destroy(); app.exit(process.exitCode || 0) }
 })

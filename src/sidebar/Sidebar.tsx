@@ -1,9 +1,10 @@
 import { useEffect, useLayoutEffect, useMemo, useRef, useState, type KeyboardEvent as ReactKeyboardEvent, type ReactNode } from 'react'
 import { createPortal } from 'react-dom'
-import type { ProjectActionGroup, ProjectInfo } from '@shared/events'
+import type { LogItem, ProjectActionGroup, ProjectInfo } from '@shared/events'
 import { useUi } from '../i18n'
 import { explorerDir, favDirs, isFav, lastCwd, toggleFav } from './recent'
-import { changedFiles, FileLog } from '../log/FileLog'
+import { changedFiles } from '../log/changed'
+import { FileLog } from '../log/FileLog'
 import { FeedLog } from '../log/FeedLog'
 import { useDesk, type SessionState } from '../store'
 import { IconBranch, IconChevron, IconClose, IconFile, IconFolder, IconMore, IconPlay, IconSearch, IconStar } from '../widgets/icons'
@@ -209,6 +210,10 @@ function FileMenu({ x, y, from, onClose, children }: { x: number; y: number; fro
   )
 }
 
+/** what the bubble log gets while there is no session: the same empty ones every time, which it does not render again for */
+const NO_LOG: LogItem[] = []
+const NO_HAMSTERS: SessionState['hamsters'] = {}
+
 /** a row of the file browser: a folder (click goes in) or a file (double-click or Enter opens it) */
 type BrowseRow = { kind: 'dir'; entry: DirEntry } | { kind: 'file'; entry: FileEntry }
 
@@ -364,7 +369,12 @@ export function Sidebar({
   const [cursor, setCursor] = useState(0)
   const rowsRef = useRef<HTMLDivElement>(null)
   const filterRef = useRef<HTMLInputElement>(null)
-  const changed = useMemo(() => changedFiles(session).length, [session])
+  // Once per new edit, for the count on the section and the list in it alike. The session itself
+  // is new with every event of it, so it is its parts the two lists get: they render again when
+  // their own part does.
+  const edits = session?.edits
+  const files = useMemo(() => (edits ? changedFiles(edits, u.common.mainHamster) : null), [edits, u])
+  const changed = files?.length ?? 0
   const logged = session?.log.length ?? 0
 
   const go = async (p: string): Promise<void> => {
@@ -511,7 +521,7 @@ export function Sidebar({
         onToggle={() => setPrefs({ showLog: !prefs.showLog })}
         empty={changed === 0}
       >
-        <FileLog session={session} />
+        <FileLog files={files} cwd={session?.info.cwd ?? ''} />
       </Section>
 
       <Section
@@ -523,7 +533,7 @@ export function Sidebar({
         onToggle={() => setPrefs({ showFeedLog: !prefs.showFeedLog })}
         empty={logged === 0}
       >
-        <FeedLog session={session} />
+        <FeedLog sessionId={session?.info.sessionId ?? null} log={session?.log ?? NO_LOG} hamsters={session?.hamsters ?? NO_HAMSTERS} />
       </Section>
 
       <Section title={u.sidebar.explore} className="side-browse" open={prefs.showExplorer} onToggle={() => setPrefs({ showExplorer: !prefs.showExplorer })}>

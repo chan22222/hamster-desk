@@ -41,6 +41,12 @@ test('summarizeTurn claims nothing for a turn that started before we were watchi
   assert.deepEqual([s.files, s.added, s.removed, s.durationMs], [0, 0, 0, 0])
 })
 
+test('summarizeTurn measures a turn with no prompt (a background task’s notice) back from its end', () => {
+  // no prompt started it, but the CLI says it took 130 s: the edits in those 130 s are its own
+  const s = summarizeTurn({ ...session, turnStartedAt: null }, { durationMs: 130_000, ts: TURN_AT + 130_000 })
+  assert.deepEqual([s.files, s.added, s.removed, s.durationMs], [1, 12, 4, 130_000])
+})
+
 test('parseStatus separates the branch header from the changed paths', () => {
   const out = ['## main...origin/main [ahead 1]', ' M src/store.ts', '?? work/new.png', 'A  shared/events.ts', ''].join('\n')
   assert.deepEqual(parseStatus(out), { branch: 'main', changed: 3, ahead: 1, behind: 0 })

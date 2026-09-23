@@ -61,6 +61,14 @@
 .log-actions button { padding: 2px 8px; border: 1px solid var(--line-strong); border-radius: var(--radius); color: var(--text-2); font-size: 11px; }
 .log-actions button:hover:not(:disabled) { background: var(--surface-3); color: var(--text); }
 .log-actions button:disabled { opacity: 0.45; cursor: default; }
+/* What stands in for the rows of a long list that are not rendered (src/log/window.ts). Never the
+   node the browser keeps in place while the list changes around it: after a jump, it was the only
+   thing in view, and the view followed it away when the rows came in above it. */
+.rows-gap { overflow-anchor: none; }
+/* The rows' element holds the keyboard focus while the row it is for is scrolled out of the
+   window (src/log/window.ts); the row wears the ring again once it is back, and there is nothing
+   on screen to put one round meanwhile. */
+.log-rows:focus, .file-rows:focus { outline: none; }
 
 /* ---- the `git diff` toggle in a changed-file preview -------------------------------------- */
 .pv-head { display: flex; align-items: center; gap: 8px; margin: 6px 0; }

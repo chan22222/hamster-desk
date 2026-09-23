@@ -3,8 +3,9 @@
 
    Loads before styles.css, so nothing here relies on source order to beat a shared rule. */
 
-/* `.term-host` is where xterm mounts and React must leave its children alone, so the overlay hangs
-   off this wrapper instead. The wrapper takes over the show/hide the host used to do itself. */
+/* xterm mounts inside `.term-host` (in its `.term-fit`, styles.css) and React must leave that alone,
+   so the overlay hangs off this wrapper instead. The wrapper takes over the show/hide the host used
+   to do itself. */
 .term-wrap {
   position: relative;
   display: flex;

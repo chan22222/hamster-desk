@@ -326,8 +326,13 @@ button:focus-visible, select:focus-visible, input:focus-visible { outline: 2px s
 .panes { flex: 1; min-height: 0; min-width: 0; display: flex; flex-direction: column; position: relative; container: panes / inline-size; }
 /* the one dark panel: Claude Code paints this with its own theme, and a light background would
    swallow every dim colour it uses */
-.term-host { flex: 1; min-height: 0; padding: 6px 0 0 10px; background: var(--term-bg); border-top: 1px solid var(--line); }
-.term-host .xterm { height: 100%; }
+.term-host { flex: 1; min-height: 0; display: flex; flex-direction: column; padding: 6px 0 0 10px; background: var(--term-bg); border-top: 1px solid var(--line); }
+/* xterm mounts in this box, not in the host. FitAddon sizes the grid from the computed `height` of
+   the element xterm sits in, which under `box-sizing: border-box` is the border box: the host's
+   6px of padding and 1px border were counted as room for rows, so about two heights in five got a
+   row that did not fit and its bottom was cut off. A box with no padding or border measures true. */
+.term-fit { flex: 1; min-height: 0; min-width: 0; }
+.term-fit .xterm { height: 100%; }
 .ext-pane { flex: 1; display: flex; align-items: center; justify-content: center; background: var(--bg); color: var(--text-2); font-size: 13px; line-height: 1.7; padding: 24px; text-align: center; }
 /* no terminal at all: the `+` menu's list again, in the middle of the window */
 .start-pane { flex: 1; min-height: 0; display: flex; align-items: center; justify-content: center; background: var(--bg); padding: 24px; overflow: auto; }
