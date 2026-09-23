@@ -6,7 +6,7 @@
 
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
-import { GAP_LANES, H_OFFICE, HUB_J, OFFICE, OFFICE_TILE, T, directRoute, tileToWorld, type Point } from '../../src/desk/office-world'
+import { GAP_LANES, H_OFFICE, HUB_J, LOBBY, OFFICE, OFFICE_TILE, T, corridorRoute, directRoute, tileToWorld, type Point } from '../../src/desk/office-world'
 import { BOSS_DESK_W, DESK_D, DESK_W } from '../../src/desk/vox/props'
 import {
   DROP_SPEED,
@@ -181,7 +181,9 @@ test('inside the office the way home is the direct lanes, ending on the seat', (
 
 test('from outside it goes round the building to the steps, in at the door and up the corridor', () => {
   const door = OFFICE.door
-  const tail = [{ i: PORCH_I, j: door.j }, { ...door }, { i: 0.5, j: seat.j }, { ...seat }]
+  // in at the door, it walks on as a colleague arriving would: along the aisle behind its row, not the seat line
+  const tail = [{ i: PORCH_I, j: door.j }, { ...door }, ...corridorRoute(door, seat)]
+  assert.ok(tail.slice(2, -1).every((p) => Math.abs(p.j - seat.j) > 1e-9), 'the way in runs along the row of chairs')
   // west of the wall: straight to the steps
   assert.deepEqual(returnPath({ i: -3, j: 3 }, seat), tail)
   // north of it: along the north side to the west, then down to the steps
@@ -194,4 +196,29 @@ test('from outside it goes round the building to the steps, in at the door and u
     for (const p of path.slice(0, doorAt)) assert.ok(!inside(p), `(${p.i}, ${p.j}) cuts through the office`)
     assert.deepEqual(path.slice(doorAt + 1), tail.slice(2))
   }
+})
+
+test('one that was on its way out when it was thrown heads for the door from where it lands — never through a desk or a wall', () => {
+  const door = OFFICE.door
+  // inside: the lanes to the first row's walkway, then down the corridor to the door
+  for (const from of [{ i: GAP_LANES[2], j: HUB_J }, { i: GAP_LANES[3], j: HUB_J + 8 }, landingSpot({ i: seat.i, j: seat.j })]) {
+    const path = returnPath(from, door)
+    assert.ok(same(path[path.length - 1], door), 'ends at the door')
+    assert.deepEqual(path, directRoute(from, door))
+    assert.ok(path.every((q, k) => { const p = k ? path[k - 1] : from; return Math.abs(q.i - p.i) < 1e-9 || Math.abs(q.j - p.j) < 1e-9 }), 'every leg runs along a lane')
+  }
+  // outside: round the building to the steps and in — and there it is at the door already
+  const out = returnPath({ i: OFFICE.W + 2, j: 10 }, door)
+  assert.ok(same(out[out.length - 1], door))
+  for (const p of out.slice(0, -1)) assert.ok(!inside(p), `(${p.i}, ${p.j}) cuts through the office`)
+})
+
+test('one from the queue goes back to its place in the queue by way of the door, as a newcomer joins it', () => {
+  const place = LOBBY[2]
+  const from = { i: GAP_LANES[2], j: HUB_J }
+  const path = returnPath(from, place)
+  const doorAt = path.findIndex((p) => same(p, OFFICE.door))
+  assert.ok(doorAt >= 0, 'by the door')
+  assert.deepEqual(path.slice(0, doorAt + 1), directRoute(from, OFFICE.door))
+  assert.deepEqual(path.slice(doorAt + 1), corridorRoute(OFFICE.door, place))
 })

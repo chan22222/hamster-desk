@@ -1,15 +1,16 @@
-import { useEffect, useRef, useState } from 'react'
+import { memo, useEffect, useId, useRef, useState, type KeyboardEvent as ReactKeyboardEvent } from 'react'
 import * as THREE from 'three'
-import { feedLife, runInTerminal, setFeedLife, useDesk, type Hamster, type HamsterState, type SessionState } from '../store'
-import { ui, useUi } from '../i18n'
+import { feedLife, runInTerminal, setFeedLife, shortName, useDesk, type Hamster, type HamsterState, type SessionState } from '../store'
+import { formatDuration, ui, useUi } from '../i18n'
 import { rich } from '../rich'
 import { animFor, screenColor, statusDot, tintFor, type IsoAnim } from './anim'
 import { modelSkin } from './skins'
 import { makePatrol, patrolGoal, setPatrolMode, stepPatrol, type Patrol, type PatrolMode } from './patrol'
-import { IconHome, IconMap, IconMinus, IconPlus, IconTarget } from '../widgets/icons'
+import { IconClose, IconHome, IconMap, IconMinus, IconPlus, IconTarget } from '../widgets/icons'
 import { Popover } from '../widgets/Popover'
 import { TranscriptList } from '../session/TranscriptList'
 import {
+  LOBBY,
   OFFICE,
   FEED_RISE,
   H_OFFICE,
@@ -21,16 +22,20 @@ import {
   tileToWorld,
   walkDirect,
   walkTo,
+  type Point,
   type Walker,
 } from './office-world'
 import {
   applyTo,
   autoFrameCamera,
+  basisOf,
   createCamera,
   distanceFor,
   feedLines,
   focusCamera,
   FRAME_PAD,
+  HEADER_PAD,
+  makeBasis,
   orbitCamera,
   overviewCamera,
   panCamera,
@@ -41,11 +46,13 @@ import {
   zoomCamera,
   type Camera,
 } from './office-camera'
-import { foldDepthMaterial, skyDome, swayDepthMaterial, VOX_FOLD, voxMaterial, waterMaterial } from './vox/material'
-import { buildHamster, FEED_ANCHOR, MAIN_SCALE, type HamsterRig } from './vox/hamster'
+import { foldDepthMaterial, setVoxBump, skyDome, swayDepthMaterial, VOX_FOLD, voxMaterial, waterMaterial } from './vox/material'
+import { buildHamster, coatOf, FEED_ANCHOR, MAIN_SCALE, type HamsterRig } from './vox/hamster'
 import { buildStudioWorld, COLS, ROWS, WATER_Y, WORLD_D, WORLD_W, type StudioWorld } from './vox/world'
 import { BOSS_DESK_W, DESK_W } from './vox/props'
-import { hangSign, setSignHot, tickSignHover, type HungSign } from './signs'
+import { dropSign, hangSign, repaintSigns, setSignHot, tickSignHover, type HungSign } from './signs'
+import { INPUT_HOLD_MS, QUALITY, frameDue, frameRate, pixelRatio, qualityFor, type Quality } from './pace'
+import { declutter, type FeedBox, type Shift } from './declutter'
 import { LIFT, SCRUFF, carry, fly, grab, hang, landingSpot, release, returnPath, worldToTile, type Flight, type Ground, type Held } from './grab'
 import { disposeSplash, makeSplash, tickSplash, type Splash } from './splash'
 import { BLAST_REST, BUILD, BUILD_REST, CENTRE, STORY_DROP, blendView, builder, doomAt, flashAlpha, foldAge, foldAt, foldLift, foldPlaying, landTime, shakeOffset, shockRadius, storyBounds, storyMix, storyScale, type FoldFx } from './fold'
@@ -61,10 +68,27 @@ const bossAway = (p: Patrol, w: Walker): boolean => p.phase === 'going' || p.pha
 const FOG = 0xcfe3f2
 /** how fast the automatic camera eases towards its target (the room it leaves is FRAME_PAD) */
 const FRAME_EASE = 6
+/**
+ * While somebody walks, the automatic framing is worked out again at most this often. The answer
+ * is a bisection of a few hundred projections, and the easing towards it fills in between anyway:
+ * at every frame it was most of the frame's budget for a camera that could not move any faster.
+ */
+const REFRAME_MS = 120
 /** a lone seated hamster: closer than a manual focus (the framing pushes it down on its own) */
 const SOLO_SCALE = 3.0
 /** a feed row fades out over its last `FEED_FADE` ms (or half its life, whichever is shorter) */
 const FEED_FADE = 600
+/** a press on a hamster that lets go within this many px and ms is a tap (select), anything more picks it up */
+const TAP_PX = 4
+const TAP_MS = 250
+/** a feed pushed further than this from its hamster (declutter.ts) gets a tail back to the head */
+const TAIL_MIN = 10
+/** how far one arrow key pans the view, px (Shift: three times as far) */
+const PAN_STEP = 64
+/** how often the studio looks for scenes whose session is gone */
+const SWEEP_MS = 2000
+
+const near = (a: Point, b: Point): boolean => Math.hypot(a.i - b.i, a.j - b.j) < 0.01
 
 /** Camera scripting for the capture script, only wired up in the `?studio-demo` preview. */
 export interface StudioDebug {
@@ -85,6 +109,8 @@ export interface StudioDebug {
   patrol(mode: PatrolMode): void
   /** hold the pointer over the k-th wall print (`StudioWorld.signs` order), or over none */
   hoverSign(index: number | null): void
+  /** pin a hamster's card, as a tap on it does (or let go of it) */
+  pin(id: string | null): void
   /** the fold story on screen (fold.ts): its phase and age, how many rigs it has hidden, the white-out's opacity */
   fold(): { phase: FoldFx['phase']; age: number; hidden: number; flash: string }
 }
@@ -107,10 +133,17 @@ interface AutoFrame {
   on: boolean
   key: string
   target: { tx: number; tz: number; scale: number } | null
+  /** when the target was last worked out (the render loop's clock) */
+  at: number
 }
 
 interface Scene {
   seats: Map<string, number>
+  /**
+   * Everybody on the floor, by hamster id — including, for a few seconds, one the session has
+   * already let go of: a colleague whose report is in walks on to the door (`LEAVE_MS` in the store
+   * is not long enough to cross the room from its far corner) and is only taken away there.
+   */
   walkers: Map<string, Walker>
   /** the boss's rounds: whether it is out of its chair, and where in a round it is (patrol.ts) */
   patrol: Patrol
@@ -123,6 +156,8 @@ interface Scene {
   flights: Flight[]
   /** how many times each hamster has gone into the sea: the one that walks in after is a different individual */
   variants: Map<string, number>
+  /** hamsters with neither a desk nor a place in the visible queue, last frame: the next place that opens, they walk in for */
+  unseen: Set<string>
   width: number
   height: number
 }
@@ -135,8 +170,9 @@ const makeScene = (): Scene => ({
   hold: null,
   flights: [],
   variants: new Map(),
+  unseen: new Set(),
   // a scene that has never been opened starts with whatever the saved preference says
-  auto: { on: useDesk.getState().prefs.autoCam, key: '', target: null },
+  auto: { on: useDesk.getState().prefs.autoCam, key: '', target: null, at: 0 },
   width: 0,
   height: 0,
 })
@@ -165,9 +201,49 @@ interface Studio {
   /** the world's chunk meshes: culling comes off them while a fold story (fold.ts) moves their vertices about */
   chunks: THREE.Mesh[]
   minimapUrl: string
+  /** the sun, whose shadow map the quality tier sizes (pace.ts) */
+  sun: THREE.DirectionalLight
+  /** the sea, and its vertex grids by segment count — the tier swaps between two (pace.ts `QUALITY`) */
+  water: THREE.Mesh
+  seaGrids: Map<number, THREE.BufferGeometry>
+  /** the tier the picture is drawn at (pace.ts) */
+  quality: Quality
+  /** a software rasteriser: shadows off and a fixed low pixel ratio, whatever the tier */
+  software: boolean
 }
 let studio: Studio | null = null
 let studioFailed = false
+
+/** The sea's vertex grid at `n` segments a side, made once per size. */
+function seaGrid(st: Pick<Studio, 'seaGrids'>, n: number): THREE.BufferGeometry {
+  let g = st.seaGrids.get(n)
+  if (!g) {
+    // Wide enough that its edge always sits beyond the sky dome horizon (4500 from the camera);
+    // a 6000 plane left a visible chevron where the sea ran out during the overview.
+    g = new THREE.PlaneGeometry(16000, 16000, n, n)
+    g.rotateX(-Math.PI / 2) // local y becomes world up, which the wave shader displaces
+    st.seaGrids.set(n, g)
+  }
+  return g
+}
+
+/**
+ * Draw at another tier (pace.ts): the pixel ratio, the shadow map, the voxel normal tilt and the
+ * sea's grid. The shadow map is thrown away so the renderer makes it again at the new size.
+ */
+function setQuality(st: Studio, q: Quality): void {
+  if (st.quality === q) return
+  st.quality = q
+  const spec = QUALITY[q]
+  if (!st.software) {
+    st.renderer.setPixelRatio(pixelRatio(q, window.devicePixelRatio)) // re-sizes the buffer at the size it had
+    st.sun.shadow.mapSize.set(spec.shadow, spec.shadow)
+    st.sun.shadow.map?.dispose()
+    st.sun.shadow.map = null
+  }
+  setVoxBump(spec.bump)
+  st.water.geometry = seaGrid(st, spec.sea)
+}
 
 const basicCache = new Map<string, THREE.MeshBasicMaterial>()
 function flat(color: string | number): THREE.MeshBasicMaterial {
@@ -230,18 +306,19 @@ function createStudio(): Studio | null {
     console.error('[studio] WebGL context creation failed', err)
     return null
   }
-  const dpr = Math.min(window.devicePixelRatio || 1, 2)
-  renderer.setPixelRatio(dpr)
+  renderer.setPixelRatio(pixelRatio('full', window.devicePixelRatio))
   renderer.shadowMap.enabled = true
   renderer.shadowMap.type = THREE.PCFShadowMap
   renderer.toneMapping = THREE.ACESFilmicToneMapping
   renderer.toneMappingExposure = 1.35
   // software rasterisers (SwiftShader / llvmpipe) cannot afford shadows at full resolution
+  let software = false
   try {
     const gl = renderer.getContext()
     const dbg = gl.getExtension('WEBGL_debug_renderer_info')
     const gpu = String(gl.getParameter(dbg ? dbg.UNMASKED_RENDERER_WEBGL : gl.RENDERER) || '')
     if (/swiftshader|software|llvmpipe|basic render/i.test(gpu)) {
+      software = true
       renderer.shadowMap.enabled = false
       renderer.setPixelRatio(0.6)
     }
@@ -263,7 +340,7 @@ function createStudio(): Studio | null {
   scene.add(new THREE.HemisphereLight(0xd6e6f2, 0x7ab45c, 0.89))
   const sun = new THREE.DirectionalLight(0xffe7ae, 2.3)
   sun.castShadow = true
-  sun.shadow.mapSize.set(2048, 2048)
+  sun.shadow.mapSize.set(QUALITY.full.shadow, QUALITY.full.shadow)
   sun.shadow.camera.left = -1200
   sun.shadow.camera.right = 1200
   sun.shadow.camera.top = 1200
@@ -301,11 +378,8 @@ function createStudio(): Studio | null {
     }
   }
 
-  // Wide enough that its edge always sits beyond the sky dome horizon (4500 from the camera);
-  // a 6000 plane left a visible chevron where the sea ran out during the overview.
-  const waterGeo = new THREE.PlaneGeometry(16000, 16000, 224, 224)
-  waterGeo.rotateX(-Math.PI / 2) // local y becomes world up, which the wave shader displaces
-  const water = new THREE.Mesh(waterGeo, waterMaterial(uTime, new THREE.Color(FOG)))
+  const seaGrids = new Map<number, THREE.BufferGeometry>()
+  const water = new THREE.Mesh(seaGrid({ seaGrids }, QUALITY.full.sea), waterMaterial(uTime, new THREE.Color(FOG)))
   water.position.set(WORLD_W / 2, WATER_Y, WORLD_D / 2)
   water.renderOrder = -1
   scene.add(water)
@@ -341,6 +415,11 @@ function createStudio(): Studio | null {
     splashes: [],
     chunks,
     minimapUrl: minimapDataUrl(world),
+    sun,
+    water,
+    seaGrids,
+    quality: 'full',
+    software,
   }
 }
 
@@ -373,10 +452,12 @@ const NO_FX: FoldFx = foldAt(false)
 
 function startFoldRun(st: Studio, world: Scene, fx: FoldFx, handed: number | null): FoldRun {
   // A hamster in the hand or in the air goes back to its chair first: both stories pose every rig
-  // themselves, and a flight left mid-air would land in a room that is not there any more.
+  // themselves, and a flight left mid-air would land in a room that is not there any more. (One
+  // from the queue loses its walker instead, and is put back in its place on the next frame.)
   const reseat = (id: string): void => {
     const k = world.seats.get(id)
     if (k !== undefined) world.walkers.set(id, makeWalker(OFFICE.slots[k].seat))
+    else world.walkers.delete(id)
   }
   for (const f of world.flights) reseat(f.id)
   if (world.hold) reseat(world.hold.id)
@@ -415,10 +496,7 @@ function endFoldRun(st: Studio, run: FoldRun): void {
       dyn[key].updateMatrix()
     }
   })
-  for (const s of st.signs) {
-    s.mesh.position.y = s.spot.y
-    s.mesh.updateMatrix()
-  }
+  for (const s of st.signs) dropSign(s, 0)
   for (const { rig, main } of run.rigs.values()) {
     rig.group.scale.setScalar(main ? MAIN_SCALE : 1)
     rig.group.rotation.x = 0
@@ -437,10 +515,17 @@ function liftFixtures(st: Studio, build: number, blast: number): void {
       dyn[key].updateMatrix()
     }
   })
-  for (const s of st.signs) {
-    s.mesh.position.y = s.spot.y - foldLift(s.spot.x, s.spot.y, s.spot.z, build, blast)
-    s.mesh.updateMatrix()
-  }
+  // the prints through their own pose, which keeps whatever hover they are easing out of (signs.ts)
+  for (const s of st.signs) dropSign(s, foldLift(s.spot.x, s.spot.y, s.spot.z, build, blast))
+}
+
+/** Ease a rig's facing towards `yaw` the short way round: a hamster turns rather than snapping. */
+function turn(rs: RigState, yaw: number, dt: number): void {
+  let d = yaw - rs.yaw
+  while (d > Math.PI) d -= Math.PI * 2
+  while (d < -Math.PI) d += Math.PI * 2
+  rs.yaw += d * Math.min(1, dt * 8)
+  rs.rig.group.rotation.y = rs.yaw
 }
 
 /** Pose the rig for one frame. Rhythms are lifted from the game's cat animation. */
@@ -614,13 +699,89 @@ function poseRig(st: RigState, anim: IsoAnim, seated: boolean, t: number): void 
 /** the size the picture keeps while the pane slides (styles.css `.is-story .desk-canvas-host`); `w` null = the pane's own width */
 export interface KeepSize { w: number | null; h: number }
 
-export function DeskStudio({ session, height, fx = NO_FX, story = false, shut = false, keep }: { session: SessionState | null; height: number; fx?: FoldFx; story?: boolean; shut?: boolean; keep?: KeepSize }) {
+interface DeskStudioProps { session: SessionState | null; height: number; fx?: FoldFx; story?: boolean; shut?: boolean; keep?: KeepSize }
+
+// The pointer's ray, shared by every hit test (one at a time, all on the main thread).
+const raycaster = new THREE.Raycaster()
+const ndc = new THREE.Vector2()
+/** a rig's group → its hamster, filled afresh for each hit test rather than allocated for it */
+const owners = new Map<THREE.Object3D, string>()
+const ownerList: THREE.Object3D[] = []
+/** when the studio last looked for scenes whose session is gone (the render loop's clock) */
+let sweptAt = 0
+
+// Inline styles the render loop writes, as it last wrote them: most frames change nothing, and a
+// style write the browser has to look at costs more than the comparison that skips it.
+const written = new WeakMap<HTMLElement, Record<string, string>>()
+type Prop = 'display' | 'opacity' | 'visibility' | 'transform' | 'cursor' | 'width' | 'height'
+function put(el: HTMLElement, prop: Prop, value: string): void {
+  let w = written.get(el)
+  if (!w) {
+    w = {}
+    written.set(el, w)
+  }
+  if (w[prop] === value) return
+  w[prop] = value
+  el.style[prop] = value
+}
+function putText(el: HTMLElement, text: string): void {
+  if (el.textContent !== text) el.textContent = text
+}
+function putClass(el: HTMLElement, name: string): void {
+  if (el.className !== name) el.className = name
+}
+
+function DeskStudioView({ session, height, fx = NO_FX, story = false, shut = false, keep }: DeskStudioProps) {
   const u = useUi()
+  /** the hidden line that tells a screen reader (and `aria-describedby`) what the studio's keys do */
+  const keysId = useId()
   const wrapRef = useRef<HTMLDivElement>(null)
   const canvasHost = useRef<HTMLDivElement>(null)
   const feeds = useRef(new Map<string, HTMLDivElement>())
   const plates = useRef(new Map<string, HTMLDivElement>())
   const glyphs = useRef(new Map<string, HTMLDivElement>())
+  /** the line from a feed that had to move aside back to its hamster's head (declutter.ts) */
+  const tails = useRef(new Map<string, HTMLDivElement>())
+  /** where each feed was pushed last frame, so the next frame keeps pushing the same way */
+  const shifts = useRef(new Map<string, Shift>())
+  /**
+   * The feeds' and the card's sizes, as the browser last laid them out. The render loop needs them
+   * to keep the bubbles apart, and reading a size back right after writing positions would make the
+   * browser lay the page out again in the middle of every frame; a ResizeObserver hears of the
+   * changes after layout instead, which is also the only time they happen.
+   */
+  const sizes = useRef(new WeakMap<Element, { w: number; h: number }>())
+  const sizeObs = useRef<ResizeObserver | null>(null)
+  /** what the observer watches; the ones that have left the page are let go of every SWEEP_MS */
+  const observed = useRef(new Set<Element>())
+  const observe = (el: Element): void => {
+    if (observed.current.has(el)) return
+    sizeObs.current ??= new ResizeObserver((entries) => {
+      for (const e of entries) {
+        const box = e.borderBoxSize?.[0]
+        sizes.current.set(e.target, box ? { w: box.inlineSize, h: box.blockSize } : { w: e.contentRect.width, h: e.contentRect.height })
+      }
+    })
+    observed.current.add(el)
+    sizeObs.current.observe(el)
+  }
+  /** the card for the hamster under the pointer, or the one a tap pinned (DOM, placed by the render loop) */
+  const card = useRef<HTMLDivElement>(null)
+  /** the card's `12분 3초`, written by the render loop as the clock moves */
+  const cardSince = useRef<HTMLSpanElement>(null)
+  /** the camera's basis for this frame's projections (office-camera.ts `basisOf`) */
+  const frameBasis = useRef(makeBasis())
+  /** the pointer over the studio (client px) while it is not dragging anything; hit tested once a frame */
+  const pointer = useRef<{ x: number; y: number } | null>(null)
+  /** a drag, a hamster in the hand or a press on one is under way: nothing is hovered meanwhile */
+  const gesture = useRef(false)
+  /**
+   * The print the pointer was found over last. The render loop only tells the prints when that
+   * answer changes, so a print lit by something else — the capture script's `hoverSign` — stays lit.
+   */
+  const hotRef = useRef<HungSign | null>(null)
+  /** the last time the user worked the studio (pace.ts `INPUT_HOLD_MS`) */
+  const inputAt = useRef(0)
   const viewportPolygon = useRef<SVGPolygonElement>(null)
   /** the caption under a wall print while the pointer is over it */
   const signTip = useRef<HTMLDivElement>(null)
@@ -639,6 +800,14 @@ export function DeskStudio({ session, height, fx = NO_FX, story = false, shut = 
   const [showMap, setShowMap] = useState(false)
   const [dragging, setDragging] = useState(false)
   const [noGl, setNoGl] = useState(false)
+  // The card that says who a hamster is: for the one under the pointer, or — after a tap on it —
+  // pinned to that one until a tap elsewhere, Esc, or it leaves. The refs are the render loop's copy.
+  const [hoverId, setHoverId] = useState<string | null>(null)
+  const [pinned, setPinned] = useState<string | null>(null)
+  const hoverRef = useRef(hoverId)
+  hoverRef.current = hoverId
+  const pinnedRef = useRef(pinned)
+  pinnedRef.current = pinned
   // Automatic framing keeps every present hamster in view. Any manual gesture switches it off;
   // ⌂ switches it back on. The scene holds the truth (the render loop reads it); this state only
   // draws the button, and the preference remembers the answer across restarts.
@@ -648,7 +817,11 @@ export function DeskStudio({ session, height, fx = NO_FX, story = false, shut = 
     setAutoFrameState(on)
     if (useDesk.getState().prefs.autoCam !== on) useDesk.getState().setPrefs({ autoCam: on })
   }
-  const manual = (): void => { if (sceneFor().auto.on) setAuto(false) }
+  // (every manual gesture is the user at the studio: the frames after it are drawn at the full rate, pace.ts)
+  const manual = (): void => {
+    inputAt.current = performance.now()
+    if (sceneFor().auto.on) setAuto(false)
+  }
   /** DOM nodes the render loop has already hidden once, so a re-render does not blank them again */
   const primed = useRef(new WeakSet<HTMLElement>())
   const dismissFeedItem = useDesk((s) => s.dismissFeedItem)
@@ -690,22 +863,32 @@ export function DeskStudio({ session, height, fx = NO_FX, story = false, shut = 
     zoomShown.current = z
     setZoom(z)
   }
-  /** Look at one hamster's seat (the follow menu, double-click): a manual view. */
+  /** Look at one hamster (the follow menu, a double-click): its seat, or its place in the queue. A manual view. */
   const focus = (id = 'main'): void => {
     const s = sceneFor()
     const k = s.seats.get(id)
-    if (k === undefined && id !== 'main') return
+    const walker = s.walkers.get(id)
+    const at = k !== undefined ? OFFICE.slots[k].seat : walker ? { i: walker.i, j: walker.j } : id === 'main' ? OFFICE.slots[0].seat : null
+    if (!at) return
     manual()
-    const slot = OFFICE.slots[k ?? 0]
-    const w = tileToWorld(slot.seat.i, slot.seat.j)
-    focusCamera(s.camera, w, size.current.w, size.current.h)
+    focusCamera(s.camera, tileToWorld(at.i, at.j), size.current.w, size.current.h)
     setSelected(id)
     updateZoom()
+  }
+  /** A tap on a hamster: select it and pin its card — a second tap on the same one lets go. */
+  const tap = (id: string): void => {
+    setSelected(id)
+    setPinned((p) => (p === id ? null : id))
+  }
+  /** the user did something to the studio: draw at the full rate for a moment (pace.ts) */
+  const input = (): void => {
+    inputAt.current = performance.now()
   }
   /** ⌂: back to automatic framing. With only the main hamster present that is the 250% desk view. */
   const home = (): void => {
     const s = sceneFor()
     s.auto.target = null
+    inputAt.current = performance.now()
     setAuto(true)
     setSelected('main')
   }
@@ -724,13 +907,107 @@ export function DeskStudio({ session, height, fx = NO_FX, story = false, shut = 
     updateZoom()
   }
 
+  // ---- hit tests, for the pointer handlers and the render loop's hover ------------------------
+  // `x`/`y` are client pixels and `rect` the studio's box, read once by the caller.
+  const aim = (x: number, y: number, rect: DOMRect, st: Studio): void => {
+    ndc.set(((x - rect.left) / Math.max(1, rect.width)) * 2 - 1, 1 - ((y - rect.top) / Math.max(1, rect.height)) * 2)
+    raycaster.setFromCamera(ndc, st.camera)
+  }
+  /**
+   * The hamster under a point, if any: one of the rigs' meshes hit by the ray — not one already in
+   * the air, and not one walking out that the session has already let go of. Nothing while a fold
+   * story plays: the hamsters are being blown up or dropped in then, not for taking.
+   */
+  const hamsterUnder = (x: number, y: number, rect: DOMRect): string | null => {
+    const st = getStudio()
+    const here = sessionRef.current?.hamsters
+    if (!st || !here || fxOn.current) return null
+    const world = sceneFor()
+    owners.clear()
+    ownerList.length = 0
+    for (const [id, rs] of world.rigs) {
+      if (!rs.rig.group.visible || !here[id] || world.flights.some((f) => f.id === id)) continue
+      owners.set(rs.rig.group, id)
+      ownerList.push(rs.rig.group)
+    }
+    if (!ownerList.length) return null
+    aim(x, y, rect, st)
+    const hit = raycaster.intersectObjects(ownerList, true)[0]
+    let o: THREE.Object3D | null = hit ? hit.object : null
+    while (o && !owners.has(o)) o = o.parent
+    return o ? owners.get(o) ?? null : null
+  }
+  /**
+   * The wall print under a point, if any — a plane is one-sided, so nothing hits from behind the
+   * wall. A name plate over it wins: plates let the pointer through (so the canvas can be dragged
+   * across them), but a label on top of a print is what the eye is on.
+   */
+  const signUnder = (x: number, y: number, rect: DOMRect): HungSign | null => {
+    const st = getStudio()
+    if (!st || !st.signs.length || fxOn.current) return null
+    for (const plate of plates.current.values()) {
+      if (plate.style.display === 'none') continue
+      const r = plate.getBoundingClientRect()
+      if (x >= r.left && x <= r.right && y >= r.top && y <= r.bottom) return null
+    }
+    aim(x, y, rect, st)
+    const hit = raycaster.intersectObjects(st.signs.map((s) => s.mesh), false)[0]
+    return hit ? st.signs.find((s) => s.mesh === hit.object) ?? null : null
+  }
+
+  // The studio's keys, while it has the focus itself (Tab reaches it; a click does not take it
+  // from the terminal): arrows pan, + and − zoom, Home is ⌂, Esc lets go of a pinned card.
+  const onKey = (e: ReactKeyboardEvent<HTMLElement>): void => {
+    if (e.target !== e.currentTarget || e.ctrlKey || e.altKey || e.metaKey) return
+    const { w, h } = size.current
+    const step = PAN_STEP * (e.shiftKey ? 3 : 1)
+    const pan = (dx: number, dy: number): void => {
+      manual()
+      panCamera(sceneFor().camera, { x: w / 2, y: h / 2 }, { x: w / 2 - dx, y: h / 2 - dy }, w, h)
+    }
+    switch (e.key) {
+      case 'ArrowLeft': pan(-step, 0); break
+      case 'ArrowRight': pan(step, 0); break
+      case 'ArrowUp': pan(0, -step); break
+      case 'ArrowDown': pan(0, step); break
+      case '+':
+      case '=': zoomBy(1.25); break
+      case '-':
+      case '_': zoomBy(0.8); break
+      case 'Home': home(); break
+      case 'Escape':
+        if (!pinnedRef.current) return
+        setPinned(null)
+        break
+      default: return
+    }
+    input()
+    e.preventDefault()
+  }
+
   useEffect(() => {
     setSelected('main')
+    setPinned(null)
+    setHoverId(null)
     // a session's scene keeps its own camera and framing mode; a fresh one starts automatic
     setAutoFrameState(sceneFor().auto.on)
     updateZoom()
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [session?.info.sessionId])
+
+  // The print's caption and the canvas's label are the two strings the studio paints outside React:
+  // put them into the language the UI is in, on mount and whenever it changes.
+  useEffect(() => {
+    repaintSigns()
+    getStudio()?.renderer.domElement.setAttribute('aria-label', u.studio.canvasLabel(OFFICE.slots.length))
+  }, [u])
+
+  // the observer that measures the feeds and the card goes with the component
+  useEffect(() => () => {
+    sizeObs.current?.disconnect()
+    sizeObs.current = null
+    observed.current.clear()
+  }, [])
 
   // A row of the speech-bubble log was clicked: look at whoever said it. Same shape as the
   // terminal's focus request — a stamped request in the store, acted on by whoever can.
@@ -801,6 +1078,10 @@ export function DeskStudio({ session, height, fx = NO_FX, story = false, shut = 
       hoverSign(index) {
         const st = getStudio()
         if (st) setSignHot(st.signs, index === null ? null : st.signs[index] ?? null)
+      },
+      pin(id) {
+        if (id) setSelected(id)
+        setPinned(id)
       },
       fold() {
         const now = fxRef.current
@@ -874,91 +1155,90 @@ export function DeskStudio({ session, height, fx = NO_FX, story = false, shut = 
     // A hamster in the hand (grab.ts): which pointer holds it, and the scene it belongs to — a tab
     // switch mid-drag must let go of the one that was picked up, not of the new scene's nothing.
     let grabbing: { pointer: number; scene: Scene } | null = null
-    const raycaster = new THREE.Raycaster()
+    // The left button on a hamster is a question until the pointer moves or time passes: let go
+    // within TAP_PX and TAP_MS and it was a tap (select it, pin its card); move further, or hold
+    // still longer, and it picks the hamster up. `hand` is where the hand met it on the carrying
+    // plane, so the lift keeps the offset the press had rather than jumping into the hand.
+    let pending: { pointer: number; id: string; scene: Scene; hand: { x: number; z: number }; x0: number; y0: number; t0: number; timer: number } | null = null
     const overUi = (e: Event): boolean => !!(e.target as HTMLElement).closest('[data-office-ui]')
-    const aim = (e: { clientX: number; clientY: number }, st: Studio): void => {
+    const client = (e: { clientX: number; clientY: number }): { x: number; y: number } => {
       const rect = el.getBoundingClientRect()
-      const nx = ((e.clientX - rect.left) / Math.max(1, rect.width)) * 2 - 1
-      const ny = 1 - ((e.clientY - rect.top) / Math.max(1, rect.height)) * 2
-      raycaster.setFromCamera(new THREE.Vector2(nx, ny), st.camera)
+      return { x: e.clientX - rect.left, y: e.clientY - rect.top }
     }
-    /** the hamster under the pointer, if any: one of the rigs' meshes hit by the ray, and not one already in the air */
-    const hamsterUnder = (e: { clientX: number; clientY: number }): string | null => {
+    /** where the pointer is on the plane the hand carries at — the scruff of a hamster hanging at LIFT — seen by `sc`'s camera */
+    const handAt = (e: { clientX: number; clientY: number }, sc: Scene): { x: number; z: number } | null => {
+      const p = client(e)
+      return planeHit(sc.camera, p.x, p.y, size.current.w, size.current.h, H_OFFICE + LIFT + SCRUFF)
+    }
+    /** nothing is under the pointer any more, as far as the prints, the cursor and the card go */
+    const unhover = (): void => {
+      pointer.current = null
+      hotRef.current = null
       const st = getStudio()
-      // while a fold story plays the hamsters are being blown up or dropped in: not for taking
-      if (!st || fxOn.current) return null
-      const world = sceneFor()
-      const owners = new Map<THREE.Object3D, string>()
-      for (const [id, rs] of world.rigs) if (rs.rig.group.visible && !world.flights.some((f) => f.id === id)) owners.set(rs.rig.group, id)
-      if (!owners.size) return null
-      aim(e, st)
-      const hit = raycaster.intersectObjects([...owners.keys()], true)[0]
-      let o: THREE.Object3D | null = hit ? hit.object : null
-      while (o && !owners.has(o)) o = o.parent
-      return o ? owners.get(o) ?? null : null
+      if (st) setSignHot(st.signs, null)
     }
-    /** where the pointer is on the plane the hand carries at: the scruff of a hamster hanging at LIFT */
-    const handAt = (e: { clientX: number; clientY: number }): { x: number; z: number } | null => {
-      const rect = el.getBoundingClientRect()
-      return planeHit(sceneFor().camera, e.clientX - rect.left, e.clientY - rect.top, size.current.w, size.current.h, H_OFFICE + LIFT + SCRUFF)
-    }
-    /**
-     * The wall print under the pointer, if any — a plane is one-sided, so nothing hits from
-     * behind the wall. A name plate over it wins: plates let the pointer through (so the canvas
-     * can be dragged across them), but a label on top of a print is what the eye is on.
-     */
-    const signUnder = (e: { clientX: number; clientY: number }): HungSign | null => {
-      const st = getStudio()
-      if (!st || !st.signs.length || fxOn.current) return null
-      for (const plate of plates.current.values()) {
-        if (plate.style.display === 'none') continue
-        const r = plate.getBoundingClientRect()
-        if (e.clientX >= r.left && e.clientX <= r.right && e.clientY >= r.top && e.clientY <= r.bottom) return null
+    const lift = (p: NonNullable<typeof pending>, e: { clientX: number; clientY: number } | null): void => {
+      window.clearTimeout(p.timer)
+      pending = null
+      const rs = p.scene.rigs.get(p.id)
+      // gone meanwhile, or a fold story began: nothing to pick up
+      if (!rs || fxOn.current) {
+        gesture.current = false
+        return
       }
-      const rect = el.getBoundingClientRect()
-      const nx = ((e.clientX - rect.left) / Math.max(1, rect.width)) * 2 - 1
-      const ny = 1 - ((e.clientY - rect.top) / Math.max(1, rect.height)) * 2
-      raycaster.setFromCamera(new THREE.Vector2(nx, ny), st.camera)
-      const hit = raycaster.intersectObjects(st.signs.map((s) => s.mesh), false)[0]
-      return hit ? st.signs.find((s) => s.mesh === hit.object) ?? null : null
+      const at = rs.rig.group.position
+      p.scene.hold = grab(p.id, { x: at.x, y: at.y, z: at.z }, p.hand, p.t0)
+      if (e) carry(p.scene.hold, handAt(e, p.scene), performance.now())
+      const walker = p.scene.walkers.get(p.id)
+      if (walker) {
+        walker.path = []
+        walker.moving = false
+      }
+      // the boss lifted off its rounds is not on them any more
+      if (p.id === 'main') p.scene.patrol = makePatrol()
+      grabbing = { pointer: p.pointer, scene: p.scene }
+      setDragging(true)
     }
-    /** the print the pointer is over now (none while dragging: the lift must not fight the pan) */
-    const hover = (sign: HungSign | null): void => {
-      const st = getStudio()
-      if (st) setSignHot(st.signs, sign)
-    }
+    // A wheel is a zoom, as it always was — but a trackpad has no middle button to pan with, so its
+    // gestures get their own meanings: a pinch (which the browser reports as a wheel with Ctrl held)
+    // zooms in fine steps, and a two-finger swipe with any sideways part — or any wheel with Shift —
+    // pans the view, the way a page scrolls.
     const wheel = (e: WheelEvent): void => {
-      if ((e.target as HTMLElement).closest('[data-office-ui]')) return
+      if (overUi(e)) return
       e.preventDefault()
-      const rect = el.getBoundingClientRect()
+      const p = client(e)
       const c = sceneFor().camera
+      const { w, h } = size.current
+      const unit = e.deltaMode === 1 ? 16 : e.deltaMode === 2 ? h : 1
       manual()
-      zoomCamera(c, c.scale * Math.exp(-e.deltaY * 0.0015), e.clientX - rect.left, e.clientY - rect.top, size.current.w, size.current.h)
+      if (e.ctrlKey) zoomCamera(c, c.scale * Math.exp(-e.deltaY * unit * 0.01), p.x, p.y, w, h)
+      else if (e.shiftKey || e.deltaX !== 0) {
+        const sideways = e.shiftKey && e.deltaX === 0
+        const dx = (sideways ? e.deltaY : e.deltaX) * unit
+        const dy = (sideways ? 0 : e.deltaY) * unit
+        panCamera(c, { x: w / 2, y: h / 2 }, { x: w / 2 - dx, y: h / 2 - dy }, w, h)
+      } else zoomCamera(c, c.scale * Math.exp(-e.deltaY * unit * 0.0015), p.x, p.y, w, h)
       updateZoom()
     }
     const down = (e: PointerEvent): void => {
-      if (overUi(e) || grabbing) return
+      if (overUi(e) || grabbing || pending) return
+      input()
       if (e.button === 0) {
-        // the left button on a hamster picks it up (grab.ts); on anything else it is a press that
-        // may turn out to be a click on a print — it never pans
-        const id = hamsterUnder(e)
+        // the left button on a hamster is a tap or a pick-up (above); on anything else it is a
+        // press that may turn out to be a click on a print — it never pans
         const world = sceneFor()
-        const rs = id ? world.rigs.get(id) : undefined
-        const hand = id ? handAt(e) : null
-        if (id && rs && hand) {
-          const p = rs.rig.group.position
-          world.hold = grab(id, { x: p.x, y: p.y, z: p.z }, hand, performance.now())
-          const walker = world.walkers.get(id)
-          if (walker) {
-            walker.path = []
-            walker.moving = false
-          }
-          // the boss lifted off its rounds is not on them any more
-          if (id === 'main') world.patrol = makePatrol()
-          grabbing = { pointer: e.pointerId, scene: world }
-          hover(null)
+        const id = hamsterUnder(e.clientX, e.clientY, el.getBoundingClientRect())
+        const hand = id ? handAt(e, world) : null
+        if (id && hand && world.rigs.has(id)) {
+          const p = { pointer: e.pointerId, id, scene: world, hand, x0: e.clientX, y0: e.clientY, t0: performance.now(), timer: 0 }
+          // held still that long, a press is a pick-up too: no need to wiggle the pointer first
+          p.timer = window.setTimeout(() => {
+            if (pending === p) lift(p, null)
+          }, TAP_MS)
+          pending = p
+          gesture.current = true
+          unhover()
           el.setPointerCapture(e.pointerId)
-          setDragging(true)
           return
         }
         press = { id: e.pointerId, x0: e.clientX, y0: e.clientY }
@@ -969,26 +1249,33 @@ export function DeskStudio({ session, height, fx = NO_FX, story = false, shut = 
       // cancelling this pointerdown instead would suppress that mouse event and leave the autoscroll
       // on, eating every move of the drag)
       drag = { id: e.pointerId, x: e.clientX, y: e.clientY, orbit: e.button === 2 }
-      el.style.cursor = '' // the class's grabbing cursor takes over for the drag
-      hover(null)
+      gesture.current = true
+      put(el, 'cursor', '') // the class's grabbing cursor takes over for the drag
+      unhover()
       el.setPointerCapture(e.pointerId)
       setDragging(true)
     }
     const move = (e: PointerEvent): void => {
+      if (pending) {
+        if (e.pointerId === pending.pointer && Math.hypot(e.clientX - pending.x0, e.clientY - pending.y0) >= TAP_PX) lift(pending, e)
+        return
+      }
       if (grabbing) {
-        if (e.pointerId === grabbing.pointer && grabbing.scene.hold) carry(grabbing.scene.hold, handAt(e), performance.now())
+        input()
+        if (e.pointerId === grabbing.pointer && grabbing.scene.hold) carry(grabbing.scene.hold, handAt(e, grabbing.scene), performance.now())
         return
       }
       if (!drag) {
-        // The prints on the walls are links: the cursor says so, and the print itself answers
-        // like a button — lifted, lit, captioned (signs.ts) — for as long as the pointer stays.
-        // Over a hamster the cursor is the hand that can pick it up.
-        const sign = overUi(e) ? null : signUnder(e)
-        el.style.cursor = sign ? 'pointer' : !overUi(e) && hamsterUnder(e) ? 'grab' : ''
-        hover(sign)
+        // What is under the pointer — a print (a link: lifted, lit, captioned, signs.ts), a
+        // hamster (the hand that can pick it up, and its card), or nothing — is worked out by the
+        // render loop, once a frame: a mouse reports far more often than the screen draws, and it
+        // changes under a still pointer too, as the camera eases and the hamsters walk.
+        pointer.current = overUi(e) ? null : { x: e.clientX, y: e.clientY }
+        input()
         return
       }
       if (e.pointerId !== drag.id) return
+      input()
       const rect = el.getBoundingClientRect()
       const c = sceneFor().camera
       if (e.clientX !== drag.x || e.clientY !== drag.y) manual()
@@ -1000,10 +1287,21 @@ export function DeskStudio({ session, height, fx = NO_FX, story = false, shut = 
       drag.y = e.clientY
     }
     const up = (e: PointerEvent): void => {
+      if (pending) {
+        if (e.pointerId !== pending.pointer) return
+        const p = pending
+        window.clearTimeout(p.timer)
+        pending = null
+        gesture.current = false
+        if (el.hasPointerCapture(e.pointerId)) el.releasePointerCapture(e.pointerId)
+        if (e.type === 'pointerup') tap(p.id)
+        return
+      }
       if (grabbing) {
         if (e.pointerId !== grabbing.pointer) return
         const sc = grabbing.scene
         grabbing = null
+        gesture.current = false
         setDragging(false)
         // let go: a drop or a throw, from wherever the hand is — grab.ts decides which
         if (sc.hold) {
@@ -1018,29 +1316,43 @@ export function DeskStudio({ session, height, fx = NO_FX, story = false, shut = 
         press = null
         // A left click that did not move, on the print: open its site. `window.open` is how every
         // external link leaves the app — electron/main.ts hands it to the default browser through
-        // setWindowOpenHandler, so this needs no bridge of its own.
-        if (e.type === 'pointerup' && e.button === 0 && Math.hypot(e.clientX - p.x0, e.clientY - p.y0) < 4) {
-          const sign = signUnder(e)
+        // setWindowOpenHandler, so this needs no bridge of its own. On nothing at all, it lets go
+        // of a pinned card, the way a click beside a popover closes it.
+        if (e.type === 'pointerup' && e.button === 0 && Math.hypot(e.clientX - p.x0, e.clientY - p.y0) < TAP_PX) {
+          const sign = signUnder(e.clientX, e.clientY, el.getBoundingClientRect())
           if (sign) window.open(sign.url, '_blank', 'noopener')
+          else setPinned(null)
         }
         return
       }
       if (!drag) return
       drag = null
+      gesture.current = false
       setDragging(false)
     }
+    // A double-click on a hamster looks at it (as the follow menu does), with its card pinned — its
+    // two clicks were two taps, which pinned the card and let it go again; on the floor, at the boss.
     const dbl = (e: MouseEvent): void => {
-      if (!overUi(e) && !signUnder(e) && !hamsterUnder(e)) focus()
+      if (overUi(e)) return
+      const rect = el.getBoundingClientRect()
+      const id = hamsterUnder(e.clientX, e.clientY, rect)
+      if (id) {
+        focus(id)
+        setPinned(id)
+      } else if (!signUnder(e.clientX, e.clientY, rect)) focus()
     }
     const leave = (): void => {
-      el.style.cursor = ''
-      hover(null)
+      put(el, 'cursor', '')
+      unhover()
     }
     const menu = (e: Event): void => e.preventDefault()
-    // The middle button pans, so its own meaning — Chromium's autoscroll, a default action of the
-    // mouse events, not the pointer ones — is cancelled here, on mousedown and on the auxclick after.
+    // A press on the studio itself keeps the focus where it was — in the terminal, as a rule, so a
+    // click on a hamster does not leave the next keystroke with nowhere to go (the studio is still
+    // reached with Tab, for its keys). The middle button pans, so its own meaning, Chromium's
+    // autoscroll, goes too — a default action of the mouse events, not the pointer ones, which is
+    // why this is on mousedown and on the auxclick after.
     const aux = (e: MouseEvent): void => {
-      if (e.button === 1) e.preventDefault()
+      if (e.type === 'mousedown' ? !overUi(e) : e.button === 1) e.preventDefault()
     }
     el.addEventListener('wheel', wheel, { passive: false })
     el.addEventListener('pointerdown', down)
@@ -1067,6 +1379,8 @@ export function DeskStudio({ session, height, fx = NO_FX, story = false, shut = 
       el.removeEventListener('mousedown', aux)
       el.removeEventListener('auxclick', aux)
       leave()
+      if (pending) window.clearTimeout(pending.timer)
+      gesture.current = false
       // unmounted mid-drag (the desk folded away): let go, or the hamster hangs in the air for good
       if (grabbing?.scene.hold) {
         grabbing.scene.flights.push(release(grabbing.scene.hold, performance.now()))
@@ -1075,10 +1389,21 @@ export function DeskStudio({ session, height, fx = NO_FX, story = false, shut = 
     }
   }, [])
 
-  const renderRef = useRef<(t: number, dt: number) => void>(() => {})
+  /** set by every render of the component: the next frame is drawn whatever the pace says (the store changed, or a button did something) */
+  const dirty = useRef(true)
+  dirty.current = true
+  /** the minimap's viewport outline as last written */
+  const polygonDrawn = useRef('')
+
+  /**
+   * One frame. Returns whether anything on screen moved the way the eye follows — somebody
+   * walking, a hamster in the hand or the air, a story, a print easing, the camera still on its way
+   * — which is what earns the next frames the full rate (pace.ts).
+   */
+  const renderRef = useRef<(t: number, dt: number) => boolean>(() => false)
   renderRef.current = (t, dt) => {
     const st = getStudio()
-    if (!st) return
+    if (!st) return false
     const { w: W, h: H } = size.current
     const s = sessionRef.current
     const key = s?.info.sessionId ?? 'empty'
@@ -1089,6 +1414,32 @@ export function DeskStudio({ session, height, fx = NO_FX, story = false, shut = 
     world.width = W
     world.height = H
     st.uTime.value += dt
+    let lively = false
+
+    // ---- what the pointer is over --------------------------------------------------------------
+    // Hit tested here, once a frame and before this frame writes anything to the DOM (the plates'
+    // boxes are read): a print is a link — the cursor says so and the print answers like a button
+    // (signs.ts) — and a hamster is something the hand can take, with a card that says who it is.
+    {
+      const at = pointer.current
+      const el = wrapRef.current
+      let sign: HungSign | null = null
+      let over: string | null = null
+      if (at && el && !gesture.current) {
+        const rect = el.getBoundingClientRect()
+        sign = signUnder(at.x, at.y, rect)
+        over = sign ? null : hamsterUnder(at.x, at.y, rect)
+      }
+      if (el && !gesture.current) put(el, 'cursor', sign ? 'pointer' : over ? 'grab' : '')
+      if (sign !== hotRef.current) {
+        hotRef.current = sign
+        setSignHot(st.signs, sign)
+      }
+      if (over !== hoverRef.current) {
+        hoverRef.current = over
+        setHoverId(over)
+      }
+    }
 
     // ---- the fold stories (fold.ts): start, end or cut whichever App.tsx's clock says ----------
     // A story that is over, or replaced by the other one (an unfold in the middle of the blast),
@@ -1105,6 +1456,7 @@ export function DeskStudio({ session, height, fx = NO_FX, story = false, shut = 
     if (!run && foldPlaying(fx)) run = foldRun.current = startFoldRun(st, world, fx, handed)
     const ft = run ? foldAge(fx, t) : 0
     fxOn.current = !!run
+    if (run) lively = true
     /** height of the ground at a world point, or null over the sea — what a thrown hamster and the blast's dust land on */
     const groundAt: GroundAt = (x, z) => {
       const tx = Math.floor(x / T)
@@ -1123,10 +1475,18 @@ export function DeskStudio({ session, height, fx = NO_FX, story = false, shut = 
     const hams = s ? s.order.map((id) => s.hamsters[id]).filter(Boolean) : []
     reconcileSeats(world.seats, hams.map((h) => h.id))
     const bySeat = new Map<number, Hamster>()
-    hams.forEach((h) => {
+    // Where everybody belongs: its seat, or — past the twelfth colleague — its place in the queue by
+    // the door (office-world.ts `LOBBY`), in the order the session lists them, which is the order
+    // `reconcileSeats` hands the next free desk out in: the head of the queue is always next.
+    const places = new Map<string, Point>()
+    let queued = 0
+    for (const h of hams) {
       const k = world.seats.get(h.id)
-      if (k !== undefined) bySeat.set(k, h)
-    })
+      if (k !== undefined) {
+        bySeat.set(k, h)
+        places.set(h.id, OFFICE.slots[k].seat)
+      } else if (queued < LOBBY.length) places.set(h.id, LOBBY[queued++])
+    }
 
     // ---- desks: screen colour, blinking keys, status lamp, and the glow they spill -----------
     st.world.deskParts.forEach((parts, k) => {
@@ -1154,6 +1514,29 @@ export function DeskStudio({ session, height, fx = NO_FX, story = false, shut = 
     }
     for (const [gk, gv] of st.sessionGroups) gv.visible = gk === key
 
+    // A scene outlives its session only until the studio notices: the store drops a session when
+    // its claude exits (or on /clear), and every scene kept its camera, its walkers and a group of
+    // invisible rigs in the three scene for good. Looked for every SWEEP_MS, not every frame.
+    if (t - sweptAt > SWEEP_MS) {
+      sweptAt = t
+      // (and the feeds that are gone from the page no longer need measuring)
+      for (const el of observed.current) {
+        if (el.isConnected) continue
+        sizeObs.current?.unobserve(el)
+        observed.current.delete(el)
+      }
+      const live = useDesk.getState().sessions
+      for (const k of [...scenes.keys()]) {
+        if (k === key || k === 'empty' || live[k]) continue
+        scenes.delete(k)
+        const g = st.sessionGroups.get(k)
+        if (g) {
+          st.scene.remove(g)
+          st.sessionGroups.delete(k)
+        }
+      }
+    }
+
     // ---- the hamster in the hand, and the ones in the air (grab.ts) -------------------------
     // A held one eases up to carrying height; a thrown one flies until it lands (and walks home
     // from there) or hits the water (a splash, a short sink, and a newcomer at the door). Both
@@ -1171,18 +1554,20 @@ export function DeskStudio({ session, height, fx = NO_FX, story = false, shut = 
           st.scene.add(splash.group)
           st.splashes.push(splash)
         } else if (ev === 'landed') {
-          // on its feet: from here it walks back to its desk (out of the furniture, if it fell on some)
+          // On its feet: from here it walks back to its place, out of the furniture first if it
+          // fell on some — by the lanes, or round the building, but never by `walkTo`, whose
+          // corridor legs would start right where it stands and cut through a desk or a wall.
           const walker = world.walkers.get(f.id)
-          const k = world.seats.get(f.id)
-          if (walker && k !== undefined) {
+          const home = places.get(f.id)
+          if (walker && home) {
             const spot = landingSpot(worldToTile(f))
             walker.i = spot.i
             walker.j = spot.j
             walker.moving = false
-            const seat = OFFICE.slots[k].seat
-            walker.target = { ...seat }
-            walker.path = returnPath(spot, seat)
-          }
+            walker.target = { ...home }
+            walker.path = returnPath(spot, home)
+            walker.free = true
+          } else world.walkers.delete(f.id) // it has no place on the floor any more: put back where it belongs next frame
           return false
         } else if (ev === 'gone') {
           // in the sea: a different hamster (vox/hamster.ts `variant`) walks in through the door
@@ -1201,8 +1586,10 @@ export function DeskStudio({ session, height, fx = NO_FX, story = false, shut = 
     /** hamsters not on the floor this frame: in the hand or in the air */
     const carried = new Set<string>(world.flights.map((f) => f.id))
     if (world.hold) carried.add(world.hold.id)
+    if (carried.size) lively = true
     for (let k = st.splashes.length - 1; k >= 0; k--) {
       const sp = st.splashes[k]
+      lively = true
       if (tickSplash(sp, dt)) continue
       st.scene.remove(sp.group)
       disposeSplash(sp)
@@ -1225,7 +1612,8 @@ export function DeskStudio({ session, height, fx = NO_FX, story = false, shut = 
           if (h.id === 'main' || !WORKING.has(h.state) || carried.has(h.id)) continue
           const k = world.seats.get(h.id)
           const w = world.walkers.get(h.id)
-          if (k !== undefined && w && w.path.length === 0) workers.push({ id: h.id, seat: OFFICE.slots[k].seat })
+          // seated means on the chair — not merely standing still (a newcomer at the door has no path yet either)
+          if (k !== undefined && w && near(w, OFFICE.slots[k].seat)) workers.push({ id: h.id, seat: OFFICE.slots[k].seat })
         }
         let said = ''
         for (let k = boss.feed.length - 1; k >= 0; k--) if (boss.feed[k].kind === 'say') { said = boss.feed[k].id; break }
@@ -1236,47 +1624,71 @@ export function DeskStudio({ session, height, fx = NO_FX, story = false, shut = 
     }
     const patrol = world.patrol
 
+    // every projection of this frame goes through one basis of the camera as it stands now
+    const basis = basisOf(c, frameBasis.current)
+    const scale = c.scale
+    /** the feeds on screen this frame, for the declutter pass after the loop */
+    const boxes: FeedBox[] = []
     const seen = new Set<string>()
+    const unseen = new Set<string>()
     hams.forEach((h) => {
       seen.add(h.id)
       const index = world.seats.get(h.id)
       const plate = plates.current.get(h.id)
       const feed = feeds.current.get(h.id)
       const glyph = glyphs.current.get(h.id)
-      if (index === undefined) {
+      const home = places.get(h.id)
+      if (!home) {
+        // neither a desk nor a place in the queue: waiting out of sight until one opens up, when
+        // it walks in through the door (`unseen`)
+        unseen.add(h.id)
         const idle = world.rigs.get(h.id)
         if (idle) idle.rig.group.visible = false
-        if (plate) plate.style.display = 'none'
+        world.walkers.delete(h.id)
+        if (plate) put(plate, 'display', 'none')
         if (feed) {
-          feed.style.opacity = '0'
-          feed.style.visibility = 'hidden'
+          put(feed, 'opacity', '0')
+          put(feed, 'visibility', 'hidden')
         }
-        if (glyph) glyph.style.display = 'none'
+        if (glyph) put(glyph, 'display', 'none')
         return
       }
-      const slot = OFFICE.slots[index]
+      const slot = index !== undefined ? OFFICE.slots[index] : null
       let walker = world.walkers.get(h.id)
       if (!walker) {
-        walker = makeWalker(h.state === 'arriving' ? OFFICE.door : slot.seat)
+        // a newcomer walks in at the door, and so does one whose place in the queue has just come
+        // into view; one that is already here when the studio opens (a remount, a tab switch) is
+        // simply in its place
+        walker = makeWalker(h.state === 'arriving' || world.unseen.has(h.id) ? OFFICE.door : home)
         world.walkers.set(h.id, walker)
       }
       const held = world.hold?.id === h.id ? world.hold : null
       const flight = held ? null : world.flights.find((f) => f.id === h.id) ?? null
       const inHand = !!(held || flight)
       // The boss may be out on its rounds, and for those it takes the direct lanes rather than
-      // the door corridor; everybody else only ever walks the corridor to a seat or the door.
-      // In the hand or in the air it walks nowhere: the walker waits where it was picked up until
-      // it lands, and the landing sets it down and gives it the way home (above). A fold story
-      // freezes every walker where it is, and they carry on from there when it is over.
+      // the door corridor; everybody else only ever walks the corridor to a seat, a place in the
+      // queue or the door — unless a throw left it off the corridor (`Walker.free`), when the lanes
+      // or the way round the building take it home. In the hand or in the air it walks nowhere:
+      // the walker waits where it was picked up until it lands, and the landing sets it down and
+      // gives it the way home (above). A fold story freezes every walker where it is, and they
+      // carry on from there when it is over.
       if (!inHand && !run) {
-        if (h.id === 'main' && patrol.phase !== 'idle') walkDirect(walker, patrolGoal(patrol) ?? slot.seat)
-        else walkTo(walker, h.state === 'leaving' ? OFFICE.door : slot.seat)
+        const goal = h.state === 'leaving' ? OFFICE.door : home
+        if (h.id === 'main' && patrol.phase !== 'idle') walkDirect(walker, patrolGoal(patrol) ?? home)
+        else if (walker.free) {
+          if (!near(walker.target, goal)) {
+            walker.target = { ...goal }
+            walker.path = returnPath(walker, goal)
+          }
+        } else walkTo(walker, goal)
         advanceWalker(walker, dt)
+        if (walker.free && !walker.path.length) walker.free = false // home: back on the corridor's network
+        if (walker.moving) lively = true
       }
 
       const skin = modelSkin(h.model)
       const variant = world.variants.get(h.id) ?? 0
-      const rigKey = `${skin.family}|${skin.accessory}|${tintFor(h.agentType)}|${h.id === 'main'}|${variant}`
+      const rigKey = `${skin.family}|${skin.accessory}|${tintFor(h.agentType)}|${h.id === 'main'}|${coatOf(variant)}`
       let rs = world.rigs.get(h.id)
       if (!rs || rs.key !== rigKey) {
         if (rs) group!.remove(rs.rig.group)
@@ -1288,13 +1700,15 @@ export function DeskStudio({ session, height, fx = NO_FX, story = false, shut = 
       rs.rig.group.visible = true
 
       // Arriving/leaving are lifecycle states. Only an actual path plays the walk cycle. The boss
-      // on its rounds is out of its chair until it is back at the desk.
+      // on its rounds is out of its chair until it is back at the desk; one in the queue stands.
       const away = h.id === 'main' && bossAway(patrol, walker)
-      const seated = !inHand && !walker.path.length && h.state !== 'leaving' && !away
+      const seated = !!slot && !inHand && !walker.path.length && h.state !== 'leaving' && !away
       // the two halves of a telling-off override whatever the states would otherwise play
       const part: IsoAnim | null =
         h.id === 'main' ? (patrol.phase === 'scolding' ? 'scold' : null) : patrol.phase === 'scolding' && patrol.target === h.id ? 'flinch' : null
-      const anim: IsoAnim = inHand ? 'struggle' : walker.moving ? 'walk' : part ?? (['arriving', 'leaving'].includes(h.state) ? 'idle' : animFor(h.state, Date.now() - h.since))
+      // standing in the queue there is no desk to work at: it waits, and waves if it needs the user
+      const standing: IsoAnim = h.state === 'waiting' ? 'wave' : 'idle'
+      const anim: IsoAnim = inHand ? 'struggle' : walker.moving ? 'walk' : part ?? (['arriving', 'leaving'].includes(h.state) ? 'idle' : slot ? animFor(h.state, Date.now() - h.since) : standing)
       const lifted = held ?? flight
       const pos = lifted ? { x: lifted.x, z: lifted.z } : tileToWorld(walker.i, walker.j)
       // Sitting lays the folded legs (8.4 thick, pinned at rig y 4) across the chair seat and
@@ -1314,11 +1728,7 @@ export function DeskStudio({ session, height, fx = NO_FX, story = false, shut = 
         : walker.moving && next
         ? Math.atan2(next.i - walker.i, next.j - walker.j)
         : victim ? Math.atan2(victim.i - walker.i, victim.j - walker.j) : 0
-      let d = targetYaw - rs.yaw
-      while (d > Math.PI) d -= Math.PI * 2
-      while (d < -Math.PI) d += Math.PI * 2
-      rs.yaw += d * Math.min(1, dt * 8)
-      rs.rig.group.rotation.y = rs.yaw
+      turn(rs, targetYaw, dt)
       // dangling from the hand it swings a little; thrown hard it cartwheels the way it is going
       // (the roll is about its own forward axis, which points at the camera); otherwise upright
       const side = flight ? flight.vx * Math.cos(rs.yaw) - flight.vz * Math.sin(rs.yaw) : 0
@@ -1370,20 +1780,22 @@ export function DeskStudio({ session, height, fx = NO_FX, story = false, shut = 
       }
 
       // ---- DOM overlays ---------------------------------------------------------------------
-      const scale = c.scale
       const headTop = groundY + (rs.rig.headG.position.y + FEED_ANCHOR) * scaleF
-      const deskCentre = tileToWorld(slot.i + 0.5, slot.j)
-      const plateWorld = seated
+      const deskCentre = slot ? tileToWorld(slot.i + 0.5, slot.j) : null
+      const plateWorld = seated && deskCentre
         ? { x: deskCentre.x, y: H_OFFICE + 42, z: deskCentre.z + 26 }
         : { x: pos.x, y: groundY + 4, z: pos.z }
+      let plateShown = false
       if (plate) {
-        const p = worldToScreen(c, plateWorld, W, H)
-        const show = !hideUi && scale >= PLATE_MIN_SCALE && !p.behind && p.x > -60 && p.x < W + 60 && p.y > -20 && p.y < H + 20
-        plate.style.display = show ? '' : 'none'
+        const p = worldToScreen(c, plateWorld, W, H, basis)
+        // The queue stands too close together for a plate each — they would lie on top of one
+        // another; a queued hamster's feed says its name instead (`is-named` below), and its card.
+        plateShown = !hideUi && !!slot && scale >= PLATE_MIN_SCALE && !p.behind && p.x > -60 && p.x < W + 60 && p.y > -20 && p.y < H + 20
+        put(plate, 'display', plateShown ? '' : 'none')
         // The boss on its rounds ends up standing just behind and beside a colleague, and a plate
         // centred under its feet lands squarely on that colleague's head — the one thing the
         // telling-off is about. Out of its chair the plate hangs off to the far side instead.
-        if (show) plate.style.transform = away ? `translate(${Math.round(p.x - 6)}px, ${Math.round(p.y)}px) translate(-100%, 0)` : `translate(${Math.round(p.x)}px, ${Math.round(p.y)}px) translate(-50%, 0)`
+        if (plateShown) put(plate, 'transform', away ? `translate(${Math.round(p.x - 6)}px, ${Math.round(p.y)}px) translate(-100%, 0)` : `translate(${Math.round(p.x)}px, ${Math.round(p.y)}px) translate(-50%, 0)`)
       }
       if (glyph) {
         // The rounds are told entirely in marks: anger over the boss from the moment it gets up,
@@ -1393,26 +1805,31 @@ export function DeskStudio({ session, height, fx = NO_FX, story = false, shut = 
         const symbol = mark ?? GLYPH[anim]
         // the boss's mark goes on the far side of its head: the near side is where the colleague
         // it is standing over keeps its own feed rows
-        const p = worldToScreen(c, { x: pos.x + (mark && h.id === 'main' ? -14 : 14), y: headTop + 14, z: pos.z }, W, H)
+        const p = worldToScreen(c, { x: pos.x + (mark && h.id === 'main' ? -14 : 14), y: headTop + 14, z: pos.z }, W, H, basis)
         const show = !hideUi && !!symbol && (mark ? scale >= 0.8 : !walker.moving && scale >= 1.5) && !p.behind && p.x > 0 && p.x < W && p.y > 0 && p.y < H
-        glyph.style.display = show ? '' : 'none'
+        put(glyph, 'display', show ? '' : 'none')
         if (show) {
-          glyph.textContent = symbol as string
-          glyph.className = `office-glyph${anim === 'wave' ? ' is-alert' : ''}${mark ? ' is-mark' : ''}`
+          putText(glyph, symbol as string)
+          putClass(glyph, `office-glyph${anim === 'wave' ? ' is-alert' : ''}${mark ? ' is-mark' : ''}`)
           // the little hop makes the glyph read as a thought rather than a label
-          glyph.style.transform = `translate(${Math.round(p.x)}px, ${Math.round(p.y - (Math.floor(t / 600) % 2) * 3)}px) translate(-50%, -100%)`
+          put(glyph, 'transform', `translate(${Math.round(p.x)}px, ${Math.round(p.y - (Math.floor(t / 600) % 2) * 3)}px) translate(-50%, -100%)`)
         }
       }
       if (feed) {
         // how many rows this zoom carries — the same answer the automatic framing reserved sky for
         const lines = feedLines(scale)
-        const p = worldToScreen(c, { x: pos.x, y: headTop + FEED_RISE, z: pos.z }, W, H)
+        const p = worldToScreen(c, { x: pos.x, y: headTop + FEED_RISE, z: pos.z }, W, H, basis)
         const show = !hideUi && lines > 0 && !p.behind && p.x > 70 && p.x < W - 70 && p.y > 40 && p.y < H + 70
-        feed.style.opacity = show ? '1' : '0'
+        put(feed, 'opacity', show ? '1' : '0')
         // `visibility` takes the rows out of hit testing too; the container itself never gets clicks
-        feed.style.visibility = show ? '' : 'hidden'
+        put(feed, 'visibility', show ? '' : 'hidden')
+        // With its plate off (too far out, or off the canvas) a feed says whose it is itself: the
+        // newest row carries the tie colour and the name (styles.css `.is-named .ob-who`).
+        feed.classList.toggle('is-named', show && !plateShown)
         if (show) {
-          feed.style.transform = `translate(${Math.round(p.x)}px, ${Math.round(p.y)}px) translate(-50%, -100%)`
+          // placed after the loop, once every feed on screen is known (declutter.ts)
+          const box = sizes.current.get(feed)
+          boxes.push({ id: h.id, x: p.x, y: p.y, w: box?.w ?? 0, h: box?.h ?? 0 })
           // Each row ages out on its own, and zooming out drops the oldest ones. React must not
           // re-render for either, so which rows are shown, the fade, and the step-back of the rows
           // that got pushed up are all written straight onto the elements here.
@@ -1422,28 +1839,110 @@ export function DeskStudio({ session, height, fx = NO_FX, story = false, shut = 
           for (let k = 0; k < rows.length; k++) {
             const row = rows[k] as HTMLElement
             if (k < first) {
-              row.style.display = 'none'
+              put(row, 'display', 'none')
               continue
             }
-            row.style.display = ''
+            put(row, 'display', '')
             const life = Number(row.dataset.life) || 3000
             const age = now - (Number(row.dataset.ts) || now)
             const fade = Math.min(FEED_FADE, life * 0.5)
             const dying = Math.max(0, Math.min(1, (age - (life - fade)) / fade))
             const back = k < rows.length - 1 // anything but the newest row has been pushed up
-            row.style.opacity = String((back ? 0.8 : 1) * (1 - dying))
-            row.style.transform = back ? 'scale(0.96)' : ''
+            put(row, 'opacity', ((back ? 0.8 : 1) * (1 - dying)).toFixed(2))
+            put(row, 'transform', back ? 'scale(0.96)' : '')
           }
         }
       }
     })
+    world.unseen = unseen
+
+    // ---- the ones the session has let go of, on their way out --------------------------------
+    // A colleague whose report is in walks to the door, and the store takes it off the floor
+    // `LEAVE_MS` later — which from the far corner of the room is half-way across it. So the studio
+    // keeps a walker it no longer has a hamster for, as long as that walker is still on its way to
+    // the door, and only lets the rig go there. Anybody else not here any more goes at once.
+    let ghosts = 0
+    for (const [id, walker] of world.walkers) {
+      if (seen.has(id)) continue
+      const rs = world.rigs.get(id)
+      if (!run && rs && walker.path.length && near(walker.target, OFFICE.door)) {
+        advanceWalker(walker, dt)
+        if (walker.path.length) {
+          ghosts++
+          const at = tileToWorld(walker.i, walker.j)
+          rs.rig.group.position.set(at.x, H_OFFICE, at.z)
+          const next = walker.path[0]
+          turn(rs, Math.atan2(next.i - walker.i, next.j - walker.j), dt)
+          rs.rig.group.rotation.z = 0
+          rs.rig.group.visible = true
+          poseRig(rs, 'walk', false, t / 1000)
+          continue
+        }
+      }
+      if (rs) {
+        group.remove(rs.rig.group)
+        world.rigs.delete(id)
+      }
+      world.walkers.delete(id)
+    }
     for (const [id, rs] of world.rigs) {
-      if (!seen.has(id)) {
+      if (!seen.has(id) && !world.walkers.has(id)) {
         group.remove(rs.rig.group)
         world.rigs.delete(id)
       }
     }
-    for (const id of world.walkers.keys()) if (!seen.has(id)) world.walkers.delete(id)
+    if (ghosts) lively = true
+
+    // ---- keep the bubbles apart (declutter.ts) ------------------------------------------------
+    // Nearest the viewer first; a feed that had to move gets a tail back to its hamster's head.
+    const moved = declutter(boxes, W, shifts.current, HEADER_PAD)
+    shifts.current = moved
+    const tailed = new Set<string>()
+    for (const b of boxes) {
+      const el = feeds.current.get(b.id)
+      if (!el) continue
+      const m = moved.get(b.id) ?? { dx: 0, dy: 0 }
+      const x = Math.round(b.x + m.dx)
+      const y = Math.round(b.y + m.dy)
+      put(el, 'transform', `translate(${x}px, ${y}px) translate(-50%, -100%)`)
+      const tail = tails.current.get(b.id)
+      const len = Math.hypot(m.dx, m.dy)
+      if (tail && len > TAIL_MIN) {
+        // from the bottom of the feed where it now is, back to the head it belongs to
+        tailed.add(b.id)
+        put(tail, 'height', `${Math.round(len)}px`)
+        put(tail, 'transform', `translate(${x}px, ${y}px) rotate(${Math.atan2(m.dx, -m.dy).toFixed(3)}rad)`)
+      }
+    }
+    for (const [id, tail] of tails.current) put(tail, 'display', tailed.has(id) ? '' : 'none')
+
+    // ---- the card: who the hamster under the pointer (or the pinned one) is -------------------
+    {
+      const el = card.current
+      const id = pinnedRef.current ?? hoverRef.current
+      const h = id ? s?.hamsters[id] : undefined
+      // the pinned one left the office (or the session went): the card goes with it
+      if (pinnedRef.current && !s?.hamsters[pinnedRef.current]) {
+        pinnedRef.current = null
+        setPinned(null)
+      }
+      const rs = id ? world.rigs.get(id) : undefined
+      let shown = false
+      if (el && h && rs && rs.rig.group.visible && !hideUi) {
+        const g = rs.rig.group.position
+        const p = worldToScreen(c, { x: g.x, y: g.y + 34 * (id === 'main' ? MAIN_SCALE : 1), z: g.z }, W, H, basis)
+        if (!p.behind && p.x > 0 && p.x < W && p.y > 0 && p.y < H) {
+          const box = sizes.current.get(el) ?? { w: 220, h: 96 }
+          // beside the hamster, on whichever side has the room
+          const x = p.x + 28 + box.w <= W - 8 ? p.x + 28 : p.x - 28 - box.w
+          const y = Math.max(8, Math.min(H - box.h - 8, p.y - box.h / 2))
+          put(el, 'transform', `translate(${Math.round(x)}px, ${Math.round(y)}px)`)
+          if (cardSince.current) putText(cardSince.current, formatDuration(Date.now() - h.since))
+          shown = true
+        }
+      }
+      if (el) put(el, 'visibility', shown ? '' : 'hidden')
+    }
 
     // ---- automatic framing: only the hamsters that are actually here ------------------------
     // Not while a hamster is in the hand: the hand is a point under the pointer, so a camera easing
@@ -1456,7 +1955,7 @@ export function DeskStudio({ session, height, fx = NO_FX, story = false, shut = 
       for (const h of hams) {
         const k = world.seats.get(h.id)
         const walker = world.walkers.get(h.id)
-        if (k === undefined || !walker) continue
+        if (!places.has(h.id) || !walker) continue
         ids.push(h.id)
         // a thrown one is followed through the air the way a walker is, so the splash is seen
         const flight = world.flights.find((f) => f.id === h.id)
@@ -1466,9 +1965,10 @@ export function DeskStudio({ session, height, fx = NO_FX, story = false, shut = 
           continue
         }
         // the boss out on its rounds is framed where it stands, not where its chair is — the same
-        // way a colleague walking in is, so the view follows it over and back
+        // way a colleague walking in is, so the view follows it over and back; one in the queue
+        // is framed where it stands too
         const away = h.id === 'main' && bossAway(patrol, walker)
-        if (walker.path.length || away) {
+        if (walker.path.length || away || k === undefined) {
           if (walker.path.length) moving = true
           if (away) out = true
           pts.push(tileToWorld(walker.i, walker.j))
@@ -1477,15 +1977,23 @@ export function DeskStudio({ session, height, fx = NO_FX, story = false, shut = 
           pts.push(tileToWorld(seat.i, seat.j), tileToWorld(seat.i, seat.j + 1)) // the seat and the desk in front
         }
       }
-      // Recompute only when the occupancy changes, the viewport resizes or somebody is walking;
-      // otherwise keep easing towards the target we already have. The size is in the signature
-      // because the framing is measured in pixels — how much sky a feed row needs is the same 26px
-      // in a 420-tall desk as in a 700-tall one, so dragging the splitter really does change the
-      // answer. It is quantised to 8px so a drag recomputes a handful of times, not every frame.
-      // `out` recomputes once when the boss stops beside a colleague and once when it sits back down
+      // and the ones walking out are followed to the door, as a newcomer is followed in
+      for (const [id, walker] of world.walkers) {
+        if (seen.has(id) || !walker.path.length) continue
+        moving = true
+        pts.push(tileToWorld(walker.i, walker.j))
+      }
+      // Recompute when the occupancy changes or the viewport resizes, and every REFRAME_MS while
+      // somebody walks; otherwise keep easing towards the target we already have. The size is in
+      // the signature because the framing is measured in pixels — how much sky a feed row needs is
+      // the same 26px in a 420-tall desk as in a 700-tall one, so dragging the splitter really does
+      // change the answer. It is quantised to 8px so a drag recomputes a handful of times, not
+      // every frame. `out` recomputes once when the boss stops beside a colleague and once when it
+      // sits back down.
       const sig = `${ids.sort().join(',')}|${Math.round(W / 8)}x${Math.round(H / 8)}${moving ? '|walk' : ''}${out ? '|out' : ''}`
-      if (!world.auto.target || moving || sig !== world.auto.key) {
+      if (!world.auto.target || sig !== world.auto.key || (moving && t - world.auto.at >= REFRAME_MS)) {
         world.auto.key = sig
+        world.auto.at = t
         const target: Camera = { ...c }
         // an empty office still looks at the boss's desk, so ⌂ has somewhere to go
         if (!pts.length) {
@@ -1509,6 +2017,8 @@ export function DeskStudio({ session, height, fx = NO_FX, story = false, shut = 
       c.tx += (goal.tx - c.tx) * k
       c.tz += (goal.tz - c.tz) * k
       c.scale += (goal.scale - c.scale) * k
+      // still on its way (by more than a fraction of a pixel's worth): the eye is following it
+      if (Math.abs(goal.tx - c.tx) > 0.5 || Math.abs(goal.tz - c.tz) > 0.5 || Math.abs(goal.scale - c.scale) > 0.002) lively = true
       updateZoom()
     }
 
@@ -1517,19 +2027,19 @@ export function DeskStudio({ session, height, fx = NO_FX, story = false, shut = 
     // edge, where a button's label would be, and follows the print if the camera moves.
     let hotSign: HungSign | null = null
     for (const sg of st.signs) {
-      tickSignHover(sg, dt)
+      if (tickSignHover(sg, dt)) lively = true
       if (sg.hot || sg.hover > 0) hotSign = sg
     }
     const tip = signTip.current
     if (tip) {
       const spot = hotSign?.spot
-      const p = spot ? worldToScreen(c, { x: spot.x, y: spot.y - spot.h / 2 - 6, z: spot.z }, W, H) : null
+      const p = spot ? worldToScreen(c, { x: spot.x, y: spot.y - spot.h / 2 - 6, z: spot.z }, W, H, basis) : null
       const show = !!hotSign?.hot && !!p && !p.behind && p.x > 0 && p.x < W && p.y > 0 && p.y < H
       tip.classList.toggle('is-on', show)
       if (p && !p.behind) {
         // keep the whole caption on the canvas when the print hangs at its edge
-        const half = tip.offsetWidth / 2 + 8
-        tip.style.transform = `translate(${Math.round(Math.max(half, Math.min(W - half, p.x)))}px, ${Math.round(p.y)}px) translate(-50%, 0)`
+        const half = (sizes.current.get(tip)?.w ?? 120) / 2 + 8
+        put(tip, 'transform', `translate(${Math.round(Math.max(half, Math.min(W - half, p.x)))}px, ${Math.round(p.y)}px) translate(-50%, 0)`)
       }
     }
 
@@ -1566,27 +2076,48 @@ export function DeskStudio({ session, height, fx = NO_FX, story = false, shut = 
     }
     if (flash.current) {
       const a = run?.blast ? flashAlpha(ft) : 0
-      const v = a > 0 ? a.toFixed(3) : '0'
-      if (flash.current.style.opacity !== v) flash.current.style.opacity = v
+      put(flash.current, 'opacity', a > 0 ? a.toFixed(3) : '0')
     }
     st.sky.position.copy(st.camera.position)
     if (!document.hidden) st.renderer.render(st.scene, st.camera)
 
     if (viewportPolygon.current) {
       const pts = viewportGroundPolygon(c, W, H)
-        .map((p) => `${(p.x / WORLD_W) * 100},${(p.z / WORLD_D) * 100}`)
+        .map((p) => `${((p.x / WORLD_W) * 100).toFixed(2)},${((p.z / WORLD_D) * 100).toFixed(2)}`)
         .join(' ')
-      viewportPolygon.current.setAttribute('points', pts)
+      if (pts !== polygonDrawn.current) {
+        polygonDrawn.current = pts
+        viewportPolygon.current.setAttribute('points', pts)
+      }
     }
+    return lively
   }
 
+  // The frame loop, paced (pace.ts): the display's rate only while something moves that the eye
+  // follows or the user is at the studio, less when it is calm, less again behind other windows and
+  // in the mini window — where the picture also drops to the cheaper tier. A frame is drawn at once,
+  // whatever the pace, after anything React changed (`dirty`): a new bubble never waits.
   useEffect(() => {
     let raf = 0
     let last = performance.now()
+    let lively = true
+    /** since when the window has been without the focus (the render loop's clock), for the quality tier */
+    let blurred: number | null = null
     const tick = (t: number): void => {
-      renderRef.current(t, Math.min(0.1, (t - last) / 1000))
-      last = t
       raf = requestAnimationFrame(tick)
+      const focused = document.hasFocus()
+      const mini = useDesk.getState().mini
+      const fps = frameRate({ focused, mini, lively, input: t - inputAt.current < INPUT_HOLD_MS })
+      if (!dirty.current && !frameDue(t - last, fps)) return
+      dirty.current = false
+      const st = getStudio()
+      if (st) {
+        if (focused) blurred = null
+        else blurred ??= t
+        setQuality(st, qualityFor({ mini, unfocusedFor: blurred === null ? 0 : t - blurred }))
+      }
+      lively = renderRef.current(t, Math.min(0.1, (t - last) / 1000))
+      last = t
     }
     raf = requestAnimationFrame(tick)
     return () => {
@@ -1604,13 +2135,34 @@ export function DeskStudio({ session, height, fx = NO_FX, story = false, shut = 
   }, [])
 
   const studioRef = getStudio()
+  // the card: the pinned hamster, else the one under the pointer — who it is, what it runs on,
+  // what it is doing and since when, and the last thing it said (from the log once its bubbles are gone)
+  const cardId = pinned ?? hoverId
+  const cardHam = cardId && session ? session.hamsters[cardId] ?? null : null
+  let cardLog: SessionState['log'][number] | null = null
+  if (cardHam && session) {
+    for (let k = session.log.length - 1; k >= 0; k--) {
+      if (session.log[k].hid === cardHam.id) {
+        cardLog = session.log[k]
+        break
+      }
+    }
+  }
+  const cardLine = cardHam && cardHam.feed.length ? cardHam.feed[cardHam.feed.length - 1].text : cardLog?.text ?? null
+  const cardPinned = !!pinned && !!cardHam
+  /** somewhere to stand for a hamster: a desk, or a place in the visible queue (the follow menu can look at either) */
+  const placed = (id: string): boolean => scene.seats.has(id) || scene.walkers.has(id)
   return (
     <section
       ref={wrapRef}
       className={`desk-wrap desk-studio ${dragging ? 'is-dragging' : ''} ${story ? 'is-story' : ''} ${shut ? 'is-shut' : ''}`}
       style={{ height, ...(story && keep ? { ['--keep-h' as string]: `${keep.h}px`, ['--keep-w' as string]: keep.w === null ? '100%' : `${keep.w}px` } : {}) }}
       aria-label={u.studio.label}
+      aria-describedby={keysId}
+      tabIndex={0}
+      onKeyDown={onKey}
     >
+      <span id={keysId} hidden>{u.studio.keysHelp}</span>
       <div ref={canvasHost} className="desk-canvas-host" />
       {noGl && <div className="office-nogl">{rich(u.studio.noGl)}</div>}
       <div className="office-vignette" />
@@ -1636,6 +2188,15 @@ export function DeskStudio({ session, height, fx = NO_FX, story = false, shut = 
             return () => { if (glyphs.current.get(h.id) === el) glyphs.current.delete(h.id) }
           }} />
         ))}
+        {/* the tails come first, so every bubble is drawn over them (declutter.ts) */}
+        {list.map((h) => h.feed.length > 0 && (
+          <div key={`tail:${session?.info.sessionId}:${h.id}`} className="office-feed-tail" aria-hidden="true" ref={(el) => {
+            if (!el) return
+            if (!primed.current.has(el)) { el.style.display = 'none'; primed.current.add(el) }
+            tails.current.set(h.id, el)
+            return () => { if (tails.current.get(h.id) === el) tails.current.delete(h.id) }
+          }} />
+        ))}
         {/* One feed container per hamster, keyed by the hamster alone. A new row must not replace
             the container: the render loop finds it through `feeds`, and swapping DOM nodes under
             that map is how a fresh bubble used to get stuck at the mount-time opacity 0. Rows are
@@ -1652,11 +2213,12 @@ export function DeskStudio({ session, height, fx = NO_FX, story = false, shut = 
               if (!el) return
               if (!primed.current.has(el)) { el.style.opacity = '0'; primed.current.add(el) }
               feeds.current.set(h.id, el)
+              observe(el) // its size, for keeping the feeds apart (declutter.ts)
               // only forget the element we registered: a stale cleanup must never drop a newer node
               return () => { if (feeds.current.get(h.id) === el) feeds.current.delete(h.id) }
             }}
           >
-            {h.feed.map((f) => (
+            {h.feed.map((f, k) => (
               <div
                 key={f.id}
                 className={`ob-item kind-${f.kind} tone-${f.tone}`}
@@ -1666,13 +2228,61 @@ export function DeskStudio({ session, height, fx = NO_FX, story = false, shut = 
                 onClick={() => { if (session) requestLogReveal(session.info.sessionId, f.id) }}
                 onContextMenu={(e) => { e.preventDefault(); if (session) dismissFeedItem(session.info.sessionId, h.id, f.id) }}
               >
+                {/* whose feed this is, on the newest row — shown only while the plate is off (the render loop's `is-named`) */}
+                {k === h.feed.length - 1 && (
+                  <span className="ob-who">
+                    <i style={{ background: tintFor(h.agentType) }} />
+                    {h.id === 'main' ? u.common.mainHamster : shortName(h.name, 10)}
+                  </span>
+                )}
                 <span className="ob-text">{f.text}</span>
                 {f.count > 1 && <span className="ob-count">×{f.count}</span>}
               </div>
             ))}
           </div>
         ))}
-        <div ref={signTip} className="office-sign-tip" aria-hidden="true">{u.studio.signTip}</div>
+        <div
+          ref={(el) => {
+            card.current = el
+            if (!el) return
+            if (!primed.current.has(el)) { el.style.visibility = 'hidden'; primed.current.add(el) }
+            observe(el)
+          }}
+          className={`office-card ${cardPinned ? 'is-pinned' : ''}`}
+          data-office-ui={cardPinned ? '' : undefined}
+          aria-hidden={cardHam ? undefined : true}
+        >
+          {cardHam && (
+            <>
+              <div className="oc-head">
+                <span className="oc-tie" style={{ background: tintFor(cardHam.agentType) }} />
+                <span className="oc-name">{cardHam.id === 'main' ? u.studio.mainHamster : cardHam.name}</span>
+                {cardPinned && (
+                  <button className="oc-x" onClick={() => setPinned(null)} aria-label={u.common.close} title={u.common.close}>
+                    <IconClose size={12} />
+                  </button>
+                )}
+              </div>
+              <div className="oc-meta">{[cardHam.id === 'main' ? null : cardHam.agentType, modelSkin(cardHam.model).label, cardHam.effort].filter(Boolean).join(' · ')}</div>
+              <div className="oc-state">
+                <span className="oc-dot" style={{ background: statusDot(cardHam.state) }} />
+                {u.studio.state[cardHam.state]} · <span ref={cardSince}>{formatDuration(Date.now() - cardHam.since)}</span>
+              </div>
+              {cardLine && <div className="oc-say">{cardLine}</div>}
+              {cardPinned
+                ? cardLog && session && (
+                    <button className="oc-log" onClick={() => requestLogReveal(session.info.sessionId, cardLog.id)}>
+                      {u.studio.cardLog}
+                    </button>
+                  )
+                : <div className="oc-hint">{u.studio.cardHint}</div>}
+            </>
+          )}
+        </div>
+        <div ref={(el) => {
+          signTip.current = el
+          if (el) observe(el)
+        }} className="office-sign-tip" aria-hidden="true">{u.studio.signTip}</div>
       </div>
       <div className="office-header" data-office-ui>
         <div className="office-heading">
@@ -1702,9 +2312,9 @@ export function DeskStudio({ session, height, fx = NO_FX, story = false, shut = 
       <div className="office-bottom" data-office-ui>
         <div className="office-follow">
           <span className="office-follow-icon"><IconTarget size={14} /></span>
-          <select aria-label={u.studio.findLabel} value={list.some((h) => h.id === selected && scene.seats.has(h.id)) ? selected : ''} onChange={(e) => focus(e.target.value)}>
+          <select aria-label={u.studio.findLabel} value={list.some((h) => h.id === selected && placed(h.id)) ? selected : ''} onChange={(e) => focus(e.target.value)}>
             <option value="" disabled>{u.studio.findPlaceholder}</option>
-            {list.map((h) => <option key={h.id} value={h.id} disabled={!scene.seats.has(h.id)}>{h.id === 'main' ? u.studio.mainHamster : h.name} · {scene.seats.has(h.id) ? u.studio.state[h.state] : u.studio.waitingSeat}</option>)}
+            {list.map((h) => <option key={h.id} value={h.id} disabled={!placed(h.id)}>{h.id === 'main' ? u.studio.mainHamster : h.name} · {scene.seats.has(h.id) ? u.studio.state[h.state] : u.studio.waitingSeat}</option>)}
           </select>
           {overflow > 0 && <span className="office-overflow" role="status">{u.studio.overflow(overflow)}</span>}
         </div>
@@ -1735,11 +2345,27 @@ export function DeskStudio({ session, height, fx = NO_FX, story = false, shut = 
             const w = k === 0 ? BOSS_DESK_W : DESK_W
             return <rect key={k} x={((p.x - w / 2) / WORLD_W) * 100} y={((p.z - 26) / WORLD_D) * 100} width={(w / WORLD_W) * 100} height={(52 / WORLD_D) * 100} rx="0.4" fill={[...scene.seats.values()].includes(k) ? '#d6bc85' : '#8b7f63'} />
           })}
-          <polygon ref={viewportPolygon} fill="#c9e3b516" stroke="#d7edbf" strokeWidth="0.8" />
+          <polygon ref={(el) => {
+            viewportPolygon.current = el
+            polygonDrawn.current = '' // a fresh outline has no points until the next frame writes them
+          }} fill="#c9e3b516" stroke="#d7edbf" strokeWidth="0.8" />
         </svg>
       </div>}
       <div className="office-help">{u.studio.helpLeft} <span>·</span> {u.studio.helpRight} <span>·</span> {u.studio.helpWheel} <span>·</span> {u.studio.helpMiddle}</div>
-      {session && <div className="office-metrics"><span>+{session.linesAdded}</span> −{session.linesRemoved}<i />{session.edits.length} edits <i />{session.turns} turns</div>}
+      {session && <div className="office-metrics"><span>+{session.linesAdded}</span> −{session.linesRemoved}<i />{u.studio.edits(session.edits.length)} <i />{u.studio.turns(session.turns)}</div>}
     </section>
   )
 }
+
+const sameKeep = (a?: KeepSize, b?: KeepSize): boolean => a === b || (!!a && !!b && a.w === b.w && a.h === b.h)
+
+/**
+ * The studio renders again only when what it draws changed: the session it shows, its size, the
+ * fold story's clock — and its own store subscriptions (the language, the welcome card's terminal,
+ * the log requests) as any component does. App.tsx re-renders for every tab dot and usage tick and
+ * hands the pane size in as a fresh object each time, which is compared by value here.
+ */
+export const DeskStudio = memo(
+  DeskStudioView,
+  (a, b) => a.session === b.session && a.height === b.height && a.fx === b.fx && a.story === b.story && a.shut === b.shut && sameKeep(a.keep, b.keep),
+)

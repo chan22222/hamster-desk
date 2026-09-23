@@ -23,6 +23,31 @@ export const WALL_H = 120
 export const WINDOWS = [3, 11, 18]
 export const WHITEBOARDS = [7, 15]
 
+/**
+ * The things that stand on the office floor besides the desks and chairs, in office tiles — the
+ * fixtures inherited from the 2D office, and the plants. Exported so the walking tests can check
+ * every route against where they really are (scripts/unit/furniture.ts).
+ *
+ * The water cooler stands at the head of the queue for a desk (office-world.ts `LOBBY`), and the
+ * plant by the west wall a little further down the same line: both used to stand on the corridor
+ * itself (i 0.6 and 0.8), where every colleague on its way to the second or third row walked
+ * straight through them.
+ */
+export const FIXTURES: readonly { id: 'cooler' | 'coffee' | 'printer'; i: number; j: number }[] = [
+  { id: 'cooler', i: 2.2, j: 5.8 },
+  { id: 'coffee', i: 5.5, j: 0.7 },
+  { id: 'printer', i: 16, j: 0.7 },
+]
+/** the plants: the room's corners, one down the west side, and one either side of the boss's desk */
+export const PLANTS: readonly { i: number; j: number }[] = [
+  { i: 2.6, j: 0.8 },
+  { i: OFFICE.W - 1.5, j: 0.8 },
+  { i: 2.2, j: 11 },
+  { i: OFFICE.W - 1.5, j: OFFICE.D - 2.5 },
+  { i: OFFICE.slots[0].i + 0.5 - 2, j: OFFICE.slots[0].j },
+  { i: OFFICE.slots[0].i + 0.5 + 2, j: OFFICE.slots[0].j },
+]
+
 export type WorldBox = LocalBox
 
 /**
@@ -337,9 +362,9 @@ export function buildStudioWorld(): StudioWorld {
   // one stretch of that wall with nothing hung on it. The close-up on a lone boss never shows the
   // west wall at all, but every wider framing does, on the left: colleagues at 117 % and 84 %, and
   // the corridor a new colleague walks in along. Seen from further away than the north print, it
-  // is a size up (1.4×), with its top on the same line as the window heads; the cooler and the
-  // plant standing in front of this bay only ever cover the wainscot below it from this camera,
-  // and the corridor and the lobby are a tile out from the wall.
+  // is a size up (1.4×), with its top on the same line as the window heads; nothing stands in
+  // front of this bay (the cooler and the plant are out by the queue, `FIXTURES`), and the
+  // corridor is a tile out from the wall.
   const signWZ = tileToWorld(0, 9.4).z
   const signWY = deck + 111 - 3 - SIGN_L_H / 2
   put('signFrameL', WALL_IN_X, signWZ, signWY, 1)
@@ -363,17 +388,15 @@ export function buildStudioWorld(): StudioWorld {
     deskParts.push({ slot: k, screen: w(parts.screen), keys: w(parts.keys), lamp: w(parts.lamp), spill: w(parts.spill) })
   })
 
-  // the fixtures inherited from the 2D office, at the same tile coordinates (the coffee table
-  // moved west so the boss's corner is not crowded)
+  // the fixtures inherited from the 2D office (the coffee table moved west so the boss's corner is
+  // not crowded, the cooler off the corridor to the head of the queue: `FIXTURES`)
   put('shelf', WALL_IN_X + 4, tileToWorld(0, 1.8).z, deck, 0)
-  for (const [id, pi, pj] of [['cooler', 0.6, 8.5], ['coffee', 5.5, 0.7], ['printer', 16, 0.7]] as [string, number, number][]) {
-    const p = tileToWorld(pi, pj)
-    put(id, p.x, p.z, deck, 0)
+  for (const f of FIXTURES) {
+    const p = tileToWorld(f.i, f.j)
+    put(f.id, p.x, p.z, deck, 0)
   }
-  // plants: the room's corners, plus one either side of the boss's desk
-  const bossI = OFFICE.slots[0].i + 0.5, bossJ = OFFICE.slots[0].j
-  for (const [pi, pj] of [[2.6, 0.8], [OFFICE.W - 1.5, 0.8], [0.8, 11], [OFFICE.W - 1.5, OFFICE.D - 2.5], [bossI - 2, bossJ], [bossI + 2, bossJ]]) {
-    const p = tileToWorld(pi, pj)
+  for (const f of PLANTS) {
+    const p = tileToWorld(f.i, f.j)
     put('plant', p.x, p.z, deck, 0)
   }
 

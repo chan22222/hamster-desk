@@ -11,7 +11,7 @@
 // Pure, like office-world.ts: no three, no DOM. Positions are world units (x/z on the deck plane,
 // y up), the pointer and the clock are inputs and the ground is a callback, so the unit test can
 // throw one into the sea without building the island.
-import { BOSS_SLOT, H_OFFICE, OFFICE, OFFICE_TILE, T, WALK_BACK, directRoute, type Point } from './office-world'
+import { BOSS_SLOT, H_OFFICE, LOBBY, OFFICE, OFFICE_TILE, T, WALK_BACK, corridorRoute, directRoute, type Point } from './office-world'
 import { BOSS_DESK_W, DESK_D, DESK_W } from './vox/props'
 
 /** how high a held hamster hangs above the deck (its feet), world units — about its own height */
@@ -182,29 +182,40 @@ export const PORCH_I = -1.6
 /** how far outside the deck the way round the building runs */
 const AROUND = 1.2
 
+/** a spot in the queue for a desk (office-world.ts `LOBBY`) */
+const queued = (p: Point): boolean => LOBBY.some((q) => Math.abs(q.i - p.i) < 1e-6 && Math.abs(q.j - p.j) < 1e-6)
+
 /**
- * The way home from `from` (tiles) to `seat`. Inside the office it is the boss's own lanes
- * (`directRoute`: walkways and the gaps between desk columns, never through a desk). Outside,
- * the hamster goes round the building on the grass to the steps, in through the door and up the
- * corridor like a colleague arriving — the north and west sides have walls, and the open sides
- * have desks right up to the edge.
+ * The way from wherever a hamster landed, `from` (tiles), to `goal`: its seat, the door (it was
+ * on its way out) or its place in the queue. Inside the office it is the boss's own lanes
+ * (`directRoute`: walkways and the gaps between desk columns, never through a desk) — to the door
+ * as well, which they reach down the corridor from the first row's walkway. The queue stands off
+ * those lanes, so a queued hamster goes to the door that way and joins the queue from the corridor
+ * the way a newcomer does. Outside, the hamster goes round the building on the grass to the steps,
+ * in through the door and on as a colleague arriving would (`corridorRoute`) — the north and west
+ * sides have walls, and the open sides have desks right up to the edge.
  */
-export function returnPath(from: Point, seat: Point): Point[] {
-  if (inside(from)) return directRoute(from, seat)
+export function returnPath(from: Point, goal: Point): Point[] {
   const door = OFFICE.door
-  const porch: Point = { i: PORCH_I, j: door.j }
-  const legs: Point[] = []
-  if (from.i >= -0.5) {
-    // north, east or south of the building: along that side to the west, then down (or up) to the steps
-    let j = from.j
-    if (from.j > -0.5 && from.j < OFFICE.D - 0.5) {
-      // east of it, between its rows: out past the nearer corner first
-      j = from.j < OFFICE.D / 2 ? -AROUND : OFFICE.D - 1 + AROUND
-      legs.push({ i: from.i, j })
+  let legs: Point[]
+  if (inside(from)) {
+    if (!queued(goal)) return directRoute(from, goal)
+    legs = [...directRoute(from, door), ...corridorRoute(door, goal)]
+  } else {
+    const porch: Point = { i: PORCH_I, j: door.j }
+    legs = []
+    if (from.i >= -0.5) {
+      // north, east or south of the building: along that side to the west, then down (or up) to the steps
+      let j = from.j
+      if (from.j > -0.5 && from.j < OFFICE.D - 0.5) {
+        // east of it, between its rows: out past the nearer corner first
+        j = from.j < OFFICE.D / 2 ? -AROUND : OFFICE.D - 1 + AROUND
+        legs.push({ i: from.i, j })
+      }
+      legs.push({ i: PORCH_I, j })
     }
-    legs.push({ i: PORCH_I, j })
+    legs.push(porch, { ...door }, ...corridorRoute(door, goal))
   }
-  legs.push(porch, { ...door }, { i: 0.5, j: seat.j }, { ...seat })
   const out: Point[] = []
   let prev = from
   for (const p of legs) {

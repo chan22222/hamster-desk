@@ -6,9 +6,9 @@
 
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
-import { BOSS_LANES, BOSS_SLOT, GAP_LANES, HUB_J, OFFICE, T, WALK_BACK, advanceWalker, directRoute, makeWalker, walkDirect, type Point } from '../../src/desk/office-world'
-import { BOSS_DESK_W, DESK_D, DESK_W } from '../../src/desk/vox/props'
+import { BOSS_LANES, BOSS_SLOT, GAP_LANES, HUB_J, OFFICE, WALK_BACK, advanceWalker, corridorRoute, directRoute, makeWalker, walkDirect, type Point } from '../../src/desk/office-world'
 import { BACK, FIRST_DELAY, REST, SCOLD, SIDE, makePatrol, patrolGoal, scoldSpot, setPatrolMode, stepPatrol, type Patrol, type PatrolInput } from '../../src/desk/patrol'
+import { touching } from './furniture'
 
 const FRAME = 1000 / 60
 const worker = (id: string, slot: number) => ({ id, seat: OFFICE.slots[slot].seat })
@@ -33,28 +33,10 @@ function until(p: Patrol, clock: { now: number }, walker: ReturnType<typeof make
   return clock.now - t0
 }
 
-// ---- the furniture, as the world actually places it (vox/world.ts + vox/props.ts), in tiles ----
-type Box = { i0: number; i1: number; j0: number; j1: number; what: string }
-const box = (ci: number, cj: number, hw: number, hd: number, what: string, back = hd): Box => ({ i0: ci - hw, i1: ci + hw, j0: cj - back, j1: cj + hd, what })
-const FURNITURE: Box[] = [
-  // desks are centred half a tile east of their slot and on the slot's row
-  ...OFFICE.slots.map((s, k) => box(s.i + 0.5, s.j, (k === 0 ? BOSS_DESK_W : DESK_W) / 2 / T, DESK_D / 2 / T, `desk ${k}`)),
-  // the colleagues' chairs: 26 wide, and the back reaches 16 behind the seat point (the boss's
-  // own chair is where it starts and ends, so it is no obstacle)
-  ...OFFICE.slots.slice(1).map((s, k) => box(s.chair.i, s.chair.j, 13 / T, 13 / T, `chair ${k + 1}`, 16 / T)),
-  // plants (27 wide): the room's corners and either side of the boss's desk
-  ...[[2.6, 0.8], [OFFICE.W - 1.5, 0.8], [0.8, 11], [OFFICE.W - 1.5, OFFICE.D - 2.5], [BOSS_SLOT.i + 0.5 - 2, BOSS_SLOT.j], [BOSS_SLOT.i + 0.5 + 2, BOSS_SLOT.j]].map(([i, j]) => box(i, j, 13.5 / T, 13.5 / T, `plant at ${i},${j}`)),
-  box(0.6, 8.5, 13 / T, 12 / T, 'cooler'),
-  box(5.5, 0.7, 21 / T, 17 / T, 'coffee table'),
-  box(16, 0.7, 17 / T, 15 / T, 'printer'),
-]
-/** half the hamster's footprint (its torso is 28 × 22) */
-const HALF = 0.2
-const touching = (p: Point): Box | undefined =>
-  FURNITURE.find((b) => p.i + HALF > b.i0 && p.i - HALF < b.i1 && p.j + HALF > b.j0 && p.j - HALF < b.j1)
+// ---- the furniture, as the world actually places it: scripts/unit/furniture.ts ----------------
 const length = (from: Point, path: Point[]): number => path.reduce((sum, q) => { const d = Math.hypot(q.i - from.i, q.j - from.j); from = q; return sum + d }, 0)
-/** what the colleagues walk: the west corridor and the row (office-world.ts `walkTo`) */
-const corridor = (from: Point, to: Point): number => length(from, [{ i: 0.5, j: from.j }, { i: 0.5, j: to.j }, to])
+/** what the colleagues walk: the west corridor and the aisle behind the row (office-world.ts `walkTo`) */
+const corridor = (from: Point, to: Point): number => length(from, corridorRoute(from, to))
 
 test('with nobody working the boss never leaves its desk', () => {
   setPatrolMode('on')

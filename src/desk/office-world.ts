@@ -41,7 +41,7 @@ export function tileToWorld(i: number, j: number): { x: number; z: number } {
 
 // The office is a fixed place: the boss's desk alone along the north wall, then a dozen staff
 // desks in three rows. Claude Code rarely runs more than a handful of subagents at once, so extra
-// hamsters wait by the door instead of growing the room.
+// hamsters queue by the door (`LOBBY`) instead of growing the room.
 export const DESK_COLS = 4
 export const DESK_ROWS = 3
 const PITCH_I = 4
@@ -81,13 +81,28 @@ const slots: Seat[] = [
   ).sort((a, b) => fromBoss(a) - fromBoss(b) || a.j - b.j || a.i - b.i),
 ]
 
+/** the corridor down the west wall, in from the door: every walk to or from a desk runs along it */
+export const CORRIDOR_I = 0.5
+
+// The queue for hamsters without a desk: one file just inside the door, from the water cooler at
+// its head (vox/world.ts) back towards the second row, between the strip the boss's rounds walk
+// (`GAP_LANES[0]`, i 1.5) and the first column of desks. One file on purpose — a newcomer steps
+// straight across from the corridor to the end of it, the queue shuffles up along its own line,
+// and the one at the head steps back onto the corridor for the desk it was given, so nobody walks
+// through anybody. Every spot clears the corridor, that lane, the aisles behind the first two rows
+// and the desks by a hamster's width (scripts/unit/walk.test.ts); a longer queue waits out of sight.
+const LOBBY_I = 2.2
+const LOBBY_STEP = 0.45
+/** where the hamsters that have no desk yet stand, head of the queue first — its head right across from the door */
+export const LOBBY: readonly Point[] = Array.from({ length: 5 }, (_, k) => ({ i: LOBBY_I, j: 6.35 + k * LOBBY_STEP }))
+
 export const OFFICE = {
   W: ORIGIN.i + DESK_COLS * PITCH_I + 1,
   D: ORIGIN.j + DESK_ROWS * PITCH_J + 2,
   slots,
-  door: { i: 0.5, j: 6.5 },
-  /** where hamsters without a desk wait (near the door, along the left wall) */
-  lobby: { i: 1.2, j: 8.5 },
+  door: { i: CORRIDOR_I, j: 6.5 },
+  /** the head of the queue for hamsters without a desk (`LOBBY`): by the door, along the left wall */
+  lobby: LOBBY[0],
   /** how many staff desks there are (every slot but the boss's) */
   staff: DESK_COLS * DESK_ROWS,
 } as const
@@ -112,6 +127,12 @@ export interface Walker extends Point {
   path: Point[]
   facing: 'se' | 'sw' | 'ne' | 'nw'
   moving: boolean
+  /**
+   * Off the corridor and its aisles: landed wherever a throw put it (grab.ts). Until it is home, a
+   * new goal is reached by the lanes or round the building (`returnPath`), never by `walkTo` —
+   * whose legs start from the corridor network and would cut straight through a desk or a wall.
+   */
+  free?: boolean
 }
 
 export function makeWalker(at: Point): Walker {
@@ -119,18 +140,62 @@ export function makeWalker(at: Point): Walker {
 }
 
 /**
- * Travel through the left corridor and the aisle behind each row, never through desks. The boss's
- * seat is reached the same way: up the corridor to the north walkway (j 1.25), then east along it.
+ * Travel through the left corridor and the aisle behind each row, never through desks, chairs or
+ * whoever sits on them. The boss's seat is reached the same way: up the corridor to the north
+ * walkway (j 1.25), then east along it — the boss's row has no other chair on it.
  */
 export function walkTo(walker: Walker, goal: Point): void {
   if (walker.target.i === goal.i && walker.target.j === goal.j) return
   walker.target = { ...goal }
-  if (Math.hypot(walker.i - goal.i, walker.j - goal.j) < 0.01) { walker.path = []; return }
-  walker.path = [
-    { i: 0.5, j: walker.j },
-    { i: 0.5, j: goal.j },
-    { ...goal },
-  ]
+  walker.path = corridorRoute(walker, goal)
+}
+
+/** the seat line of each staff row (j): the chairs stand on it, their backs to the aisle behind */
+const STAFF_ROWS: readonly number[] = Array.from({ length: DESK_ROWS }, (_, r) => ORIGIN.j + r * PITCH_J + SEAT.dj)
+const EPS = 1e-6
+
+/**
+ * The aisle `p` reaches its staff row by, when it is on one — a seat, the step down from the aisle
+ * to a chair, or the aisle itself — and null anywhere else (the corridor, the boss's row, the queue).
+ */
+function aisleOf(p: Point): number | null {
+  if (p.i <= CORRIDOR_I + EPS) return null
+  for (const row of STAFF_ROWS) {
+    const aisle = row - WALK_BACK
+    if (p.j >= aisle - EPS && p.j <= row + EPS) return aisle
+  }
+  return null
+}
+
+/** `p` stands in the queue's file (`LOBBY`) */
+const inLobby = (p: Point): boolean => Math.abs(p.i - LOBBY_I) < EPS && p.j >= LOBBY[0].j - EPS && p.j <= LOBBY[LOBBY.length - 1].j + EPS
+
+/**
+ * The corridor route `walkTo` walks. Out of a staff row it is back from the chair onto the aisle
+ * behind its row, along that aisle to the corridor; into one, the same in reverse — along the aisle
+ * to the desk's column and only then the step down onto the chair. The seat line itself is never
+ * walked along: every other chair of the row stands on it, with a colleague in it. Anywhere else
+ * (the door, the boss's row, the queue) is left and reached straight across from the corridor, and
+ * two spots of the queue are one step along its file.
+ */
+export function corridorRoute(from: Point, to: Point): Point[] {
+  if (sameSpot(from, to)) return []
+  const a = aisleOf(from)
+  const b = aisleOf(to)
+  let legs: Point[]
+  if (inLobby(from) && inLobby(to)) legs = [{ ...to }]
+  else if (a !== null && a === b) legs = [{ i: from.i, j: a }, { i: to.i, j: b }, { ...to }]
+  else {
+    legs = a !== null ? [{ i: from.i, j: a }, { i: CORRIDOR_I, j: a }] : [{ i: CORRIDOR_I, j: from.j }]
+    legs.push(...(b !== null ? [{ i: CORRIDOR_I, j: b }, { i: to.i, j: b }, { ...to }] : [{ i: CORRIDOR_I, j: to.j }, { ...to }]))
+  }
+  const out: Point[] = []
+  let prev = from
+  for (const p of legs) {
+    if (!sameSpot(p, prev)) out.push(p)
+    prev = p
+  }
+  return out
 }
 
 // ---- the boss's rounds: a direct route (src/desk/patrol.ts) --------------------------------

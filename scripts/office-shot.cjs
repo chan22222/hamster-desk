@@ -188,6 +188,31 @@ app.whenReady().then(async () => {
     await shot('sign-hover')
     await studio('hoverSign(null)')
 
+    // 13. More colleagues than desks: the twelve desks fill up (every arrival down the corridor and
+    // along the aisle behind its row, never through a chair) and the rest queue by the door, in one
+    // file from the water cooler — seen from the corridor, then in the automatic framing, where the
+    // plates are off and each feed's newest row says whose it is, and feeds that would pile up on
+    // each other are pushed apart with a tail back to their heads.
+    await clearFeeds()
+    for (let k = 0; k < 14; k++) await studio(`addArriving('queue-${k}', '${['claude-sonnet-5', 'claude-haiku-4-5', 'claude-opus-5'][k % 3]}', '${['Explore', 'Plan', 'general-purpose'][k % 3]}')`)
+    await wait(6000) // the far desks are a long walk from the door
+    await studio('focus({ i: 2.2, j: 7.3 }, 2.4)')
+    await shot('queue')
+    await evaluate("document.querySelector('.office-controls button[aria-label=\"메인 햄스터로 이동\"]').click()")
+    await studio('feedLife({ act: 60000, say: 60000, warn: 60000 })')
+    for (const id of ['main', 'patrol-0', 'patrol-1', 'queue-0', 'queue-1', 'queue-2', 'queue-13']) await studio(`say('${id}', '${id} 여기 있어요')`)
+    await wait(2200)
+    await shot('crowd', 0)
+
+    // 14. the card that says who a hamster is — pinned, as a tap on it leaves it: name, agent type,
+    // model and effort, what it is doing and for how long, the last thing it said, and the way to
+    // that line in the bubble log
+    await studio("pin('patrol-1')")
+    await studio("focus('patrol-1', 2.2)")
+    await shot('card')
+    await studio('pin(null)')
+    await studio('feedLife({ act: 3000, say: 9000, warn: 12000 })')
+
     if (errors.length) {
       console.error('renderer errors:')
       for (const e of errors) console.error('  ' + e)

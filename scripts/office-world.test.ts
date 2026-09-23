@@ -2,8 +2,8 @@ import { test } from 'node:test'
 import assert from 'node:assert/strict'
 import * as THREE from 'three'
 import { H_OFFICE, OFFICE, OFFICE_TILE, T, advanceWalker, makeWalker, reconcileSeats, tileToWorld, walkTo } from '../src/desk/office-world'
-import { FEED_LINE_PX, FRAME_MAX_SCALE, FRAME_MIN_SCALE, FRAME_PAD, HEADER_PAD, autoFrameCamera, createCamera, feedLines, feedTopY, focusCamera, frameCamera, frameHeadPad, frameSubject, groundHit, feedAnchorY, overviewCamera, worldToScreen, zoomCamera } from '../src/desk/office-camera'
-import { HAMSTER_H, LEG_Y, buildHamster } from '../src/desk/vox/hamster'
+import { FEED_LINE_PX, FRAME_MAX_SCALE, FRAME_MIN_SCALE, FRAME_PAD, HEADER_PAD, autoFrameCamera, basisOf, createCamera, feedLines, feedTopY, focusCamera, frameCamera, frameHeadPad, frameSubject, groundHit, feedAnchorY, overviewCamera, worldToScreen, zoomCamera } from '../src/desk/office-camera'
+import { HAMSTER_H, LEG_Y, buildHamster, coatOf } from '../src/desk/vox/hamster'
 import { voxMaterial } from '../src/desk/vox/material'
 import { WHITEBOARDS, WINDOWS, buildStudioWorld, COLS, ROWS } from '../src/desk/vox/world'
 import { SIGN_H, SIGN_L_H, SIGN_L_W, SIGN_W } from '../src/desk/vox/props'
@@ -217,7 +217,9 @@ test('auto framing: one hamster gets the close-up desk view, a full room stays i
 test('auto framing: every zoom bucket reserves exactly its own rows worth of sky', () => {
   const seat = tileToWorld(OFFICE.slots[0].seat.i, OFFICE.slots[0].seat.j)
   const square = (r: number): Box => ({ minX: seat.x - r, maxX: seat.x + r, minZ: seat.z - r, maxZ: seat.z + r })
-  assert.deepEqual([3.4, 2.2, 1.9, 1.5, 1.4, 1.1, 0.9, 0.8, 0.79, 0.2].map(feedLines), [4, 4, 3, 3, 2, 2, 1, 1, 0, 0])
+  assert.deepEqual([3.4, 2.2, 1.9, 1.5, 1.4, 1.1, 0.9, 0.8, 0.76, 0.75, 0.74, 0.2].map(feedLines), [4, 4, 3, 3, 2, 2, 1, 1, 1, 1, 0, 0])
+  // the automatic framing never goes further out than its floor, so it always carries a row
+  assert.equal(feedLines(FRAME_MIN_SCALE), 1, 'the floor scale must still show each hamster its newest line')
   for (const [w, h] of [[900, 420], [1280, 700]]) {
     // the subject only ever gets bigger, so the first-pass zoom only ever falls: bisect for the
     // size that lands each bucket, then check what the framing actually left clear
@@ -249,14 +251,24 @@ test('auto framing: every zoom bucket reserves exactly its own rows worth of sky
         assert.ok(sp.x >= 0 && sp.x <= w && sp.y >= 0 && sp.y <= h, `corner off screen in the ${expected}-row bucket: ${sp.x},${sp.y}`)
       }
     }
-    // far enough out that no bubble is drawn: no strip at all, and no zoom paid for one
+    // Far out, the default floor still carries one row (`feedLines(FRAME_MIN_SCALE)`): a room too
+    // big to fit stops there and keeps a one-row strip — never a framing with nothing to say.
     const wide = square(8000)
-    const zero = createCamera()
-    frameCamera(zero, wide, w, h)
-    assert.equal(feedLines(firstPass(wide, w, h)), 0)
+    const floor = createCamera()
+    frameCamera(floor, wide, w, h)
+    assert.equal(floor.scale, FRAME_MIN_SCALE)
+    assert.ok(Math.abs(reservedPixels(floor, wide, w, h) - frameHeadPad(h, 1)) < 2, 'the floor keeps its one-row strip')
+    // Down on a floor of the caller's own that carries no row at all: no strip, and no zoom paid for one.
+    const low = 0.5
+    const probe = createCamera()
+    overviewCamera(probe, wide, w, h, 0, BOTTOM_PAD)
+    const s0 = Math.max(low, Math.min(FRAME_MAX_SCALE, probe.scale))
+    assert.equal(feedLines(s0), 0)
     assert.equal(frameHeadPad(h, 0), 0)
+    const zero = createCamera()
+    frameCamera(zero, wide, w, h, low)
     assert.ok(Math.abs(reservedPixels(zero, wide, w, h)) < 2, 'a framing with no feed must reserve nothing')
-    assert.equal(zero.scale, firstPass(wide, w, h), 'a framing with no feed must keep the first pass')
+    assert.equal(zero.scale, s0, 'a framing with no feed must keep the first pass')
   }
 })
 
@@ -380,6 +392,28 @@ test('every model skin builds a hamster that stands on the floor at a readable s
     if (skin.accessory !== 'none') assert.ok(rig.headG.children.length >= 2, `${model}: accessory missing`)
     // HAMSTER_H is what the bubbles and glyphs anchor to, so it has to be the ear tips for real
     else assert.ok(Math.abs(box.max.y - HAMSTER_H) < 0.01, `${model}: HAMSTER_H ${HAMSTER_H} but the ears top out at ${box.max.y}`)
+  }
+})
+
+test('newcomers from the sea cycle through four coats, and the fifth shares the first one’s geometry instead of building its own', () => {
+  assert.deepEqual([0, 1, 2, 3, 4, 5, 8, 9, 13].map(coatOf), [0, 1, 2, 3, 4, 1, 4, 1, 1])
+  const material = voxMaterial({ localDetail: true })
+  const skin = modelSkin('claude-opus-5')
+  const rig = (variant: number) => buildHamster({ skin, tint: tintFor('Explore'), main: false, variant }, material)
+  assert.equal(rig(5).bodyM.geometry, rig(1).bodyM.geometry, 'the geometry cache grew for a coat it already had')
+  assert.equal(rig(41).bodyM.geometry, rig(1).bodyM.geometry)
+  assert.notEqual(rig(2).bodyM.geometry, rig(1).bodyM.geometry, 'consecutive newcomers wear different coats')
+  assert.notEqual(rig(1).bodyM.geometry, rig(0).bodyM.geometry)
+})
+
+test('a basis worked out once projects exactly as the one worldToScreen works out itself', () => {
+  const c = createCamera()
+  focusCamera(c, tileToWorld(7.5, 5.25), 900, 420, 1.7)
+  c.yaw += 0.4
+  c.pitch += 0.1
+  const b = basisOf(c)
+  for (const p of [{ x: 900, y: 24, z: 800 }, { x: 1200, y: 120, z: 1400 }, { x: 700, y: 60, z: 1000 }]) {
+    assert.deepEqual(worldToScreen(c, p, 900, 420, b), worldToScreen(c, p, 900, 420))
   }
 })
 

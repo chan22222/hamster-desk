@@ -56,6 +56,12 @@ export interface HungSign {
   hot: boolean
   /** the eased hover, 0 at rest and 1 fully lifted */
   hover: number
+  /**
+   * How far below its spot a fold story has it (fold.ts `foldLift`), 0 at rest. The hover pose
+   * is built on top of it, so a print still easing back from the pointer when a blast begins
+   * sinks with its wall instead of being put back on it every frame of the ease.
+   */
+  drop: number
 }
 
 /** The card, with or without the logo (it decodes asynchronously; the card repaints when it lands). */
@@ -75,7 +81,7 @@ function paintCard(g: CanvasRenderingContext2D, logo: HTMLImageElement | null): 
   g.textBaseline = 'alphabetic'
   g.fillStyle = '#f4f1ff'
   g.font = `700 48px ${FONT}`
-  g.fillText(ui().studio.signCaption, TEX_W / 2, 346) // the language at the time the texture is drawn: it is built once per scene
+  g.fillText(ui().studio.signCaption, TEX_W / 2, 346) // the language at the time it is painted: `repaintSigns` paints it again
   // the site's lavender, lifted a step: at the wall's slant the darker tint fell below reading
   g.fillStyle = '#d9cdff'
   g.font = `600 40px ${FONT}`
@@ -83,6 +89,8 @@ function paintCard(g: CanvasRenderingContext2D, logo: HTMLImageElement | null): 
 }
 
 let cardTex: THREE.CanvasTexture | null = null
+/** the card's canvas and the logo once it has decoded: what `repaintSigns` paints again */
+let painter: { g: CanvasRenderingContext2D; logo: HTMLImageElement | null } | null = null
 
 /** The painted card as a texture — one for every print, made on first use. */
 function cardTexture(renderer: THREE.WebGLRenderer): THREE.CanvasTexture {
@@ -96,9 +104,12 @@ function cardTexture(renderer: THREE.WebGLRenderer): THREE.CanvasTexture {
   tex.anisotropy = renderer.capabilities.getMaxAnisotropy()
   const g = canvas.getContext('2d')
   if (g) {
+    const p: NonNullable<typeof painter> = { g, logo: null }
+    painter = p
     paintCard(g, null)
     const img = new Image()
     img.onload = () => {
+      p.logo = img
       paintCard(g, img)
       tex.needsUpdate = true
     }
@@ -106,6 +117,17 @@ function cardTexture(renderer: THREE.WebGLRenderer): THREE.CanvasTexture {
   }
   cardTex = tex
   return tex
+}
+
+/**
+ * Paint the card again in the language the UI is in now. The caption is the one line on it that is
+ * translated, and the texture outlives any one mount of the studio, so the studio calls this when
+ * the language changes (and on every mount, which costs one small canvas draw).
+ */
+export function repaintSigns(): void {
+  if (!cardTex || !painter) return
+  paintCard(painter.g, painter.logo)
+  cardTex.needsUpdate = true
 }
 
 /** the way a print faces, from the props' 90° steps: 0 = +z (north wall), 1 = +x (west wall) */
@@ -129,7 +151,7 @@ export function hangSign(sign: WallSign, renderer: THREE.WebGLRenderer): HungSig
   mesh.receiveShadow = true
   mesh.matrixAutoUpdate = false
   mesh.updateMatrix()
-  return { mesh, url: SPRITFY_URL, spot: sign, hot: false, hover: 0 }
+  return { mesh, url: SPRITFY_URL, spot: sign, hot: false, hover: 0, drop: 0 }
 }
 
 /** Mark `hot` as the print under the pointer (or none): the frames after this ease every print to match. */
@@ -148,10 +170,22 @@ export function tickSignHover(s: HungSign, dt: number): boolean {
   if (s.hover === goal) return false
   const step = (dt * 1000) / HOVER_MS
   s.hover = s.hover < goal ? Math.min(goal, s.hover + step) : Math.max(goal, s.hover - step)
+  poseSign(s)
+  return true
+}
+
+/** A fold story moved the wall the print hangs on: sink it with the wall, keeping whatever hover it has. */
+export function dropSign(s: HungSign, drop: number): void {
+  if (s.drop === drop) return
+  s.drop = drop
+  poseSign(s)
+}
+
+/** The print where its spot, its hover and the fold story say it is. */
+function poseSign(s: HungSign): void {
   const n = normalOf(s.spot.rot)
-  s.mesh.position.set(s.spot.x, s.spot.y, s.spot.z).addScaledVector(n, HOVER_LIFT * s.hover)
+  s.mesh.position.set(s.spot.x, s.spot.y - s.drop, s.spot.z).addScaledVector(n, HOVER_LIFT * s.hover)
   s.mesh.scale.setScalar(1 + HOVER_SCALE * s.hover)
   s.mesh.updateMatrix()
   ;(s.mesh.material as THREE.MeshStandardMaterial).emissiveIntensity = HOVER_GLOW * s.hover
-  return true
 }

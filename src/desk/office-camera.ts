@@ -46,39 +46,79 @@ export function cameraPosition(c: Camera): THREE.Vector3 {
   return cameraTarget(c).addScaledVector(dirOf(c), distanceFor(c.scale))
 }
 
-/** right / up / forward basis of the camera, in world space */
-function basis(c: Camera): { pos: THREE.Vector3; right: THREE.Vector3; up: THREE.Vector3; forward: THREE.Vector3 } {
-  const pos = cameraPosition(c)
-  const forward = dirOf(c).multiplyScalar(-1) // from the camera towards the target
-  const right = new THREE.Vector3().crossVectors(forward, new THREE.Vector3(0, 1, 0)).normalize()
-  const up = new THREE.Vector3().crossVectors(right, forward).normalize()
-  return { pos, right, up, forward }
+/**
+ * The camera's position and its right / up / forward axes in world space, as plain numbers.
+ *
+ * Everything below projects through this, and the automatic framing projects a great deal: a
+ * bisection is thirty-odd fits of four corners each, and it used to run every frame while anybody
+ * walked. As Vector3s that was thousands of short-lived objects a frame, so the math is spelt out
+ * on numbers and the scratch copy below is reused; a caller that projects many points through one
+ * camera (the studio's overlay) computes a basis once and hands it in.
+ */
+export interface Basis {
+  px: number; py: number; pz: number
+  rx: number; ry: number; rz: number
+  ux: number; uy: number; uz: number
+  fx: number; fy: number; fz: number
+}
+export const makeBasis = (): Basis => ({ px: 0, py: 0, pz: 0, rx: 0, ry: 0, rz: 0, ux: 0, uy: 0, uz: 0, fx: 0, fy: 0, fz: 0 })
+
+/** Fill `out` with the camera's basis. `forward` points from the camera at the target; `right` is level. */
+export function basisOf(c: Camera, out: Basis = makeBasis()): Basis {
+  const cp = Math.cos(c.pitch)
+  const sp = Math.sin(c.pitch)
+  const sy = Math.sin(c.yaw)
+  const cy = Math.cos(c.yaw)
+  const d = distanceFor(c.scale)
+  out.px = c.tx + sy * cp * d
+  out.py = H_OFFICE + sp * d
+  out.pz = c.tz + cy * cp * d
+  out.fx = -sy * cp
+  out.fy = -sp
+  out.fz = -cy * cp
+  // right = forward × world up, which is level; up = right × forward (both already unit length,
+  // but normalised anyway so rounding never skews a long bisection)
+  const rl = Math.hypot(out.fz, out.fx) || 1
+  out.rx = -out.fz / rl
+  out.ry = 0
+  out.rz = out.fx / rl
+  const ux = out.ry * out.fz - out.rz * out.fy
+  const uy = out.rz * out.fx - out.rx * out.fz
+  const uz = out.rx * out.fy - out.ry * out.fx
+  const ul = Math.hypot(ux, uy, uz) || 1
+  out.ux = ux / ul
+  out.uy = uy / ul
+  out.uz = uz / ul
+  return out
 }
 
-const tanHalf = (): number => Math.tan((FOV / 2) * (Math.PI / 180))
+/** the functions below project through this when the caller has no basis of its own */
+const scratch = makeBasis()
 
-/** Ray direction through a viewport pixel. */
-function rayThrough(c: Camera, sx: number, sy: number, w: number, h: number): { pos: THREE.Vector3; dir: THREE.Vector3 } {
-  const { pos, right, up, forward } = basis(c)
-  const t = tanHalf()
+const TAN_HALF = Math.tan((FOV / 2) * (Math.PI / 180))
+
+/** Ray through a viewport pixel: the camera's position and the unit direction, as numbers. */
+function rayThrough(c: Camera, sx: number, sy: number, w: number, h: number): { px: number; py: number; pz: number; dx: number; dy: number; dz: number } {
+  const b = basisOf(c, scratch)
   const ndcX = (sx / Math.max(1, w)) * 2 - 1
   const ndcY = 1 - (sy / Math.max(1, h)) * 2
   const aspect = Math.max(1e-6, w / Math.max(1, h))
-  const dir = forward
-    .clone()
-    .addScaledVector(right, ndcX * t * aspect)
-    .addScaledVector(up, ndcY * t)
-    .normalize()
-  return { pos, dir }
+  const kx = ndcX * TAN_HALF * aspect
+  const ky = ndcY * TAN_HALF
+  const dx = b.fx + b.rx * kx + b.ux * ky
+  const dy = b.fy + b.ry * kx + b.uy * ky
+  const dz = b.fz + b.rz * kx + b.uz * ky
+  const l = Math.hypot(dx, dy, dz) || 1
+  return { px: b.px, py: b.py, pz: b.pz, dx: dx / l, dy: dy / l, dz: dz / l }
 }
 
 /** Where the pixel's ray meets the horizontal plane at height `y`, or null when it points at the sky. */
 export function planeHit(c: Camera, sx: number, sy: number, w: number, h: number, y: number): { x: number; z: number } | null {
-  const { pos, dir } = rayThrough(c, sx, sy, w, h)
-  if (Math.abs(dir.y) < 1e-6) return null
-  const t = (y - pos.y) / dir.y
+  const r = rayThrough(c, sx, sy, w, h)
+  if (Math.abs(r.dy) < 1e-6) return null
+  const t = (y - r.py) / r.dy
   if (t <= 0) return null
-  return { x: pos.x + dir.x * t, z: pos.z + dir.z * t }
+  return { x: r.px + r.dx * t, z: r.pz + r.dz * t }
 }
 
 /** Where the pixel's ray meets the office deck plane, or null when it points at the sky. */
@@ -86,16 +126,19 @@ export function groundHit(c: Camera, sx: number, sy: number, w: number, h: numbe
   return planeHit(c, sx, sy, w, h, H_OFFICE)
 }
 
-/** World point → viewport pixel. `behind` is true when the point is out of the frustum's front. */
-export function worldToScreen(c: Camera, p: { x: number; y: number; z: number }, w: number, h: number): { x: number; y: number; behind: boolean } {
-  const { pos, right, up, forward } = basis(c)
-  const v = new THREE.Vector3(p.x - pos.x, p.y - pos.y, p.z - pos.z)
-  const zc = v.dot(forward)
+/**
+ * World point → viewport pixel. `behind` is true when the point is out of the frustum's front.
+ * `b` is the camera's basis if the caller already has it (`basisOf`) — it must be this camera's.
+ */
+export function worldToScreen(c: Camera, p: { x: number; y: number; z: number }, w: number, h: number, b: Basis = basisOf(c, scratch)): { x: number; y: number; behind: boolean } {
+  const vx = p.x - b.px
+  const vy = p.y - b.py
+  const vz = p.z - b.pz
+  const zc = vx * b.fx + vy * b.fy + vz * b.fz
   if (zc <= 1e-4) return { x: 0, y: 0, behind: true }
-  const t = tanHalf()
   const aspect = Math.max(1e-6, w / Math.max(1, h))
-  const ndcX = v.dot(right) / (zc * t * aspect)
-  const ndcY = v.dot(up) / (zc * t)
+  const ndcX = (vx * b.rx + vy * b.ry + vz * b.rz) / (zc * TAN_HALF * aspect)
+  const ndcY = (vx * b.ux + vy * b.uy + vz * b.uz) / (zc * TAN_HALF)
   return { x: (ndcX * 0.5 + 0.5) * w, y: (0.5 - ndcY * 0.5) * h, behind: false }
 }
 
@@ -125,6 +168,9 @@ export function focusCamera(c: Camera, world: { x: number; z: number }, w: numbe
 
 export interface Bounds { minX: number; maxX: number; minZ: number; maxZ: number }
 
+/** `overviewCamera`'s own basis (the one `worldToScreen` falls back to is busy inside `centerOn`) */
+const fitBasis = makeBasis()
+
 /**
  * Frame the whole island. The projected footprint of a plan rectangle depends on yaw and pitch in
  * a way that is annoying to invert, so bisect on scale instead: "does every corner still fit?" is
@@ -143,8 +189,9 @@ export function overviewCamera(c: Camera, bounds: Bounds, w: number, h: number, 
   const fits = (scale: number): boolean => {
     c.scale = scale
     centerOn(c, cx, cz, w / 2, midY, w, h)
+    const b = basisOf(c, fitBasis) // one basis for the four corners
     return corners.every((p) => {
-      const s = worldToScreen(c, p, w, h)
+      const s = worldToScreen(c, p, w, h, b)
       return !s.behind && s.x >= sidePad && s.x <= w - sidePad && s.y >= topPad && s.y <= h - bottomPad
     })
   }
@@ -185,12 +232,17 @@ export const HEADER_PAD = 56
  * but how much of the scene they would bury: a room seen from far away can carry the newest line,
  * a desk close-up can carry the whole stack. DeskStudio's render loop and the automatic framing
  * both read this, which is what keeps "what is shown" and "what is left room for" in step.
+ *
+ * The one-row band starts at `FRAME_MIN_SCALE` exactly, not above it: the automatic framing never
+ * goes further out than that floor, so however crowded the room (or narrow the pane beside the
+ * terminal), the automatic view always carries each hamster's newest line. With the band at 80%
+ * a four-hamster room beside the terminal settled at 75% and said nothing at all.
  */
 export function feedLines(scale: number): number {
   if (scale >= 2.2) return 4
   if (scale >= 1.5) return 3
   if (scale >= 1.1) return 2
-  if (scale >= 0.8) return 1
+  if (scale >= FRAME_MIN_SCALE) return 1
   return 0
 }
 /** on-screen height of a one-line feed row plus its gap */
@@ -227,8 +279,9 @@ export function frameHeadPad(h: number, lines: number): number {
  * can only fall, and a strip sized for four rows is simply a little extra sky for three. Iterating
  * to a fixed point would trade that harmless slack for a framing that oscillates between buckets
  * whenever the subject sits on a boundary. The single case worth undoing is falling all the way to
- * no rows at all — a crowded room pushed onto the floor scale — because then the strip bought
- * nothing: the first pass is both closer and still shows a line, so it wins outright.
+ * no rows at all, because then the strip bought nothing: the first pass is both closer and still
+ * shows a line, so it wins outright. (At the default floor that cannot happen any more — the floor
+ * scale itself carries a row, `feedLines` — but a caller may pass a lower `minScale`.)
  */
 export function frameCamera(
   c: Camera,
@@ -285,9 +338,10 @@ const groundCorners = (b: Bounds): { x: number; z: number }[] => [
 
 /** Screen y of the highest chat-bubble anchor over `bounds` — the pixel a feed stacks up from. */
 export function feedAnchorY(c: Camera, bounds: Bounds, w: number, h: number): number | null {
+  const b = basisOf(c, fitBasis)
   let top: number | null = null
   for (const q of groundCorners(bounds)) {
-    const p = worldToScreen(c, { x: q.x, y: H_OFFICE + BUBBLE_H, z: q.z }, w, h)
+    const p = worldToScreen(c, { x: q.x, y: H_OFFICE + BUBBLE_H, z: q.z }, w, h, b)
     if (p.behind) continue
     if (top === null || p.y < top) top = p.y
   }
@@ -296,9 +350,10 @@ export function feedAnchorY(c: Camera, bounds: Bounds, w: number, h: number): nu
 
 /** Screen y of the nearest edge of `bounds` on the floor — the lowest pixel of the subject. */
 function groundBottomY(c: Camera, bounds: Bounds, w: number, h: number): number | null {
+  const b = basisOf(c, fitBasis)
   let bottom: number | null = null
   for (const q of groundCorners(bounds)) {
-    const p = worldToScreen(c, { x: q.x, y: H_OFFICE, z: q.z }, w, h)
+    const p = worldToScreen(c, { x: q.x, y: H_OFFICE, z: q.z }, w, h, b)
     if (p.behind) continue
     if (bottom === null || p.y > bottom) bottom = p.y
   }
@@ -401,8 +456,8 @@ export function viewportGroundPolygon(c: Camera, w: number, h: number, topPad = 
     const hit = groundHit(c, sx, sy, w, h)
     if (hit) return hit
     // the ray escaped above the horizon — draw it out to a plausible distance instead
-    const { pos, dir } = rayThrough(c, sx, sy, w, h)
-    return { x: pos.x + dir.x * 3000, z: pos.z + dir.z * 3000 }
+    const r = rayThrough(c, sx, sy, w, h)
+    return { x: r.px + r.dx * 3000, z: r.pz + r.dz * 3000 }
   })
 }
 

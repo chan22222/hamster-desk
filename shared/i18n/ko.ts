@@ -397,10 +397,18 @@ export const ko = {
     map: '지도',
     mapHint: '클릭하여 이동',
     mapLabel: '사무실 지도',
-    helpLeft: '좌클릭 상호작용',
+    helpLeft: '좌클릭 선택, 끌어서 던지기',
     helpRight: '우클릭 회전',
     helpWheel: '휠 확대',
     helpMiddle: '휠클릭 이동',
+    /** read out for the focused studio (its keys work only while it has the focus) */
+    keysHelp: '방향키 이동 · + / − 확대·축소 · Home 자동 카메라 · Esc 고정 해제',
+    /** the hamster card: the hint under it while it follows the pointer, and the pinned card's button */
+    cardHint: '클릭: 고정 · 더블클릭: 가까이 보기',
+    cardLog: '말풍선 로그에서 보기',
+    /** the studio's bottom-right counters */
+    edits: (n: number) => `편집 ${n}`,
+    turns: (n: number) => `턴 ${n}`,
     signTip: 'spritfy.xyz 열기 ↗',
     signCaption: '3D & 스프라이트 생성 툴',
   },

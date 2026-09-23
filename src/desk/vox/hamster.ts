@@ -105,9 +105,16 @@ const VARIANTS: { h: number; l: number }[] = [
   { h: -0.05, l: -0.04 },
   { h: 0.06, l: 0.03 },
 ]
+/**
+ * The coat a variant actually wears: 0 is the first individual, and every one after it cycles
+ * through the four coats — so the fifth newcomer is the first one's twin, and the geometry cache
+ * (keyed on this) holds at most five coats per skin however many hamsters go into the sea.
+ */
+export const coatOf = (variant: number): number => (variant > 0 ? ((variant - 1) % VARIANTS.length) + 1 : 0)
+
 export function varyColor(color: number, variant: number): number {
   if (!variant) return color
-  const v = VARIANTS[(variant - 1) % VARIANTS.length]
+  const v = VARIANTS[(coatOf(variant) - 1) % VARIANTS.length]
   const c = new THREE.Color(color)
   const hsl = { h: 0, s: 0, l: 0 }
   c.getHSL(hsl)
@@ -300,8 +307,9 @@ export interface HamsterOptions {
 }
 
 export function buildHamster({ skin, tint, main, variant = 0 }: HamsterOptions, material: THREE.Material): HamsterRig {
-  const key = `${skin.family}|${skin.accessory}|${tint}|${main}|${variant}`
-  const geos = buildGeos(skin, tint, key, main, variant)
+  const coat = coatOf(variant)
+  const key = `${skin.family}|${skin.accessory}|${tint}|${main}|${coat}`
+  const geos = buildGeos(skin, tint, key, main, coat)
 
   const group = new THREE.Group()
   const mk = (geo: THREE.BufferGeometry): THREE.Mesh => {

@@ -60,7 +60,9 @@ src/App.tsx             상단 바(탭 줄: 탭마다 자기 세션만 구독)·
 src/styles.css          라이트/다크 토큰 두 벌(`:root` · `:root[data-theme='dark']`)과 모든 크롬 스타일, 3D 오버레이용 공용 토큰
 src/i18n.ts             사전 선택(useUi()/ui()/t(), 언어 변경 구독) · 효과 언어 판정(codeOfLanguage: 원어 이름·영어 이름·로캘 코드) · formatDuration · src/bubbles/summarize.ts 요약 요청(lane 별 600ms 디바운스, 늦은 답 폐기)
 src/desk/DeskStudio.tsx three.js 렌더러·씬·리그·라벨·UI(모듈 싱글턴 렌더러라 접었다 펴도 컨텍스트를 새로 만들지 않음)
-src/desk/office-world.ts 타일 좌표·좌석 배정(reconcileSeats)·복도 경로(Walker)·사장 순찰의 지름길(directRoute) — DOM/three 없음
+src/desk/office-world.ts 타일 좌표·좌석 배정(reconcileSeats)·복도 경로(Walker, 의자 뒤 통로로 도는 corridorRoute)·문 옆 대기 줄(LOBBY)·사장 순찰의 지름길(directRoute) — DOM/three 없음
+src/desk/declutter.ts   말풍선끼리 겹치지 않게 비켜 세우기(가까운 햄스터 먼저, 가장 짧은 쪽으로, 헤더·캔버스 밖으로는 안 밀기) — 순수
+src/desk/pace.ts        그리는 속도와 화질: 움직임·입력·포커스·미니 창에 따른 fps 표, 절전 화질 단계(픽셀 비율·그림자·바다 격자) — 순수
 src/desk/patrol.ts      사장의 순찰 상태기계(idle → going → scolding → returning): 언제 일어나고 누구에게 가고 무엇이 되돌리는지 — 스토어를 건드리지 않는 순수 모듈, 시계·주사위는 입력
 src/desk/office-camera.ts 3D 궤도 카메라 상태·광선/투영 수학(groundHit·focus·overview·pan·orbit·zoom)
 src/desk/vox/            복셀 코어: builder.ts(상자→지오메트리) · material.ts(셰이더·물·하늘) · hamster.ts(직립 리그) · props.ts(사무실·자연 소품) · world.ts(시드 섬 생성)
@@ -78,7 +80,7 @@ src/notify/             notifier.ts(store 구독 → 알림, 네 겹 게이트, 
 src/toast/              알림 창 페이지(toast.html · toast.ts · toast.css): 배너와 같은 토큰, styles.css 를 같이 읽어 라이트/다크가 같다 — React 없음
 src/mini/               MiniShell.tsx(미니 모드: 스튜디오 + 상태줄)
 src/workspaces-persist.ts 터미널 탭 저장·복원(ui.json 의 workspaces)
-scripts/unit/           단위 테스트(app-update · contracts · delegation · five-hour · i18n · model-choices · patrol · profiles · project-actions · prompt · recent · shortcuts · toast-stack · transcripts · turn-git · ui-store · usage-query · window-state)
+scripts/unit/           단위 테스트(app-update · atomic-write · backlog · contracts · declutter · delegation · env · five-hour · focus · i18n · layout · model-choices · pace · paste · patrol · profiles · project-actions · prompt · recent · shortcuts · statusline · store · toast-stack · transcripts · turn-git · ui-store · usage-query · walk · watcher · window-state) · furniture.ts(걷기 테스트가 쓰는 사무실 가구 배치) · temp-home.ts(로드할 때 경로를 고정하는 모듈 앞에 `HAMSTER_HOME` 을 임시 폴더로)
 ```
 
 ## 앱이 쓰는 파일

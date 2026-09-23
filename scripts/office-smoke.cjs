@@ -135,7 +135,10 @@ app.whenReady().then(async () => {
     const afterRemove = await plates()
     for (const [id, pos] of Object.entries(before)) if (id !== 'studio-0') assert.deepEqual(afterRemove[id], pos, `remove/reorder moved ${id}`)
     await new Promise(r => setTimeout(r, 500))
-    assert.deepEqual(await plates(), afterRemove, 'seated hamsters kept walking')
+    // (the ones without a desk are another matter: the reversed order put five others at the head
+    // of the queue by the door, and they walk in for it — only the seated ones must stay put)
+    const later = await plates()
+    for (const id of Object.keys(before)) if (id in afterRemove) assert.deepEqual(later[id], afterRemove[id], `seated ${id} kept walking`)
     await click('지도')
     const mapBefore = await mapPoints()
     // the middle button pans (the left one only takes hold of hamsters and prints)
