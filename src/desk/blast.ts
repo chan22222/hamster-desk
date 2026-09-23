@@ -16,12 +16,15 @@ import { H_OFFICE } from './office-world'
 /** how far out the wave keeps throwing up dust — past the island's edge, into the sea */
 const DUST_REACH = 1400
 /**
- * The cloud: this many puffs up the stem, this many round the cap. Many small boxes rather than a
- * few big ones — the envelope is the same, but it reads as billowing smoke instead of a stack of
- * crates. One instanced draw either way.
+ * The cloud: this many puffs up the stem, this many round the cap. The envelope is fixed; the box
+ * size is the look. The first cloud was 58 crates (a stack of boxes, not smoke), the one after it
+ * 1200 grains (fine enough to lose the voxel look, and 1200 instances to move every frame). This
+ * is the geometric middle of the two sizes (the `size` lines in `tickBlast`), with the count that
+ * keeps the cloud as dense as the grains did (count × size² held): still billowing, visibly boxes.
+ * One instanced draw either way.
  */
-const STEM_N = 320
-const CAP_N = 880
+const STEM_N = 60
+const CAP_N = 160
 /** the pool for the wave's dust and the hamsters' ash */
 const SMOKE_CAP = 220
 
@@ -152,7 +155,7 @@ export function tickBlast(b: Blast, t: number, dt: number, ground: GroundAt, sea
         x = CENTRE.x + Math.cos(p.a + spin) * rr
         z = CENTRE.z + Math.sin(p.a + spin) * rr
         y = CENTRE.y + m.stem + capH * (0.2 + 0.6 * p.v) * Math.sqrt(1 - p.r * p.r * 0.8)
-        size = m.cap * (0.06 + 0.035 * p.seed) * (1 - 0.35 * p.r)
+        size = m.cap * (0.14 + 0.084 * p.seed) * (1 - 0.35 * p.r)
         smoke = Math.min(1, m.smoke * (0.6 + 0.6 * p.v))
       } else {
         // the stem: narrow at the foot, fatter up top, its foot still glowing
@@ -160,7 +163,7 @@ export function tickBlast(b: Blast, t: number, dt: number, ground: GroundAt, sea
         x = CENTRE.x + Math.cos(p.a + spin * 0.6) * rr
         z = CENTRE.z + Math.sin(p.a + spin * 0.6) * rr
         y = CENTRE.y + 20 + m.stem * p.v
-        size = m.cap * (0.055 + 0.03 * p.seed) * (0.7 + 0.3 * p.v)
+        size = m.cap * (0.13 + 0.07 * p.seed) * (0.7 + 0.3 * p.v)
         smoke = Math.min(1, m.smoke * (0.4 + 0.8 * p.v))
       }
       const c = smoke < 0.5 ? mix(FIRE, EMBER, smoke * 2) : mix(EMBER, SMOKE, (smoke - 0.5) * 2)

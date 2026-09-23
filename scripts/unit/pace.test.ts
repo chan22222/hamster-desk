@@ -8,7 +8,11 @@ import { FPS, QUALITY, SAVER_AFTER_MS, frameDue, frameRate, pixelRatio, qualityF
 
 const rate = (focused: boolean, mini: boolean, lively: boolean, input: boolean): number => frameRate({ focused, mini, lively, input })
 
-test('full rate for input and for motion, half at rest, less again behind other windows and in the mini window', () => {
+test("the display's own rate for input and for motion, 60 at rest, less again behind other windows and in the mini window", () => {
+  // uncapped: 0.1.19 held motion to 60, which a 165 Hz screen draws on every third vsync — lag
+  assert.equal(FPS.input, Infinity)
+  assert.equal(FPS.lively, Infinity)
+  assert.equal(FPS.calm, 60)
   assert.equal(rate(true, false, true, false), FPS.lively)
   assert.equal(rate(true, false, false, false), FPS.calm)
   assert.equal(rate(false, false, true, false), FPS.backLively)
@@ -39,7 +43,8 @@ test('on the display clock: 60 is every vsync of a 60 Hz screen, 30 every second
   assert.equal(Math.round(drawn(60, 60)), 60)
   assert.equal(Math.round(drawn(30, 60)), 30)
   assert.equal(Math.round(drawn(20, 60)), 20)
-  // a fast screen is held down to about the rate asked for, not run at its own
+  // the capped rates — the office at rest, the background — hold a fast screen down to about the
+  // rate asked for, not run at its own
   for (const hz of [120, 144, 165]) {
     const d60 = drawn(60, hz)
     const d30 = drawn(30, hz)
@@ -47,6 +52,15 @@ test('on the display clock: 60 is every vsync of a 60 Hz screen, 30 every second
     assert.ok(d30 >= 27 && d30 <= 37, `30 fps on a ${hz} Hz screen drew ${d30}`)
   }
   assert.ok(drawn(60, 30) <= 30, 'never more frames than the screen shows')
+  assert.ok(drawn(Infinity, 30) <= 30, 'not even uncapped')
+})
+
+test('motion and input take every vsync the display has — 165 on a 165 Hz screen, not every third', () => {
+  for (const hz of [60, 120, 144, 165]) {
+    assert.equal(Math.round(drawn(FPS.lively, hz)), hz, `motion on a ${hz} Hz screen`)
+    assert.equal(Math.round(drawn(FPS.input, hz)), hz, `input on a ${hz} Hz screen`)
+  }
+  assert.ok(frameDue(0, Infinity), 'uncapped is due at once')
 })
 
 test('the cheaper picture comes on in the mini window at once, behind other windows only after a while, and goes at once', () => {
