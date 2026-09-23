@@ -1,6 +1,6 @@
 import { homedir } from 'node:os'
 import { join } from 'node:path'
-import { existsSync, readdirSync } from 'node:fs'
+import { promises as fsp } from 'node:fs'
 
 export function claudeDir(): string {
   return process.env.CLAUDE_CONFIG_DIR || join(homedir(), '.claude')
@@ -21,22 +21,37 @@ export function projectSlug(cwd: string): string {
   return cwd.replace(/[^a-zA-Z0-9]/g, '-')
 }
 
-/** Locate `<projects>/<slug>/<sessionId>.jsonl`; falls back to scanning every project folder. */
-export function findTranscript(sessionId: string, cwd?: string, base?: string): string | null {
+const exists = (p: string): Promise<boolean> =>
+  fsp.access(p).then(
+    () => true,
+    () => false,
+  )
+
+/** `<projects>/<slug of cwd>/<sessionId>.jsonl` if it is there: one stat, cheap enough to ask every second. */
+export async function transcriptAt(sessionId: string, cwd?: string, base?: string): Promise<string | null> {
+  if (!cwd) return null
+  const direct = join(projectsDir(base), projectSlug(cwd), `${sessionId}.jsonl`)
+  return (await exists(direct)) ? direct : null
+}
+
+/**
+ * Locate `<projects>/<slug>/<sessionId>.jsonl`; falls back to looking in every project folder, for a
+ * cwd whose folder is not named by the slug rule. That fallback costs a stat per project folder —
+ * hundreds for a long-time user — so callers ask it sparingly (DeskWatcher backs off).
+ */
+export async function findTranscript(sessionId: string, cwd?: string, base?: string): Promise<string | null> {
+  const direct = await transcriptAt(sessionId, cwd, base)
+  if (direct) return direct
   const root = projectsDir(base)
-  if (cwd) {
-    const direct = join(root, projectSlug(cwd), `${sessionId}.jsonl`)
-    if (existsSync(direct)) return direct
-  }
   let dirs: string[] = []
   try {
-    dirs = readdirSync(root)
+    dirs = await fsp.readdir(root)
   } catch {
     return null
   }
   for (const d of dirs) {
     const p = join(root, d, `${sessionId}.jsonl`)
-    if (existsSync(p)) return p
+    if (await exists(p)) return p
   }
   return null
 }

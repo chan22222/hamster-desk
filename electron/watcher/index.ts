@@ -3,9 +3,20 @@ import { dirname } from 'node:path'
 import type { DeskEvent, SessionInfo } from '../../shared/events'
 import { SessionWatcher } from './sessions'
 import { ProjectWatcher } from './project'
-import { findTranscript } from './paths'
+import { findTranscript, transcriptAt } from './paths'
 
 export type { DeskEvent, SessionInfo }
+
+/** the slug-named folder is looked at every tick; every folder only this often, doubling up to the cap */
+const SCAN_FIRST_MS = 1000
+const SCAN_MAX_MS = 30_000
+
+interface Pending {
+  info: SessionInfo
+  /** when the look through every project folder is due again */
+  scanAt: number
+  misses: number
+}
 
 export interface DeskWatcherOptions {
   /** shells this window spawned (empty → nothing is "mine", everything is shown) */
@@ -24,7 +35,10 @@ export class DeskWatcher extends EventEmitter {
   private projects = new Map<string, ProjectWatcher>() // dir → watcher
   private sessionDir = new Map<string, string>() // sessionId → project dir
   private locate: NodeJS.Timeout | null = null
-  private pendingTranscript = new Map<string, SessionInfo>()
+  private locating = false
+  private pendingTranscript = new Map<string, Pending>()
+  /** stop() can come while start() or an attach is still awaiting; nothing may be set up after it */
+  private stopped = false
 
   private readonly baseDir: string | undefined
 
@@ -38,8 +52,9 @@ export class DeskWatcher extends EventEmitter {
 
   async start(): Promise<void> {
     await this.sessions.start()
+    if (this.stopped) return
     // a fresh session has no transcript until the first message; keep looking
-    this.locate = setInterval(() => void this.retryPending(), 1000)
+    this.locate = setInterval(() => void this.retryPending(), SCAN_FIRST_MS)
   }
 
   /** Re-scan now (e.g. right after a new shell was spawned, so ownership is attributed quickly). */
@@ -48,10 +63,14 @@ export class DeskWatcher extends EventEmitter {
   }
 
   stop(): void {
+    this.stopped = true
     this.sessions.stop()
     if (this.locate) clearInterval(this.locate)
+    this.locate = null
     for (const p of this.projects.values()) p.stop()
     this.projects.clear()
+    this.sessionDir.clear()
+    this.pendingTranscript.clear()
   }
 
   get liveSessions(): SessionInfo[] {
@@ -59,9 +78,18 @@ export class DeskWatcher extends EventEmitter {
   }
 
   private async onSession(s: SessionInfo): Promise<void> {
+    if (this.stopped) return
     this.emit('event', { kind: 'session', ...s } satisfies DeskEvent)
     if (!s.transcriptPath) {
-      this.pendingTranscript.set(s.sessionId, s)
+      const had = this.pendingTranscript.get(s.sessionId)
+      if (!had) {
+        this.pendingTranscript.set(s.sessionId, { info: s, scanAt: 0, misses: 0 })
+        return
+      }
+      // A status change is the moment a transcript gets written (the first message), so it brings
+      // the look through every folder forward; otherwise the backoff it is on carries over.
+      if (had.info.status !== s.status) had.scanAt = 0
+      had.info = s
       return
     }
     this.pendingTranscript.delete(s.sessionId)
@@ -69,7 +97,7 @@ export class DeskWatcher extends EventEmitter {
   }
 
   private async attach(sessionId: string, transcriptPath: string): Promise<void> {
-    if (this.sessionDir.has(sessionId)) return
+    if (this.stopped || this.sessionDir.has(sessionId)) return
     const dir = dirname(transcriptPath)
     let pw = this.projects.get(dir)
     if (!pw) {
@@ -82,21 +110,45 @@ export class DeskWatcher extends EventEmitter {
     await pw.track(sessionId)
   }
 
+  /**
+   * Sessions without a transcript yet. The folder named by the cwd's slug is one stat and is looked
+   * at every tick; looking in every project folder (a cwd the slug rule does not name) used to run
+   * synchronously every second for as long as a claude sat unused, and now backs off to 30 s.
+   */
   private async retryPending(): Promise<void> {
-    for (const [id, s] of this.pendingTranscript) {
-      const p = findTranscript(id, s.cwd, this.baseDir)
-      if (!p) continue
-      this.pendingTranscript.delete(id)
-      const live = this.sessions.sessions.get(id)
-      if (live) {
-        live.transcriptPath = p
-        this.emit('event', { kind: 'session', ...live } satisfies DeskEvent)
+    if (this.locating || this.stopped) return
+    this.locating = true
+    try {
+      for (const [id, pending] of [...this.pendingTranscript]) {
+        const due = pending.scanAt
+        const scan = Date.now() >= due
+        const cwd = pending.info.cwd
+        const p = scan ? await findTranscript(id, cwd, this.baseDir) : await transcriptAt(id, cwd, this.baseDir)
+        // stopped, gone, or answered by the session watcher while this looked
+        if (this.stopped || this.pendingTranscript.get(id) !== pending) continue
+        if (!p) {
+          // (a status change while this looked has already asked for the next look to come sooner)
+          if (scan && pending.scanAt === due) {
+            pending.misses++
+            pending.scanAt = Date.now() + Math.min(SCAN_FIRST_MS * 2 ** pending.misses, SCAN_MAX_MS)
+          }
+          continue
+        }
+        this.pendingTranscript.delete(id)
+        const live = this.sessions.sessions.get(id)
+        if (live) {
+          live.transcriptPath = p
+          this.emit('event', { kind: 'session', ...live } satisfies DeskEvent)
+        }
+        await this.attach(id, p)
       }
-      await this.attach(id, p)
+    } finally {
+      this.locating = false
     }
   }
 
   private onGone(sessionId: string): void {
+    if (this.stopped) return
     this.pendingTranscript.delete(sessionId)
     const dir = this.sessionDir.get(sessionId)
     if (dir) {

@@ -2,8 +2,8 @@ import { EventEmitter } from 'node:events'
 import { promises as fsp, watch, type FSWatcher } from 'node:fs'
 import { join } from 'node:path'
 import type { SessionInfo } from '../../shared/events'
-import { sessionsDir, findTranscript } from './paths'
-import { parentMap, isDescendant, processAlive } from './processes'
+import { sessionsDir, transcriptAt } from './paths'
+import { parentMap, retainParentMap, isDescendant, processAlive } from './processes'
 
 export interface OwnedShell {
   ptyId: number
@@ -18,6 +18,8 @@ export interface SessionWatcherOptions {
   baseDir?: string
   /** stamped on every session found there */
   profileId?: string
+  /** the parent-pid map; processes.ts's PowerShell query unless a test hands in its own */
+  parents?: (fresh?: boolean) => Promise<Map<number, number>>
 }
 
 /**
@@ -31,12 +33,24 @@ export class SessionWatcher extends EventEmitter {
   private timer: NodeJS.Timeout | null = null
   private scanning = false
   private rescan = false
+  private stopped = false
+  private release: (() => void) | null = null
+  /**
+   * Sessions judged to run outside this window, and under which shells. A claude's ancestry does not
+   * change, so asking again every scan only re-ran PowerShell + WMI every few seconds for as long as
+   * a claude was open in VS Code or another terminal. The verdict stands until a new shell appears.
+   */
+  private external = new Map<string, { pid: number; shells: number }>()
+  private shellKeys = new Set<string>()
+  /** bumped whenever this window gets a shell it did not have: every external verdict is asked again */
+  private shells = 0
 
   constructor(private readonly opts: SessionWatcherOptions) {
     super()
   }
 
   async start(): Promise<void> {
+    this.release ??= retainParentMap()
     const dir = sessionsDir(this.opts.baseDir)
     try {
       this.watcher = watch(dir, { persistent: false }, () => void this.scan())
@@ -49,13 +63,17 @@ export class SessionWatcher extends EventEmitter {
   }
 
   stop(): void {
+    this.stopped = true
     this.watcher?.close()
     this.watcher = null
     if (this.timer) clearInterval(this.timer)
     this.timer = null
+    this.release?.()
+    this.release = null
   }
 
   async scan(): Promise<void> {
+    if (this.stopped) return
     if (this.scanning) {
       this.rescan = true
       return
@@ -65,7 +83,7 @@ export class SessionWatcher extends EventEmitter {
       do {
         this.rescan = false
         await this.scanOnce()
-      } while (this.rescan)
+      } while (this.rescan && !this.stopped)
     } finally {
       this.scanning = false
     }
@@ -81,6 +99,9 @@ export class SessionWatcher extends EventEmitter {
     }
     const seen = new Set<string>()
     const owned = this.opts.ownedShells()
+    const keys = owned.map((o) => `${o.ptyId}:${o.pid}`)
+    if (keys.some((k) => !this.shellKeys.has(k))) this.shells++ // a closed shell cannot adopt anyone
+    this.shellKeys = new Set(keys)
     let pmap: Map<number, number> | null = null
     let refreshed = false
 
@@ -105,21 +126,31 @@ export class SessionWatcher extends EventEmitter {
 
       const prev = this.sessions.get(sessionId)
       let ptyId = prev?.ptyId ?? null
-      if ((!prev || (ptyId === null && !prev.mine)) && owned.length) {
-        pmap ??= await parentMap()
+      const verdict = this.external.get(sessionId)
+      const settled = verdict !== undefined && verdict.pid === pid && verdict.shells === this.shells
+      if (ptyId === null && !settled && owned.length) {
+        const parents = this.opts.parents ?? parentMap
+        pmap ??= await parents()
         // A claude that started a second ago is not in a map taken four seconds ago — and "not in
         // the map" used to read as "not ours", so a session started in one of this window's own
         // terminals showed up as a second, foreign tab until a later scan put it right. Ask again,
         // once per scan, before deciding.
         if (!pmap.has(pid) && !refreshed) {
           refreshed = true
-          pmap = await parentMap(true)
+          pmap = await parents(true)
         }
         const owner = owned.find((o) => isDescendant(pid, o.pid, pmap!))
         ptyId = owner ? owner.ptyId : null
+        // "not ours" only stands when the map knew the pid; otherwise (a failed query, a claude
+        // younger than both maps) the next scan asks again
+        if (ptyId === null && pmap.has(pid)) this.external.set(sessionId, { pid, shells: this.shells })
       }
+      if (this.stopped) return
       const cwd = String(j.cwd ?? '')
-      const transcriptPath = prev?.transcriptPath ?? findTranscript(sessionId, cwd, this.opts.baseDir)
+      // a session still waiting for its transcript is DeskWatcher's to keep looking for (with backoff);
+      // here only a new one gets the one cheap look
+      const transcriptPath = prev ? prev.transcriptPath : await transcriptAt(sessionId, cwd, this.opts.baseDir)
+      if (this.stopped) return
       const info: SessionInfo = {
         sessionId,
         pid,
@@ -148,9 +179,11 @@ export class SessionWatcher extends EventEmitter {
       }
     }
 
+    if (this.stopped) return
     for (const [id] of this.sessions) {
       if (!seen.has(id)) {
         this.sessions.delete(id)
+        this.external.delete(id)
         this.emit('session_gone', id)
       }
     }

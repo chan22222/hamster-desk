@@ -11,6 +11,47 @@ const MAIN_TAIL_BYTES = 8_000_000
 const AGENT_TAIL_BYTES = 1_000_000
 const DEBOUNCE_MS = 30
 const POLL_MS = 1500
+/** an unchanged model is still repeated after this many events (see ModelFilter) */
+const MODEL_REPEAT_EVERY = 500
+
+/** events every ProjectWatcher has emitted: roughly where main's backlog ring (4000) has got to */
+let emitted = 0
+
+/**
+ * Every assistant record carries its model, and Claude Code writes one record per content block, so
+ * `model` was close to half of all events — the same value again and again, crowding the backlog ring
+ * main keeps for a renderer that mounts late. Only what changes what the renderer shows goes through:
+ * a new model, or a new effort (a record without one keeps the last, as the store does). The value is
+ * repeated after MODEL_REPEAT_EVERY events regardless, so a ring that has dropped the first one still
+ * holds one near the agent's latest work.
+ */
+export class ModelFilter {
+  private last = new Map<string, { model: string; effort: string | null; at: number }>()
+
+  constructor(private readonly repeatEvery = MODEL_REPEAT_EVERY) {}
+
+  /** `at`: how many events have gone out so far */
+  pass(e: { sessionId: string; agentId: string | null; model: string; effort: string | null }, at: number): boolean {
+    const key = `${e.sessionId}:${e.agentId ?? ''}`
+    const prev = this.last.get(key)
+    const effort = e.effort ?? prev?.effort ?? null
+    if (prev && prev.model === e.model && prev.effort === effort && at - prev.at < this.repeatEvery) return false
+    this.last.set(key, { model: e.model, effort, at })
+    return true
+  }
+
+  /**
+   * Start over for one hamster (`agentId`, null = the main conversation) or, without it, for the
+   * whole session. The renderer lets a finished agent go, and a resumed one comes back without a model.
+   */
+  forget(sessionId: string, agentId?: string | null): void {
+    if (agentId !== undefined) {
+      this.last.delete(`${sessionId}:${agentId ?? ''}`)
+      return
+    }
+    for (const key of this.last.keys()) if (key.startsWith(`${sessionId}:`)) this.last.delete(key)
+  }
+}
 
 interface AgentSlot {
   tailer: Tailer | null
@@ -66,7 +107,7 @@ export class ProjectWatcher extends EventEmitter {
 
   /** Begin tracking a session whose main transcript lives in this folder. */
   async track(sessionId: string, opts: { fromStart?: boolean } = {}): Promise<void> {
-    if (this.mains.has(sessionId)) return
+    if (this.closed || this.mains.has(sessionId)) return
     const path = join(this.dir, `${sessionId}.jsonl`)
     const tailer = new Tailer(path, (line) => this.emitAll(parseLine(line, { sessionId, agentId: null })), {
       tailBytes: opts.fromStart ? undefined : MAIN_TAIL_BYTES,
@@ -74,6 +115,8 @@ export class ProjectWatcher extends EventEmitter {
     this.mains.set(sessionId, tailer)
     if (!this.agents.has(sessionId)) this.agents.set(sessionId, new Map())
     await tailer.open()
+    // untracked (the session ended) or stopped while the catch-up was read
+    if (this.closed || this.mains.get(sessionId) !== tailer) return
     await this.discoverAgents(sessionId, opts.fromStart === true)
   }
 
@@ -83,6 +126,9 @@ export class ProjectWatcher extends EventEmitter {
     const slots = this.agents.get(sessionId)
     if (slots) for (const s of slots.values()) s.tailer?.close()
     this.agents.delete(sessionId)
+    // the same id can come back (claude --resume) and must be told its title and model again
+    this.lastTitle.delete(sessionId)
+    this.models.forget(sessionId)
   }
 
   get trackedCount(): number {
@@ -90,15 +136,24 @@ export class ProjectWatcher extends EventEmitter {
   }
 
   private lastTitle = new Map<string, string>()
+  private models = new ModelFilter()
 
   private emitAll(evs: DeskEvent[]): void {
-    for (const e of evs) {
-      if (e.kind === 'title') {
-        if (this.lastTitle.get(e.sessionId) === e.title) continue
-        this.lastTitle.set(e.sessionId, e.title)
-      }
-      this.emit('event', e)
+    for (const e of evs) this.out(e)
+  }
+
+  /** Every event leaves through here: the unchanged title and model are dropped on the way. */
+  private out(e: DeskEvent): void {
+    if (e.kind === 'title') {
+      if (this.lastTitle.get(e.sessionId) === e.title) return
+      this.lastTitle.set(e.sessionId, e.title)
+    } else if (e.kind === 'model') {
+      if (!this.models.pass(e, emitted)) return
+    } else if (e.kind === 'agent_stop') {
+      this.models.forget(e.sessionId, e.agentId)
     }
+    emitted++
+    this.emit('event', e)
   }
 
   private onChange(rel: string): void {
@@ -183,6 +238,8 @@ export class ProjectWatcher extends EventEmitter {
   }
 
   private async touchAgent(sessionId: string, agentId: string, path: string, part: 'jsonl' | 'meta', catchUp: boolean): Promise<void> {
+    // a session that ended while its agents were being found gets no new tailers
+    if (this.closed || !this.mains.has(sessionId)) return
     const s = this.slot(sessionId, agentId)
     if (part === 'meta') {
       if (s.metaSeen) return
@@ -192,6 +249,7 @@ export class ProjectWatcher extends EventEmitter {
       } catch {
         return // half-written; retried on the next change event
       }
+      if (this.closed || this.agents.get(sessionId)?.get(agentId) !== s) return
       s.metaSeen = true
       s.agentType = String(j.agentType ?? s.agentType)
       s.description = String(j.description ?? s.description)
@@ -219,7 +277,7 @@ export class ProjectWatcher extends EventEmitter {
               s.started = false
             }
             if (!s.started) this.emitStart(sessionId, agentId, s)
-            this.emit('event', e)
+            this.out(e)
           }
         },
         { tailBytes: catchUp ? AGENT_TAIL_BYTES : undefined },
@@ -243,6 +301,6 @@ export class ProjectWatcher extends EventEmitter {
       background: s.background,
       ts: Date.now(),
     }
-    this.emit('event', ev)
+    this.out(ev)
   }
 }
