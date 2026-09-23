@@ -211,6 +211,8 @@ export const fr: UiStrings = {
     weekAll: 'Hebdo (tout)',
     weekModel: (model) => `Hebdo (${model})`,
     accountTip: (name) => `Utilisation du compte ${name}`,
+    settingsError: (why) => `Impossible de lire ou d’enregistrer settings.json : rien n’a été modifié (${why}). Vérifiez le fichier et réessayez.`,
+    settingsErrorPill: 'Erreur du fichier de réglages',
   },
 
   update: {

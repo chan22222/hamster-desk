@@ -211,6 +211,8 @@ export const es: UiStrings = {
     weekAll: 'Semanal (todo)',
     weekModel: (model) => `Semanal (${model})`,
     accountTip: (name) => `Uso de la cuenta ${name}`,
+    settingsError: (why) => `No se pudo leer ni guardar settings.json, así que no se cambió nada (${why}). Revisa el archivo e inténtalo de nuevo.`,
+    settingsErrorPill: 'Error en el archivo de ajustes',
   },
 
   update: {

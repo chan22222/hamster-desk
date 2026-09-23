@@ -2,7 +2,7 @@ import { execFile } from 'node:child_process'
 import { mkdirSync, readFileSync, renameSync, writeFileSync } from 'node:fs'
 import { homedir } from 'node:os'
 import { dirname, join } from 'node:path'
-import { claudeInvocation, cleanEnv, findClaude } from './env'
+import { claudeInvocation, cleanEnv, findClaude, stopTree, type ClaudeInvocation } from './env'
 import { tr } from './lang'
 import type { BubbleRequest, BubbleResult, BubbleState, BubbleStats } from '../shared/events'
 
@@ -13,9 +13,9 @@ import type { BubbleRequest, BubbleResult, BubbleState, BubbleStats } from '../s
  * English tool chatter), so the bubble gets cut off. Instead we ask Haiku for one short line, run
  * as a headless `claude -p`:
  *
- *   MAX_THINKING_TOKENS=0 claude -p --model haiku --no-session-persistence --disable-slash-commands \
- *     --tools "" --strict-mcp-config --setting-sources "" --output-format json \
- *     --system-prompt "<system>" "<user>"
+ *   echo "<user>" | MAX_THINKING_TOKENS=0 claude -p --model haiku --no-session-persistence \
+ *     --disable-slash-commands --tools "" --strict-mcp-config --setting-sources "" \
+ *     --output-format json --system-prompt "<system>"
  *
  * Every flag earns its place:
  *  - MAX_THINKING_TOKENS=0 — without it Haiku thinks ~5,000 tokens and the call takes 44s instead
@@ -25,6 +25,10 @@ import type { BubbleRequest, BubbleResult, BubbleState, BubbleStats } from '../s
  *  - --tools "" / --strict-mcp-config / --setting-sources "" / --disable-slash-commands — nothing of
  *    the user's config is loaded, so the call stays at ~550 input tokens (~$0.0007, 2.8s measured).
  *  - --output-format json — one JSON object on stdout with `result`, `is_error`, `usage`, cost.
+ *  - the text to summarize on stdin, not as an argument: it comes out of a transcript and can run to
+ *    several lines, and an npm `claude.cmd` that has to go through cmd.exe (electron/env.ts) would
+ *    cut it at the first line break and expand `%…%` in it. For the same reason the system prompt is
+ *    one line.
  *
  * The environment must come from cleanEnv(): if the app itself was started inside a Claude Code
  * session, CLAUDECODE & friends would be inherited and the CLI would treat this as a nested session.
@@ -37,7 +41,7 @@ const SYSTEM = [
   'You voice a pixel-art hamster that stands in for an AI coding assistant working in a terminal.',
   'Given what the assistant just said (or the task it was just assigned), write the hamster’s speech bubble: what it is doing or about to do right now.',
   'Rules: write in {lang}; first person, present tense, one line; at most {maxChars} characters; keep concrete nouns (file names, features, commands); drop greetings, apologies and filler; no quotes, no emoji, no markdown, no trailing period. Output only the bubble text.',
-].join('\n')
+].join(' ') // one line: it is an argument (see the header)
 
 const INPUT_MAX = 1200
 const CACHE_MAX = 500
@@ -177,9 +181,13 @@ function runClaude(system: string, user: string, signal: AbortSignal): Promise<s
     'json',
     '--system-prompt',
     system,
-    user,
   ]
-  const inv = claudeInvocation(bin, argv)
+  let inv: ClaudeInvocation
+  try {
+    inv = claudeInvocation(bin, argv)
+  } catch (e) {
+    return Promise.reject(e as Error)
+  }
   return new Promise((resolve, reject) => {
     const child = execFile(
       inv.file,
@@ -190,15 +198,21 @@ function runClaude(system: string, user: string, signal: AbortSignal): Promise<s
         windowsHide: true,
         windowsVerbatimArguments: inv.verbatim,
         maxBuffer: 4 * 1024 * 1024,
-        signal,
       },
       (err, stdout) => {
         if (err) return reject(err)
         resolve(String(stdout))
       },
     )
-    // with a pipe on stdin that nobody closes, `-p` first waits 3 s for input it will never get
-    child.stdin?.end()
+    // a timeout or dispose() takes the whole tree: through cmd.exe, killing the child alone would
+    // leave claude running (electron/env.ts)
+    const stop = (): void => stopTree(child)
+    if (signal.aborted) stop()
+    else signal.addEventListener('abort', stop, { once: true })
+    // `-p` with no prompt argument reads the prompt from stdin; closing it is also what keeps `-p`
+    // from first waiting 3 s for more
+    child.stdin?.on('error', () => {})
+    child.stdin?.end(user)
   })
 }
 

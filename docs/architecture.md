@@ -28,10 +28,13 @@
 ## 파일 지도
 
 ```
-electron/main.ts        창, pty 스폰, 감시기·상태줄·버전 → 렌더러(순번 붙은 백로그로 늦게 붙어도 따라잡음)
-electron/pty.ts         node-pty(ConPTY) 스폰 · 종료(taskkill /T)
+electron/main.ts        창, pty 스폰, 감시기·상태줄·버전 → 렌더러(한 틱에 모아 한 번에) · 창은 앱의 페이지만(이동 차단·IPC 보낸 쪽 확인) · 렌더러가 죽으면 셸을 내리고 다시 읽기
+electron/backlog.ts     이벤트 백로그: 순번 · 4000건 링 · 링이 밀어낸 세션·제목·모델·상태줄·버전을 따로 기억해 다시 보낼 때 앞에 — 단위 테스트
+electron/pty.ts         node-pty(ConPTY) 스폰 · 종료(taskkill /T, 비동기)
+electron/atomic-write.ts 사용자 파일(settings.json·CLAUDE.md) 바꾸기: 임시 파일 → fsync → rename, `.hamster-bak`, 심볼릭 링크는 가리키는 파일을
+electron/boot-log.ts    boot.log(부팅 구간별 시간) · error.log(메인에서 아무도 못 본 오류)
 electron/prompt.ts      "답을 기다린다" 감지: 화면 문구(공백 무시 비교, 선택지 질문 모양) + 트랜스크립트의 AskUserQuestion 을 합치는 WaitingGate — node-pty 없음
-electron/env.ts         cleanEnv(환경 정리) · findClaude(claude 실행 파일 탐색, .cmd 는 cmd.exe 경유) — node-pty 를 안 물어서 tsx 로도 돈다
+electron/env.ts         cleanEnv(환경 정리) · findClaude(claude 실행 파일 탐색, npm 의 .cmd 는 그것이 띄우는 프로그램을 직접 — 못 읽을 때만 cmd.exe, 그때는 cmd 가 바꿀 인자는 거부) · stopTree(트리째 종료) — node-pty 를 안 물어서 tsx 로도 돈다
 electron/summarize.ts   말풍선 요약: headless `claude -p --model haiku` 의 큐·캐시·회로 차단
 electron/five-hour.ts   5시간 창 자동 시작: 계정별 예약 · stream-json 의 rate_limit_event 파싱 · 재시도 — electron 의존 없음
 electron/delegation.ts  멀티 에이전트: 계정별 CLAUDE.md 의 표시된 블록 넣기/빼기 · 프리셋 문안 — electron 의존 없음
@@ -86,11 +89,11 @@ scripts/unit/           단위 테스트(app-update · contracts · delegation �
 |---|---|
 | `ui.json` · `ui.bak.json` · `ui.corrupt.json` | 설정 전부(아래). 직전의 온전한 파일과 깨진 파일 |
 | `profiles/acc-N/` | 추가한 계정의 `CLAUDE_CONFIG_DIR` — 로그인·설정·대화 기록은 CLI 가 쓴다 |
-| `status/<sessionId>.json` · `statusline.cjs` | 사용량 연동을 켰을 때 상태줄 스크립트가 남기는 스냅샷과 그 스크립트 |
+| `status/<sessionId>.json` · `statusline.cjs` | 사용량 연동을 켰을 때 상태줄 스크립트가 남기는 스냅샷과 그 스크립트. 7일 넘은 스냅샷은 앱이 지운다(앱 밖의 세션 것도 쌓이기만 했다) |
 | `bubble-stats.json` | 말풍선 요약의 누적 사용량 |
-| `update.log` · `boot.log` | 앱 업데이트의 확인·다운로드·설치·오류(최근 200줄), 부팅 구간별 시간(최근 50줄, [설계 노트](design-notes.md#새로-빌드한-뒤의-첫-실행만-느리다)) |
+| `update.log` · `boot.log` · `error.log` | 앱 업데이트의 확인·다운로드·설치·오류(최근 200줄), 부팅 구간별 시간(최근 50줄, [설계 노트](design-notes.md#새로-빌드한-뒤의-첫-실행만-느리다)), 메인 프로세스에서 아무도 못 본 오류 — 잡히지 않은 예외, 실패한 시작 단계, 죽은 렌더러(최근 200줄) |
 
-`~/.claude` 쪽에 쓰는 것은 위의 두 예외뿐이다: `settings.json` 의 `statusLine`(사용자가 연동을 켤 때)과 `CLAUDE.md` 끝의 표시된 블록(멀티 에이전트, 기본 켜짐). Electron 프로필(`%APPDATA%\hamster-desk`)에는 Chromium 캐시만 있다.
+`~/.claude` 쪽에 쓰는 것은 위의 두 예외뿐이다: `settings.json` 의 `statusLine`(사용자가 연동을 켤 때)과 `CLAUDE.md` 끝의 표시된 블록(멀티 에이전트, 기본 켜짐). 둘 다 `electron/atomic-write.ts` 로 쓴다 — 임시 파일 → fsync → rename, 심볼릭 링크면 가리키는 파일을. `settings.json` 은 **읽을 수 없으면 쓰지 않고**(없는 파일만 빈 설정이다), 바꾸기 직전의 파일을 `settings.json.hamster-bak` 으로 남긴다([설계 노트](design-notes.md#설정-파일을-앱이-스스로-날리지-않게-한다)). Electron 프로필(`%APPDATA%\hamster-desk`)에는 Chromium 캐시만 있다.
 
 ## 프로필
 
@@ -135,7 +138,9 @@ scripts/unit/           단위 테스트(app-update · contracts · delegation �
 
 내장 셸의 환경은 앱을 띄운 프로세스가 아니라 사용자의 터미널처럼 보이도록 정리한다(`electron/env.ts` `cleanEnv`): npm/npx 가 끼워 넣는 `node_modules\.bin` PATH 항목과 `npm_*` 변수, 그리고 다른 Claude Code 세션 안에서 띄웠을 때 상속되는 `CLAUDE_CODE_CHILD_SESSION` 같은 내부 표식을 제거하고, 네이티브 설치 경로 `~/.local/bin` 을 PATH 맨 앞에 둔다. 이 정리가 없으면 중첩 세션으로 오인돼 트랜스크립트·세션 파일이 생기지 않아 햄스터가 아무것도 못 본다.
 
-창을 닫으면 셸과 그 안의 `claude` 까지 프로세스 트리째 종료한다(`taskkill /T`). 이 정리는 `before-quit` 에서 돈다 — `window-all-closed` 는 `app.quit()` 로 시작된 종료(캡처 스모크, 메뉴 종료)에서는 **아예 발생하지 않아서**, 거기에만 정리를 걸어 두면 pty 가 살아남고 node-pty 의 ConPTY 핸들이 `quit` 이벤트 뒤에도 프로세스를 붙잡아 창 없는 `electron.exe` 가 남는다. 강제 종료된 세션의 `~/.claude/sessions/<pid>.json` 은 남을 수 있는데, 감시기는 죽은 pid 의 파일을 무시한다. Claude Code 가 이런 강제 종료를 겪으면 다음 실행에서 "fullscreen renderer didn't finish starting last time" 이라며 한 번 클래식 렌더러로 뜰 수 있다(그다음 실행부터 정상).
+창을 닫으면 셸과 그 안의 `claude` 까지 프로세스 트리째 종료한다(`taskkill /T` — 비동기로, 셸마다 동시에; 탭 하나를 닫는 동안 다른 터미널의 출력이 멈추지 않고, 종료는 전부 끝나기를 최대 3초 기다린다). 이 정리는 `before-quit` 에서 돈다 — `window-all-closed` 는 `app.quit()` 로 시작된 종료(캡처 스모크, 메뉴 종료)에서는 **아예 발생하지 않아서**, 거기에만 정리를 걸어 두면 pty 가 살아남고 node-pty 의 ConPTY 핸들이 `quit` 이벤트 뒤에도 프로세스를 붙잡아 창 없는 `electron.exe` 가 남는다. 강제 종료된 세션의 `~/.claude/sessions/<pid>.json` 은 남을 수 있는데, 감시기는 죽은 pid 의 파일을 무시한다. Claude Code 가 이런 강제 종료를 겪으면 다음 실행에서 "fullscreen renderer didn't finish starting last time" 이라며 한 번 클래식 렌더러로 뜰 수 있다(그다음 실행부터 정상).
+
+페이지가 셸에 다시 붙을 길은 없으므로, 렌더러가 죽거나(`render-process-gone` — 페이지를 다시 읽어 시작할 때처럼 띄운다: `시작할 때 지난 탭 다시 열기` 를 켰으면 탭도 돌아온다, 1분에 3번까지) 페이지가 무엇으로든 바뀌면(`did-navigate`) 그 페이지의 셸도 트리째 내린다. 창이 앱의 페이지를 떠나는 일 자체는 막혀 있다 — 모든 창의 `will-navigate`·`will-redirect` 는 앱의 페이지(`out/renderer` 파일, 개발 실행이면 dev 서버의 출처)가 아니면 취소, `window.open` 은 http(s) 만 브라우저로, 브라우저 권한 요청은 거절, IPC 는 보낸 프레임이 앱의 페이지일 때만 답한다([설계 노트](design-notes.md#창은-앱의-페이지를-떠나지-않는다)).
 
 ## 업데이트와 릴리스
 

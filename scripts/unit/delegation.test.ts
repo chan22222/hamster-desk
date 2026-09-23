@@ -1,6 +1,6 @@
 // The "멀티 에이전트" block in an account's CLAUDE.md (electron/delegation.ts): it goes in whole, comes
 // out whole, leaves everything else exactly as it was, and never touches the real ~/.claude.
-import { existsSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs'
+import { existsSync, lstatSync, mkdirSync, mkdtempSync, readFileSync, rmSync, symlinkSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { after, test } from 'node:test'
@@ -130,4 +130,30 @@ test('the block is worded in main’s language: HAMSTER_LANG=en gives the Englis
   } finally {
     process.env.HAMSTER_LANG = 'ko'
   }
+})
+
+test('a symlinked CLAUDE.md stays a symlink: the file it points at gets the block, and is emptied rather than deleted', (t) => {
+  const dots = join(HOME, 'dotfiles')
+  mkdirSync(dots, { recursive: true })
+  const real = join(dots, 'CLAUDE.md')
+  writeFileSync(real, '# mine\n', 'utf8')
+  const link = join(HOME, 'linked', 'CLAUDE.md')
+  mkdirSync(join(HOME, 'linked'), { recursive: true })
+  try {
+    symlinkSync(real, link, 'file')
+  } catch {
+    return t.skip('no symlinks here') // Windows without Developer Mode
+  }
+  assert.equal(applyToFile(link, ON).state, 'installed')
+  assert.ok(lstatSync(link).isSymbolicLink(), 'still a link to the dotfiles')
+  assert.match(readFileSync(real, 'utf8'), /^# mine\n\n<!-- hamster-desk:delegation start -->/)
+  assert.equal(applyToFile(link, OFF).state, 'installed')
+  assert.equal(readFileSync(real, 'utf8'), '# mine\n')
+
+  // a linked file that is nothing but our block: emptied in place — deleting it would take the dotfile away
+  writeFileSync(real, '', 'utf8')
+  applyToFile(link, ON)
+  applyToFile(link, OFF)
+  assert.ok(lstatSync(link).isSymbolicLink())
+  assert.equal(readFileSync(real, 'utf8'), '')
 })

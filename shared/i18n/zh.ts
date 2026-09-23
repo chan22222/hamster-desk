@@ -210,6 +210,8 @@ export const zh: UiStrings = {
     weekAll: '每周（全部）',
     weekModel: (model) => `每周（${model}）`,
     accountTip: (name) => `账号 ${name} 的用量`,
+    settingsError: (why) => `无法读取或保存 settings.json，因此没有做任何更改（${why}）。请检查该文件后再试一次。`,
+    settingsErrorPill: '设置文件错误',
   },
 
   update: {

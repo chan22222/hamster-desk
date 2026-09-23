@@ -13,6 +13,7 @@ import { dirname, join } from 'node:path'
  * everywhere was slow *before* the process existed (the antivirus holding the launch itself).
  *
  * Pure node, every failure swallowed: a diagnostic must never be the thing that breaks a start.
+ * The same goes for its neighbour below, error.log (`logError`).
  */
 
 const KEEP = 50
@@ -45,6 +46,42 @@ export function writeBootLog(head: string, createdAt: number | null): void {
     }
     mkdirSync(dirname(file), { recursive: true })
     writeFileSync(file, [...old, line].slice(-KEEP).join('\n') + '\n', 'utf8')
+  } catch {
+    /* ignore */
+  }
+}
+
+// ---- error.log -------------------------------------------------------------------------------
+
+const ERRORS_KEEP = 200
+
+export const errorLogPath = (): string => join(process.env.HAMSTER_HOME || join(homedir(), '.hamster-desk'), 'error.log')
+
+/**
+ * What went wrong in main that nobody would otherwise see — an exception no code caught, a rejection
+ * nobody handled, a step of the start-up that failed, a renderer that died: one line each in
+ * ~/.hamster-desk/error.log, the last 200 kept, next to this file's boot.log.
+ *
+ *   2026-09-23T06:40:01.123Z start:status | Error: EPERM: operation not permitted, mkdir '…' at …
+ *
+ * A capture run writes nothing into the user's folder (the rule main.ts keeps for boot.log): it
+ * prints the line instead. Every failure swallowed — the log must never be the next error.
+ */
+export function logError(where: string, err: unknown): void {
+  try {
+    const what = err instanceof Error ? err.stack || err.message : String(err)
+    const line = `${new Date().toISOString()} ${where} | ${what.replace(/\s+/g, ' ').slice(0, 1000)}`
+    console.error(`[error] ${line}`)
+    if (process.env.HAMSTER_CAPTURE) return
+    const file = errorLogPath()
+    let old: string[] = []
+    try {
+      old = readFileSync(file, 'utf8').split('\n').filter(Boolean)
+    } catch {
+      /* first line */
+    }
+    mkdirSync(dirname(file), { recursive: true })
+    writeFileSync(file, [...old, line].slice(-ERRORS_KEEP).join('\n') + '\n', 'utf8')
   } catch {
     /* ignore */
   }

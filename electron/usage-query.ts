@@ -2,7 +2,7 @@ import { spawn } from 'node:child_process'
 import { EventEmitter } from 'node:events'
 import { homedir } from 'node:os'
 import type { RateWindow, UsageWindows } from '../shared/events'
-import { claudeInvocation, cleanEnv, findClaude } from './env'
+import { claudeInvocation, cleanEnv, findClaude, stopTree, type ClaudeInvocation } from './env'
 
 /**
  * The per-model weekly windows, asked of the CLI itself.
@@ -24,6 +24,8 @@ import { claudeInvocation, cleanEnv, findClaude } from './env'
 const TIMEOUT_MS = 30_000
 const EVERY_MS = 10 * 60_000
 const FIRST_MS = 20_000
+/** the answer is a few hundred bytes; a CLI that keeps talking past this is not answering */
+const OUT_MAX = 1024 * 1024
 
 const REQUEST = JSON.stringify({ type: 'control_request', request_id: 'usage', request: { subtype: 'get_usage', skip_behaviors: true } }) + '\n'
 
@@ -112,14 +114,21 @@ function runClaude(configDir: string | null, signal: AbortSignal): Promise<strin
     '--setting-sources',
     '',
   ]
-  const inv = claudeInvocation(bin, argv)
+  let inv: ClaudeInvocation
+  try {
+    inv = claudeInvocation(bin, argv)
+  } catch (e) {
+    return Promise.reject(e as Error)
+  }
   const env: Record<string, string> = { ...cleanEnv(), MAX_THINKING_TOKENS: '0' }
   // the question is about the *subscription*; a key in the environment would answer for the key
   delete env.ANTHROPIC_API_KEY
   delete env.ANTHROPIC_AUTH_TOKEN
   if (configDir) env.CLAUDE_CONFIG_DIR = configDir
   return new Promise((resolve, reject) => {
-    const child = spawn(inv.file, inv.args, { cwd: homedir(), env, windowsHide: true, windowsVerbatimArguments: inv.verbatim, stdio: ['pipe', 'pipe', 'pipe'] })
+    // stderr is not read, so it is not a pipe either: one nobody drains fills up, and the CLI then
+    // stalls on its next write until the timeout
+    const child = spawn(inv.file, inv.args, { cwd: homedir(), env, windowsHide: true, windowsVerbatimArguments: inv.verbatim, stdio: ['pipe', 'pipe', 'ignore'] })
     let out = ''
     let done = false
     const finish = (err?: Error): void => {
@@ -134,15 +143,22 @@ function runClaude(configDir: string | null, signal: AbortSignal): Promise<strin
       // the answer is one line; once it is here the process has nothing more to say
       if (out.includes('"control_response"')) {
         finish()
-        setTimeout(() => child.kill(), 500).unref()
+        setTimeout(() => stopTree(child), 500).unref()
+      } else if (out.length > OUT_MAX) {
+        finish(new Error('too-long'))
+        stopTree(child)
       }
     })
     child.on('error', (e) => finish(e))
     child.on('close', () => finish(new Error(out.trim() ? 'no-response' : 'exited')))
-    signal.addEventListener('abort', () => {
-      child.kill()
-      finish(new Error('aborted'))
-    })
+    signal.addEventListener(
+      'abort',
+      () => {
+        stopTree(child) // the tree: through cmd.exe the child is only the interpreter (electron/env.ts)
+        finish(new Error('aborted'))
+      },
+      { once: true },
+    )
     child.stdin.on('error', () => {})
     child.stdin.end(REQUEST)
   })

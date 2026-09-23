@@ -8,6 +8,12 @@
 // `--no-optional-locks` + `GIT_OPTIONAL_LOCKS=0` are the reason a poll every ten seconds is safe:
 // without them `git status` refreshes the index and takes `index.lock`, which can collide with a
 // real git command the user is running in the terminal a few pixels away.
+//
+// Reading is not always *only* reading: a repository's own .git/config can name programs for git to
+// run — an fsmonitor hook on every `status`, an external diff or a textconv filter on `diff`. The
+// poll starts the moment a tab opens in a folder, before anyone has looked at what that folder is
+// (an unpacked archive, a clone of a stranger's repo), so those are switched off on the command line,
+// where the repository's config cannot switch them back on.
 
 import { execFile } from 'node:child_process'
 import { cleanEnv, findOnPath } from './env'
@@ -30,11 +36,19 @@ interface Run {
   timedOut: boolean
 }
 
+/**
+ * Before every command. `core.fsmonitor=` (empty) is off in every git: new ones read it as a boolean
+ * false, old ones as no hook path at all — `false` would be a program named "false" to the latter.
+ */
+const SAFE = ['--no-optional-locks', '-c', 'core.quotepath=false', '-c', 'core.fsmonitor=']
+/** `diff` never hands the text to a program the repository names */
+const DIFF = ['diff', '--no-ext-diff', '--no-textconv']
+
 function run(args: string[], cwd: string): Promise<Run> {
   return new Promise((resolve) => {
     execFile(
       gitBin,
-      ['--no-optional-locks', '-c', 'core.quotepath=false', ...args],
+      [...SAFE, ...args],
       { cwd, env: { ...cleanEnv(), GIT_OPTIONAL_LOCKS: '0' }, windowsHide: true, timeout: TIMEOUT_MS, maxBuffer: MAX_BUFFER, encoding: 'utf8' },
       (err, stdout, stderr) => {
         const e = err as (Error & { killed?: boolean; code?: number | string }) | null
@@ -127,11 +141,11 @@ export async function gitDiff(cwd: string, file: string): Promise<GitDiff> {
   const empty: GitDiff = { text: '', truncated: false, untracked: false, error: null }
   if (!cwd || !file) return empty
 
-  const work = await run(['diff', '--', file], cwd)
+  const work = await run([...DIFF, '--', file], cwd)
   if (!work.ok) return { ...empty, error: work.timedOut ? 'timeout' : work.err || 'diff failed' }
   let text = work.out
   if (!text.trim()) {
-    const staged = await run(['diff', '--cached', '--', file], cwd)
+    const staged = await run([...DIFF, '--cached', '--', file], cwd)
     if (staged.ok) text = staged.out
   }
   if (!text.trim()) {

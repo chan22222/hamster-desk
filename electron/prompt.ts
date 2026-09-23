@@ -93,8 +93,15 @@ export class WaitingGate {
     this.waiting(ptyId, 'question')
   }
 
-  answered(ptyId: number): void {
+  /**
+   * A key that answers a prompt went in. True when the terminal was waiting for one — the only case
+   * in which there is anything to clear (main.ts sends `waiting_clear` only then).
+   */
+  answered(ptyId: number): boolean {
+    const last = this.waitingAt.get(ptyId)
+    const was = last !== undefined && (this.answeredAt.get(ptyId) ?? 0) < last
     this.answeredAt.set(ptyId, this.now())
+    return was
   }
 
   forget(ptyId: number): void {

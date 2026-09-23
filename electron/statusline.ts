@@ -3,6 +3,7 @@ import { promises as fsp, existsSync, mkdirSync, watch, type FSWatcher, readFile
 import { homedir } from 'node:os'
 import { join } from 'node:path'
 import type { StatusSnapshot, RateWindow } from '../shared/events'
+import { writeFileAtomic } from './atomic-write'
 import { claudeDir } from './watcher/paths'
 
 /**
@@ -86,16 +87,41 @@ function settingsPath(configDir?: string | null): string {
   return join(configDir || claudeDir(), 'settings.json')
 }
 
-function readSettings(configDir?: string | null): Record<string, unknown> {
+/**
+ * settings.json is there and is not settings this can read: unreadable at the moment (an antivirus
+ * or a sync client holding it), or not JSON (a hand edit gone wrong). Nothing is written then.
+ */
+export class SettingsUnreadable extends Error {}
+
+/**
+ * The account's settings, `{}` only when there is no file yet. Anything else that goes wrong throws
+ * (`SettingsUnreadable`): this used to answer `{}` for every failure, and the install that followed
+ * wrote `{ statusLine }` over the user's whole file — permissions, hooks, env and all.
+ */
+export function readSettings(configDir?: string | null): Record<string, unknown> {
+  let raw: string
   try {
-    return JSON.parse(readFileSync(settingsPath(configDir), 'utf8')) as Record<string, unknown>
-  } catch {
-    return {}
+    raw = readFileSync(settingsPath(configDir), 'utf8')
+  } catch (e) {
+    if ((e as NodeJS.ErrnoException).code === 'ENOENT') return {}
+    throw new SettingsUnreadable((e as NodeJS.ErrnoException).code ?? (e as Error).message)
   }
+  // an editor that saves "UTF-8 with BOM" leaves one in front, and JSON.parse refuses it
+  const text = raw.charCodeAt(0) === 0xfeff ? raw.slice(1) : raw
+  if (!text.trim()) return {}
+  let j: unknown
+  try {
+    j = JSON.parse(text)
+  } catch (e) {
+    throw new SettingsUnreadable((e as Error).message)
+  }
+  if (!j || typeof j !== 'object' || Array.isArray(j)) throw new SettingsUnreadable('not an object')
+  return j as Record<string, unknown>
 }
 
+/** Atomic, with the file as it was kept as `settings.json.hamster-bak` (electron/atomic-write.ts). */
 function writeSettings(s: Record<string, unknown>, configDir?: string | null): void {
-  writeFileSync(settingsPath(configDir), JSON.stringify(s, null, 2) + '\n', 'utf8')
+  writeFileAtomic(settingsPath(configDir), JSON.stringify(s, null, 2) + '\n', { backup: true })
 }
 
 function writeScripts(): void {
@@ -125,19 +151,30 @@ export function statusLineCommand(): string {
 
 export type StatusLineState = 'installed' | 'foreign' | 'none'
 
-/** 'installed' = ours, 'foreign' = the user has their own status line, 'none' = nothing configured. */
+/**
+ * 'installed' = ours, 'foreign' = the user has their own status line, 'none' = nothing configured —
+ * or a file that cannot be read right now, which an install then refuses to write over (and says so).
+ */
 export function statusLineState(configDir?: string | null): StatusLineState {
-  const s = readSettings(configDir)
+  let s: Record<string, unknown>
+  try {
+    s = readSettings(configDir)
+  } catch {
+    return 'none'
+  }
   const sl = s.statusLine as { command?: string } | undefined
   if (!sl || typeof sl.command !== 'string') return 'none'
   return /statusline\.(cjs|ps1)/.test(sl.command) && sl.command.includes('.hamster-desk') ? 'installed' : 'foreign'
 }
 
-/** Write the script and point Claude Code's statusLine at it. Keeps a backup of a foreign command. */
+/**
+ * Write the script and point Claude Code's statusLine at it. Keeps a backup of a foreign command.
+ * Throws when settings.json cannot be read or written; the file is then exactly as it was.
+ */
 export function installStatusLine(configDir?: string | null): void {
+  const s = readSettings(configDir) // first: a file that cannot be read is not written over, not even half
   writeScripts()
   if (configDir) mkdirSync(configDir, { recursive: true }) // a brand-new account has no settings.json yet
-  const s = readSettings(configDir)
   const prev = s.statusLine as Record<string, unknown> | undefined
   if (prev && typeof prev.command === 'string' && !/statusline\.(cjs|ps1)/.test(String(prev.command))) {
     s.hamsterDeskPreviousStatusLine = prev
@@ -146,6 +183,7 @@ export function installStatusLine(configDir?: string | null): void {
   writeSettings(s, configDir)
 }
 
+/** Put back what was there before (or nothing). Throws like `installStatusLine`. */
 export function uninstallStatusLine(configDir?: string | null): void {
   const s = readSettings(configDir)
   const sl = s.statusLine as { command?: string } | undefined
@@ -210,21 +248,33 @@ export function parseSnapshot(j: Record<string, unknown>): StatusSnapshot | null
   }
 }
 
+/**
+ * A snapshot this old belongs to a session nobody will ask about again, and every window it carries
+ * has long been reset. The script writes one file per session — for every session on the machine,
+ * the ones outside this app included — and nothing else ever removes them, so the folder only grew
+ * (and was stat'ed whole every five seconds, and replayed whole at every start).
+ */
+export const STATUS_STALE_MS = 7 * 24 * 60 * 60_000
+
 /** Watches ~/.hamster-desk/status/*.json and emits 'status' with a StatusSnapshot. */
 export class StatusWatcher extends EventEmitter {
   private watcher: FSWatcher | null = null
   private timer: NodeJS.Timeout | null = null
   private seen = new Map<string, number>() // file → mtime
 
+  constructor(private readonly now: () => number = Date.now) {
+    super()
+  }
+
   start(): void {
-    mkdirSync(STATUS_DIR, { recursive: true })
     try {
+      mkdirSync(STATUS_DIR, { recursive: true })
       this.watcher = watch(STATUS_DIR, { persistent: false }, (_e, f) => {
         if (f && String(f).endsWith('.json')) void this.read(String(f))
       })
       this.watcher.on('error', () => {})
     } catch {
-      /* poll only */
+      /* poll only — and the poll finds nothing until the folder exists */
     }
     this.timer = setInterval(() => void this.scan(), 5000)
     void this.scan()
@@ -235,14 +285,35 @@ export class StatusWatcher extends EventEmitter {
     if (this.timer) clearInterval(this.timer)
   }
 
-  private async scan(): Promise<void> {
+  /** One pass over the folder; public so the unit test can run one without the five-second timer. */
+  async scan(): Promise<void> {
     let names: string[]
     try {
-      names = (await fsp.readdir(STATUS_DIR)).filter((n) => n.endsWith('.json'))
+      names = await fsp.readdir(STATUS_DIR)
     } catch {
       return
     }
-    for (const n of names) await this.read(n)
+    for (const n of names) {
+      if (n.endsWith('.json')) await this.read(n)
+      else if (n.endsWith('.tmp')) await this.dropIfStale(n) // a write the script never got to rename
+    }
+  }
+
+  /** true when the file was old enough to go (and is gone, as far as it could be removed) */
+  private async dropIfStale(name: string, mtimeMs?: number): Promise<boolean> {
+    const p = join(STATUS_DIR, name)
+    let at = mtimeMs
+    if (at === undefined) {
+      try {
+        at = (await fsp.stat(p)).mtimeMs
+      } catch {
+        return false
+      }
+    }
+    if (this.now() - at <= STATUS_STALE_MS) return false
+    this.seen.delete(name)
+    await fsp.rm(p, { force: true }).catch(() => undefined)
+    return true
   }
 
   private async read(name: string): Promise<void> {
@@ -251,8 +322,10 @@ export class StatusWatcher extends EventEmitter {
     try {
       st = await fsp.stat(p)
     } catch {
+      this.seen.delete(name)
       return
     }
+    if (await this.dropIfStale(name, st.mtimeMs)) return
     if (this.seen.get(name) === st.mtimeMs) return
     let j: Record<string, unknown>
     try {

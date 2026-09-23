@@ -211,6 +211,8 @@ export const ru: UiStrings = {
     weekAll: 'Неделя (всё)',
     weekModel: (model) => `Неделя (${model})`,
     accountTip: (name) => `Использование аккаунта ${name}`,
+    settingsError: (why) => `Не удалось прочитать или сохранить settings.json, поэтому ничего не изменено (${why}). Проверьте файл и попробуйте ещё раз.`,
+    settingsErrorPill: 'Ошибка файла настроек',
   },
 
   update: {

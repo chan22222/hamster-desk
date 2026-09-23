@@ -242,6 +242,10 @@ export const ko = {
     weekAll: '주간 (전체)',
     weekModel: (model: string) => `주간 (${model})`,
     accountTip: (name: string) => `${name} 계정의 사용량`,
+    /** settings.json was there but could not be read or replaced: nothing changed. `why` is technical (`EBUSY`, a JSON error) */
+    settingsError: (why: string) => `settings.json 을 읽거나 저장하지 못해서 그대로 두었어요 (${why}). 파일을 확인하고 다시 눌러 보세요.`,
+    /** the pill that stays up after such a failure, until the next try */
+    settingsErrorPill: '설정 파일 오류',
   },
 
   /** Claude Code and Hamster Desk updates (src/widgets/Version.tsx, AppUpdate.tsx) */

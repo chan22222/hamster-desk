@@ -211,6 +211,8 @@ export const ja: UiStrings = {
     weekAll: '週間 (全体)',
     weekModel: (model) => `週間 (${model})`,
     accountTip: (name) => `${name} アカウントの使用量`,
+    settingsError: (why) => `settings.json を読み込めないか保存できなかったため、何も変更していません（${why}）。ファイルを確認してもう一度押してください。`,
+    settingsErrorPill: '設定ファイルのエラー',
   },
 
   update: {

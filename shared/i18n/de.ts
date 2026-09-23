@@ -211,6 +211,8 @@ export const de: UiStrings = {
     weekAll: 'Woche (alle)',
     weekModel: (model) => `Woche (${model})`,
     accountTip: (name) => `Nutzung von Konto ${name}`,
+    settingsError: (why) => `settings.json konnte nicht gelesen oder gespeichert werden, daher wurde nichts geändert (${why}). Prüf die Datei und versuch es noch einmal.`,
+    settingsErrorPill: 'Fehler in der Einstellungsdatei',
   },
 
   update: {

@@ -211,6 +211,8 @@ export const pt: UiStrings = {
     weekAll: 'Semanal (tudo)',
     weekModel: (model) => `Semanal (${model})`,
     accountTip: (name) => `Uso da conta ${name}`,
+    settingsError: (why) => `Não foi possível ler ou salvar o settings.json, então nada foi alterado (${why}). Verifique o arquivo e tente de novo.`,
+    settingsErrorPill: 'Erro no arquivo de configurações',
   },
 
   update: {

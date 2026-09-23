@@ -1,5 +1,6 @@
-import { existsSync, readFileSync, rmSync, unlinkSync, writeFileSync } from 'node:fs'
+import { existsSync, readFileSync, rmSync, unlinkSync } from 'node:fs'
 import { join } from 'node:path'
+import { writeFileAtomic } from './atomic-write'
 import { claudeDir } from './watcher/paths'
 import { HAMSTER_HOME } from './statusline'
 
@@ -37,7 +38,8 @@ export function cleanupLegacyHarness(): string[] {
 
   try {
     const p = join(claudeDir(), 'settings.json')
-    const s = JSON.parse(readFileSync(p, 'utf8')) as Record<string, unknown>
+    const raw = readFileSync(p, 'utf8')
+    const s = JSON.parse(raw.charCodeAt(0) === 0xfeff ? raw.slice(1) : raw) as Record<string, unknown>
     const ours = s.agent === 'hd-architect'
     const hadPrevious = typeof s.hamsterDeskPreviousAgent === 'string'
     if (ours || hadPrevious) {
@@ -46,7 +48,8 @@ export function cleanupLegacyHarness(): string[] {
         else delete s.agent
       }
       delete s.hamsterDeskPreviousAgent
-      writeFileSync(p, JSON.stringify(s, null, 2) + '\n', 'utf8')
+      // the user's whole settings file: atomic, and the version before kept (electron/atomic-write.ts)
+      writeFileAtomic(p, JSON.stringify(s, null, 2) + '\n', { backup: true })
       removed.push('settings.json agent')
     }
   } catch {

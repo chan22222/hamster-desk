@@ -1,5 +1,5 @@
 import * as pty from 'node-pty'
-import { execFileSync } from 'node:child_process'
+import { execFile } from 'node:child_process'
 import { existsSync } from 'node:fs'
 import { homedir } from 'node:os'
 import { cleanEnv, findOnPath } from './env'
@@ -12,8 +12,12 @@ export { cleanEnv, findOnPath } from './env'
 export interface PtyHandle extends PtyInfo {
   write(data: string): void
   resize(cols: number, rows: number): void
-  kill(): void
+  /** the shell and everything it started; resolves once that is done (or given up on) */
+  kill(): Promise<void>
 }
+
+/** a `taskkill` that has not finished by then is not going to; node-pty gets its turn */
+const TASKKILL_TIMEOUT_MS = 5000
 
 export function defaultShell(): string {
   if (process.platform === 'win32') {
@@ -69,24 +73,27 @@ export function spawnPty(
         /* closed */
       }
     },
-    kill: () => {
-      // ConPTY only signals the shell; a claude session running inside it would survive, so take the tree down.
-      // taskkill already took the shell with it, and node-pty's conpty helper would then die with
-      // "AttachConsole failed" all over stderr, so only fall back to proc.kill() if taskkill could not run.
-      if (process.platform === 'win32') {
-        try {
-          execFileSync('taskkill', ['/T', '/F', '/PID', String(proc.pid)], { stdio: 'ignore', windowsHide: true })
-          return
-        } catch {
-          /* taskkill unavailable or the tree is already gone — let node-pty try */
+    kill: () =>
+      new Promise<void>((resolve) => {
+        const fallback = (): void => {
+          try {
+            proc.kill()
+          } catch {
+            /* already gone */
+          }
+          resolve()
         }
-      }
-      try {
-        proc.kill()
-      } catch {
-        /* already gone */
-      }
-    },
+        // ConPTY only signals the shell; a claude session running inside it would survive, so take the tree down.
+        // taskkill already took the shell with it, and node-pty's conpty helper would then die with
+        // "AttachConsole failed" all over stderr, so only fall back to proc.kill() if taskkill could not run.
+        // Asynchronous: it used to be execFileSync, and every terminal's output stood still while
+        // one tab closed — at quit, once per tab, one after the other.
+        if (process.platform !== 'win32') return fallback()
+        execFile('taskkill', ['/T', '/F', '/PID', String(proc.pid)], { windowsHide: true, timeout: TASKKILL_TIMEOUT_MS }, (err) => {
+          if (err) fallback() // taskkill unavailable or the tree is already gone — let node-pty try
+          else resolve()
+        })
+      }),
   }
 }
 

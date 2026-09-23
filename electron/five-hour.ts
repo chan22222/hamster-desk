@@ -1,7 +1,7 @@
 import { execFile } from 'node:child_process'
 import { EventEmitter } from 'node:events'
 import { homedir } from 'node:os'
-import { claudeInvocation, cleanEnv, findClaude } from './env'
+import { claudeInvocation, cleanEnv, findClaude, stopTree, type ClaudeInvocation } from './env'
 import { tr } from './lang'
 import { loadUi, saveUi } from './ui-store'
 import type { FiveHourAccount, FiveHourState, RateWindow } from '../shared/events'
@@ -169,7 +169,12 @@ function runClaude(configDir: string | null, signal: AbortSignal): Promise<strin
     SYSTEM,
     MESSAGE,
   ]
-  const inv = claudeInvocation(bin, argv)
+  let inv: ClaudeInvocation
+  try {
+    inv = claudeInvocation(bin, argv)
+  } catch (e) {
+    return Promise.reject(e as Error)
+  }
   const env: Record<string, string> = { ...cleanEnv(), MAX_THINKING_TOKENS: '0' }
   // The point is the subscription's window. A key in the environment would take precedence over
   // the account's login: the message would be billed to that key and start no window at all.
@@ -180,7 +185,7 @@ function runClaude(configDir: string | null, signal: AbortSignal): Promise<strin
     const child = execFile(
       inv.file,
       inv.args,
-      { cwd: homedir(), env, windowsHide: true, windowsVerbatimArguments: inv.verbatim, maxBuffer: 4 * 1024 * 1024, signal },
+      { cwd: homedir(), env, windowsHide: true, windowsVerbatimArguments: inv.verbatim, maxBuffer: 4 * 1024 * 1024 },
       (err, stdout, stderr) => {
         const out = String(stdout ?? '')
         if (err && !out.includes('"type":"result"')) {
@@ -190,7 +195,12 @@ function runClaude(configDir: string | null, signal: AbortSignal): Promise<strin
         resolve(out)
       },
     )
+    // the timeout (or stop()) takes the whole tree — through cmd.exe the child is only the interpreter
+    const stop = (): void => stopTree(child)
+    if (signal.aborted) stop()
+    else signal.addEventListener('abort', stop, { once: true })
     // with a pipe on stdin that nobody closes, `-p` first waits 3 s for input it will never get
+    child.stdin?.on('error', () => {})
     child.stdin?.end()
   })
 }

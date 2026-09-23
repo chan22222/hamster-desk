@@ -152,6 +152,8 @@ function AccountUsageList({ shownId }: { shownId: string }) {
   const profiles = useDesk((s) => s.profiles)
   const usageBy = useDesk((s) => s.usageByProfile)
   const [states, setStates] = useState<Record<string, SLState>>({})
+  // a 연동하기 that could not write the account's settings.json says why, under the list
+  const [linkError, setLinkError] = useState<string | null>(null)
 
   useEffect(() => {
     let alive = true
@@ -169,8 +171,9 @@ function AccountUsageList({ shownId }: { shownId: string }) {
 
   const link = async (id: string): Promise<void> => {
     if (!window.desk) return
-    const st = await window.desk.statusline.install(id)
-    setStates((prev) => ({ ...prev, [id]: st }))
+    const r = await window.desk.statusline.install(id)
+    setStates((prev) => ({ ...prev, [id]: r.state }))
+    setLinkError(r.error)
   }
 
   return (
@@ -199,6 +202,7 @@ function AccountUsageList({ shownId }: { shownId: string }) {
           </div>
         )
       })}
+      {linkError && <p className="pop-note warn-line">{u.usage.settingsError(linkError)}</p>}
       <p className="pop-note">{u.usage.perAccountNote}</p>
     </>
   )
@@ -286,6 +290,8 @@ export function UsageMeters() {
   const profiles = useDesk((s) => s.profiles)
   const [sl, setSl] = useState<SLState>('unknown')
   const [busy, setBusy] = useState(false)
+  /** why the last 연동 / 연동 해제 changed nothing (settings.json could not be read or saved) */
+  const [slError, setSlError] = useState<string | null>(null)
   const [, tick] = useState(0)
 
   useEffect(() => {
@@ -295,6 +301,7 @@ export function UsageMeters() {
 
   useEffect(() => {
     let alive = true
+    setSlError(null) // another account's file: the last one's trouble is not this one's
     // the old answer stays up until the new one arrives, so switching tabs does not blink the chips
     void window.desk?.statusline.state(shownId).then((s) => {
       if (alive) setSl(s)
@@ -304,19 +311,28 @@ export function UsageMeters() {
     }
   }, [shownId])
 
-  const install = async (): Promise<void> => {
-    if (!window.desk) return
+  /**
+   * 연동 and 연동 해제. False when settings.json could not be read or saved: nothing was changed,
+   * `slError` says why, and the popover that asked stays open to show it.
+   */
+  const switchStatusLine = async (call: 'install' | 'uninstall'): Promise<boolean> => {
+    if (!window.desk) return false
     setBusy(true)
     try {
-      setSl(await window.desk.statusline.install(shownId))
+      const r = await window.desk.statusline[call](shownId)
+      setSl(r.state)
+      setSlError(r.error)
+      return !r.error
+    } catch (e) {
+      setSlError(String((e as Error)?.message ?? e))
+      return false
     } finally {
       setBusy(false)
     }
   }
-  const uninstall = async (): Promise<void> => {
-    if (!window.desk) return
-    setSl(await window.desk.statusline.uninstall(shownId))
-  }
+  const install = (): Promise<boolean> => switchStatusLine('install')
+  const uninstall = (): Promise<boolean> => switchStatusLine('uninstall')
+  const errorLine = slError && <p className="warn-line">{u.usage.settingsError(slError)}</p>
 
   if (sl === 'unknown') return null
 
@@ -339,12 +355,12 @@ export function UsageMeters() {
           <div className="pop-body">
             <p>{rich(u.usage.linkNote(shown?.dir ? u.usage.accountFile(shown.name) : '<code>~/.claude/settings.json</code>'))}</p>
             {sl === 'foreign' && <p className="warn-line">{u.usage.foreignWarn}</p>}
+            {errorLine}
             <button
               className="pop-primary"
               disabled={busy}
               onClick={() => {
-                void install()
-                close()
+                void install().then((ok) => ok && close())
               }}
             >
               {sl === 'foreign' ? u.usage.replaceForeign : u.usage.link}
@@ -371,11 +387,12 @@ export function UsageMeters() {
           <div className="pop-body">
             <p>{many ? u.usage.waitingNoteAccount : u.usage.waitingNote}</p>
             <AccountUsageList shownId={shownId} />
+            {errorLine}
             <button
               className="pop-ghost"
+              disabled={busy}
               onClick={() => {
-                void uninstall()
-                close()
+                void uninstall().then((ok) => ok && close())
               }}
             >
               {u.usage.unlink}
@@ -412,6 +429,12 @@ export function UsageMeters() {
         </span>
       )}
       <UsageChip lines={lines} rows={rows} ts={usage?.ts ?? 0} shownId={shownId} onRefresh={() => void window.desk?.usage.refresh(shownId)} onUninstall={() => void uninstall()} />
+      {/* the chip's 연동 해제 closes its panel at once; one that failed leaves this behind to say why */}
+      {slError && (
+        <Popover className="pill" label={pillLabel(u.usage.settingsErrorPill)} title={u.usage.settingsError(slError)} ariaLabel={`${u.usage.settingsErrorPill}${who}`}>
+          {() => <div className="pop-body">{errorLine}</div>}
+        </Popover>
+      )}
     </div>
   )
 }

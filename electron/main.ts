@@ -1,8 +1,9 @@
-import { app, BrowserWindow, clipboard, dialog, ipcMain, Menu, nativeTheme, powerMonitor, shell } from 'electron'
-import { appendFileSync, readdirSync, rmSync } from 'node:fs'
-import { basename, join } from 'node:path'
+import { app, BrowserWindow, clipboard, dialog, ipcMain, Menu, nativeTheme, powerMonitor, session, shell, type IpcMainEvent, type IpcMainInvokeEvent } from 'electron'
+import { appendFileSync, promises as fsp, readdirSync, rmSync, type Dirent } from 'node:fs'
+import { basename, isAbsolute, join, relative } from 'node:path'
+import { fileURLToPath } from 'node:url'
 import { DeskWatcher } from './watcher'
-import { DEFAULT_PROFILE_ID, type BubbleRequest, type DelegationState, type DeskEvent, type FileEntry, type NotifyRequest, type Profile, type SessionInfo, type StatusSnapshot, type UiState, type AppUpdateInfo } from '../shared/events'
+import { DEFAULT_PROFILE_ID, type BubbleRequest, type DelegationState, type DeskEvent, type DirEntry, type FileEntry, type NotifyRequest, type Profile, type ProfilesState, type SessionInfo, type StatusSnapshot, type UiState, type AppUpdateInfo } from '../shared/events'
 import { spawnPty, PromptDetector, type PtyHandle } from './pty'
 import { WaitingGate } from './prompt'
 import { HAMSTER_HOME, StatusWatcher, installStatusLine, uninstallStatusLine, statusLineState, refreshStatusScripts } from './statusline'
@@ -23,7 +24,8 @@ import { detectProject } from './project-actions'
 import { gitDiff, gitInfo } from './git'
 import { COMMITS_URL, buildCommit, checkAppUpdate, repoDirOf, startSelfUpdate } from './app-update'
 import { checkRelease, downloadRelease, installRelease, isInstalled, releaseInfo } from './app-release'
-import { bootMark, writeBootLog } from './boot-log'
+import { bootMark, logError, writeBootLog } from './boot-log'
+import { EventBacklog, type SeqEvent } from './backlog'
 import { appUserModelId, listDir, pathExists, repairShortcuts } from './shortcuts'
 
 // the first line of ours to run; what came before it is the OS loading the exe (electron/boot-log.ts)
@@ -149,16 +151,25 @@ function send(channel: string, ...args: unknown[]): void {
   if (win && !win.isDestroyed()) win.webContents.send(channel, ...args)
 }
 
-// Events carry a sequence number and are kept in a ring buffer, so a renderer that mounts (or reloads)
-// after the watcher already streamed the catch-up can replay them and skip duplicates.
-const BACKLOG_MAX = 4000
-let seq = 0
-const backlog: { seq: number; ev: DeskEvent }[] = []
+// Events carry a sequence number and are kept (electron/backlog.ts), so a renderer that mounts (or
+// reloads) after the watcher already streamed the catch-up can replay them and skip duplicates —
+// and still gets every session, title and status line the ring has since dropped.
+const backlog = new EventBacklog()
+
+/**
+ * Sent once per turn of the event loop rather than one message each: a catch-up is thousands of
+ * events in a burst. preload.ts hands them on one by one, so the renderer sees no difference.
+ */
+let outbox: SeqEvent[] = []
+function flushOutbox(): void {
+  const items = outbox
+  outbox = []
+  send('desk:events', items)
+}
+
 function emitDesk(ev: DeskEvent): void {
-  const item = { seq: ++seq, ev }
-  backlog.push(item)
-  if (backlog.length > BACKLOG_MAX) backlog.splice(0, backlog.length - BACKLOG_MAX)
-  send('desk:event', item)
+  outbox.push(backlog.push(ev))
+  if (outbox.length === 1) setImmediate(flushOutbox)
 }
 
 // ---- debug/e2e knobs ----------------------------------------------------------------------
@@ -264,6 +275,124 @@ function scheduleMouse(): void {
     }, at)
   }
 }
+
+// ---- the window stays on this app's own pages
+// Chromium opens a file dropped on a page in place of the page, and a link dragged in from a browser
+// the same way. The tabs were then gone with no way back (there is no menu, and nothing is bound to
+// Ctrl+R) — and the page the window had landed on was handed the whole bridge, because preload.ts
+// runs for whatever page is loaded, and that bridge starts shells and types into them. So no page
+// navigates anywhere but to a page of ours, none opens a window of its own (a web link goes to the
+// browser), none is granted a browser permission, and every IPC channel below asks who is calling.
+
+/** where the pages come from: the files next to this one, or the dev server of a dev run */
+const RENDERER_DIR = join(__dirname, '../renderer')
+const devOrigin = ((): string | null => {
+  const url = !app.isPackaged ? process.env.ELECTRON_RENDERER_URL : undefined
+  try {
+    return url ? new URL(url).origin : null
+  } catch {
+    return null
+  }
+})()
+
+let lastUrl = ''
+let lastUrlOurs = false
+/** A page this app loads itself (index.html, the notification window's page). Remembered for the last URL asked: `pty:input` asks on every key. */
+function isAppUrl(url: string): boolean {
+  if (url === lastUrl) return lastUrlOurs
+  let ours = false
+  try {
+    const u = new URL(url)
+    if (devOrigin && u.origin === devOrigin) ours = true
+    else if (u.protocol === 'file:') {
+      const rel = relative(RENDERER_DIR, fileURLToPath(u))
+      ours = !!rel && !rel.startsWith('..') && !isAbsolute(rel)
+    }
+  } catch {
+    ours = false
+  }
+  lastUrl = url
+  lastUrlOurs = ours
+  return ours
+}
+
+const isWebUrl = (url: string): boolean => {
+  try {
+    const p = new URL(url).protocol
+    return p === 'https:' || p === 'http:'
+  } catch {
+    return false
+  }
+}
+
+app.on('web-contents-created', (_e, wc) => {
+  const stay = (e: Electron.Event, url: string): void => {
+    if (isAppUrl(url)) return // a reload — the dev server's own included
+    e.preventDefault()
+    if (process.env.HAMSTER_CAPTURE) console.log(`[nav] blocked ${url.slice(0, 200)}`)
+  }
+  wc.on('will-navigate', stay)
+  wc.on('will-redirect', stay)
+  // `window.open` (the studio's wall prints) goes to the browser — a web address only: anything else
+  // (file:, a custom protocol) would be an app or a program started by name
+  wc.setWindowOpenHandler(({ url }) => {
+    if (isWebUrl(url)) void shell.openExternal(url)
+    return { action: 'deny' }
+  })
+})
+
+/**
+ * The caller is a page of ours. With the navigation lock above there is no other page to call; this
+ * is the second line, for the channels that start shells, type into them and delete accounts.
+ */
+function fromApp(e: IpcMainEvent | IpcMainInvokeEvent): boolean {
+  try {
+    const url = e.senderFrame?.url
+    return !!url && isAppUrl(url)
+  } catch {
+    return false // the frame is gone
+  }
+}
+
+/** `ipcMain.handle` that answers pages of ours only (`fromApp`) */
+function handle<A extends unknown[]>(channel: string, fn: (e: IpcMainInvokeEvent, ...args: A) => unknown): void {
+  ipcMain.handle(channel, (e, ...args) => {
+    if (!fromApp(e)) throw new Error(`${channel}: refused`)
+    return fn(e, ...(args as A))
+  })
+}
+
+/** `ipcMain.on`, likewise */
+function listen<A extends unknown[]>(channel: string, fn: (e: IpcMainEvent, ...args: A) => void): void {
+  ipcMain.on(channel, (e, ...args) => {
+    if (fromApp(e)) fn(e, ...(args as A))
+  })
+}
+
+// ---- a renderer that dies takes its terminals' shells with it
+// There is no way for a page to reattach to a shell another page started: after a crash (the GPU
+// process taking WebGL down with it, out of memory) the window was white and every shell behind it —
+// and the claude in it — ran on unseen. Now the shells go, and the page is loaded again and restores
+// its tabs the way it does at every start.
+
+/** a renderer that crashes this often is not helped by reloading it once more */
+const RELOADS_MAX = 3
+const RELOADS_WINDOW_MS = 60_000
+const reloads: number[] = []
+
+function onRendererGone(details: Electron.RenderProcessGoneDetails): void {
+  // a window on its way out: shutdown() takes the shells, and waits for them
+  if (details.reason === 'clean-exit' || shuttingDown) return
+  logError('renderer', `gone: ${details.reason} (exit ${details.exitCode})`)
+  void killAllPtys()
+  if (!win || win.isDestroyed()) return
+  const now = Date.now()
+  while (reloads.length && now - reloads[0] > RELOADS_WINDOW_MS) reloads.shift()
+  if (reloads.length >= RELOADS_MAX) return
+  reloads.push(now)
+  win.webContents.reload()
+}
+
 function createWindow(): void {
   // where the window sat last time, once it has been checked against the screens that exist now
   const saved = readWindowState()
@@ -350,10 +479,11 @@ function createWindow(): void {
       }
     })
   }
-  win.webContents.setWindowOpenHandler(({ url }) => {
-    void shell.openExternal(url)
-    return { action: 'deny' }
-  })
+  // (window.open is handled for every page at once: see 'web-contents-created' above)
+  win.webContents.on('render-process-gone', (_e, details) => onRendererGone(details))
+  // whatever replaced the page — a reload after a crash, a dev server's full reload — the terminals
+  // of the page that was there went with it, and nothing can reach their shells any more
+  win.webContents.on('did-navigate', () => void killAllPtys())
   win.on('closed', () => {
     win = null
     toasts.dispose() // a card with no window to open is pointless
@@ -411,58 +541,81 @@ function unwatchProfile(id: string): void {
 }
 
 /**
+ * The account list, read at most once a second for the snapshots: the status watcher's first scan
+ * hands over every file in the folder at once, and each one used to read ui.json again to say whose
+ * it is. A list a second old is good enough to tell one account from another.
+ */
+let profilesSeen: { at: number; state: ProfilesState } | null = null
+function recentProfiles(): ProfilesState {
+  const now = Date.now()
+  if (!profilesSeen || now - profilesSeen.at > 1000) profilesSeen = { at: now, state: loadProfiles() }
+  return profilesSeen.state
+}
+
+/**
  * Rate limits belong to an account, so a snapshot has to say whose it is. The status-line script
  * reports the `CLAUDE_CONFIG_DIR` it ran with; a file an older script wrote does not, and then the
  * session's own watcher is the next best witness.
  */
 function profileOfSnapshot(s: StatusSnapshot): string {
-  if (s.configDir !== undefined) return profileOfConfigDir(s.configDir)
+  if (s.configDir !== undefined) return profileOfConfigDir(s.configDir, recentProfiles())
   for (const [id, w] of watchers) if (w.liveSessions.some((x) => x.sessionId === s.sessionId)) return id
   return DEFAULT_PROFILE_ID
 }
 
+/** Each of these on its own (`step`): one that fails does not keep the others from starting. */
 function startWatchers(): void {
-  // accounts the list lost but whose folder (and login) is still on disk come back first
-  const adopted = adoptOrphanProfiles()
-  if (adopted.length) console.log(`[profiles] recovered: ${adopted.map((p) => p.id).join(', ')}`)
-  for (const p of loadProfiles().list) watchProfile(p)
+  step('accounts', () => {
+    // accounts the list lost but whose folder (and login) is still on disk come back first
+    const adopted = adoptOrphanProfiles()
+    if (adopted.length) console.log(`[profiles] recovered: ${adopted.map((p) => p.id).join(', ')}`)
+    for (const p of loadProfiles().list) watchProfile(p)
+  })
 
   // every account's CLAUDE.md carries the "멀티 에이전트" block the stored config asks for (on by default)
-  delegationSync(true)
+  step('delegation', () => delegationSync(true))
 
-  // the per-model weekly windows, asked of the CLI for every logged-in account (electron/usage-query.ts);
-  // a capture run asks nothing — a blind screenshot must not spawn claudes under the user's logins
-  usageQuery = new UsageQuerier({ accounts: () => withEmails(loadProfiles()).list.map((p) => ({ id: p.id, dir: p.dir, loggedIn: !!p.email })) })
-  usageQuery.on('usage', (u) => emitDesk({ kind: 'usage_windows', ...u }))
-  if (!process.env.HAMSTER_CAPTURE) usageQuery.start()
-
-  // before the status watcher: its first scan is what tells this when each account's window ends
-  fiveHour = new FiveHourStarter({ accounts: () => loadProfiles().list.map((p) => ({ id: p.id, dir: p.dir })) })
-  fiveHour.on('change', (s) => send('fiveHour:changed', s))
-  // a capture run restores what is stored and writes nothing back — and sends nothing on anyone's account
-  if (!process.env.HAMSTER_CAPTURE) fiveHour.start()
-
-  refreshStatusScripts()
-  status = new StatusWatcher()
-  status.on('status', (s: StatusSnapshot) => {
-    const profileId = profileOfSnapshot(s)
-    fiveHour?.observe(profileId, s.fiveHour)
-    emitDesk({ kind: 'status', ...s, profileId })
+  step('usage', () => {
+    // the per-model weekly windows, asked of the CLI for every logged-in account (electron/usage-query.ts);
+    // a capture run asks nothing — a blind screenshot must not spawn claudes under the user's logins
+    usageQuery = new UsageQuerier({ accounts: () => withEmails(loadProfiles()).list.map((p) => ({ id: p.id, dir: p.dir, loggedIn: !!p.email })) })
+    usageQuery.on('usage', (u) => emitDesk({ kind: 'usage_windows', ...u }))
+    if (!process.env.HAMSTER_CAPTURE) usageQuery.start()
   })
-  status.start()
 
-  const version = (force = false): void => {
-    void checkVersion(force).then((v) => emitDesk({ kind: 'version', ...v }))
-  }
-  version()
-  setInterval(() => version(), 60 * 60 * 1000)
+  step('five-hour', () => {
+    // before the status watcher: its first scan is what tells this when each account's window ends
+    fiveHour = new FiveHourStarter({ accounts: () => loadProfiles().list.map((p) => ({ id: p.id, dir: p.dir })) })
+    fiveHour.on('change', (s) => send('fiveHour:changed', s))
+    // a capture run restores what is stored and writes nothing back — and sends nothing on anyone's account
+    if (!process.env.HAMSTER_CAPTURE) fiveHour.start()
+  })
+
+  step('status', () => {
+    refreshStatusScripts()
+    status = new StatusWatcher()
+    status.on('status', (s: StatusSnapshot) => {
+      const profileId = profileOfSnapshot(s)
+      fiveHour?.observe(profileId, s.fiveHour)
+      emitDesk({ kind: 'status', ...s, profileId })
+    })
+    status.start()
+  })
+
+  step('version', () => {
+    const version = (force = false): void => {
+      void checkVersion(force).then((v) => emitDesk({ kind: 'version', ...v }))
+    }
+    version()
+    setInterval(() => version(), 60 * 60 * 1000)
+  })
 
   // Once, at start — and whenever the user asks (다시 확인). There used to be an hourly check too,
   // and it did more harm than good: a release found mid-session wanted a restart in the middle of
   // work, and (in an installed build) its blockmap download kept the disk busy under a running
   // claude. A version is picked up the next time the app is opened, which is soon enough.
   // A capture run photographs the window, and a pill that depends on the network is not repeatable.
-  if (!process.env.HAMSTER_CAPTURE) void appUpdate()
+  if (!process.env.HAMSTER_CAPTURE) void appUpdate().catch((e: unknown) => logError('app-update', e))
 }
 
 /**
@@ -530,7 +683,25 @@ function visible(data: string): string {
 
 const ptyLogInput = (data: string): void => ptyLog(`\n>> ${visible(data)}\n`)
 
-ipcMain.handle('pty:create', (_e, cols: number, rows: number, cwd?: string, profileId?: string) => {
+/** how long taking every shell down may hold a quit, a crash recovery or an account's delete up */
+const KILL_CAP_MS = 3000
+
+/**
+ * Take every shell down, trees and all (pty.ts), in parallel; resolves when they have gone or after
+ * `KILL_CAP_MS`, whichever is first. They are off the books at once: nothing more is written to them.
+ */
+function killAllPtys(): Promise<void> {
+  const all = [...ptys.values()]
+  ptys.clear()
+  ptyProfile.clear()
+  for (const h of all) waitingGate.forget(h.id)
+  if (all.length === 0) return Promise.resolve()
+  if (process.env.HAMSTER_CAPTURE) console.log(`[pty] killing ${all.length}`)
+  return Promise.race([Promise.allSettled(all.map((h) => h.kill())).then(() => undefined), new Promise<void>((r) => setTimeout(r, KILL_CAP_MS).unref())])
+}
+
+handle('pty:create', (_e, cols: number, rows: number, cwd?: string, profileId?: string) => {
+  if (shuttingDown) throw new Error('quitting')
   // an account that has been forgotten since the tab was stored falls back to the default one
   const profiles = loadProfiles()
   const profile = profiles.list.find((p) => p.id === profileId) ?? profiles.list[0]
@@ -566,82 +737,135 @@ ipcMain.handle('pty:create', (_e, cols: number, rows: number, cwd?: string, prof
   return { id: handle.id, pid: handle.pid, shell: handle.shell, cwd: handle.cwd, profileId: profile.id }
 })
 
-ipcMain.on('pty:input', (_e, id: number, data: string) => {
+const CR = String.fromCharCode(13)
+const ESC = String.fromCharCode(27)
+const CTRL_C = String.fromCharCode(3)
+/** what xterm sends in front of pasted text while the program asked for bracketed paste */
+const PASTE_START = `${ESC}[200~`
+
+/**
+ * Keys that answer (or dismiss) a prompt: Enter, Esc on its own, Ctrl+C. Not anything that merely
+ * *contains* an Esc — the arrow keys that move through a prompt's choices are Esc sequences, and
+ * clearing on those put the warning away (and the session bar's buttons back) while the prompt was
+ * still up. Pasted text is not an answer either, whatever line breaks it carries.
+ */
+function answersPrompt(data: string): boolean {
+  if (data.startsWith(PASTE_START)) return false
+  return data === ESC || data.includes(CR) || data.includes(CTRL_C)
+}
+
+listen('pty:input', (_e, id: number, data: string) => {
   ptys.get(id)?.write(data)
   ptyLogInput(data)
-  if (data.includes(String.fromCharCode(13)) || data.includes(String.fromCharCode(27))) {
-    waitingGate.answered(id)
-    emitDesk({ kind: 'waiting_clear', ptyId: id, ts: Date.now() })
-  }
+  // only a terminal that was waiting has anything to clear; the others would re-render the whole
+  // window for nothing, on every Enter
+  if (answersPrompt(data) && waitingGate.answered(id)) emitDesk({ kind: 'waiting_clear', ptyId: id, ts: Date.now() })
 })
 
-ipcMain.on('pty:resize', (_e, id: number, cols: number, rows: number) => {
+listen('pty:resize', (_e, id: number, cols: number, rows: number) => {
   ptys.get(id)?.resize(cols, rows)
 })
 
-ipcMain.on('pty:kill', (_e, id: number) => {
-  ptys.get(id)?.kill()
+listen('pty:kill', (_e, id: number) => {
+  const h = ptys.get(id)
   ptys.delete(id)
+  ptyProfile.delete(id)
+  waitingGate.forget(id)
+  void h?.kill() // asynchronous: the other terminals keep printing while this one's tree goes
 })
 
 // ---- IPC: desk data
 
-ipcMain.handle('desk:sessions', () => liveSessions())
-ipcMain.handle('desk:backlog', (_e, after: number) => backlog.filter((b) => b.seq > after))
+handle('desk:sessions', () => liveSessions())
+handle('desk:backlog', (_e, after: number) => backlog.replay(Number(after) || 0))
 
 // ---- IPC: accounts (electron/profiles.ts)
 // An account is a config folder. Adding one only makes an empty folder under ~/.hamster-desk;
 // forgetting one never deletes anything. The default account's folder is never written to here.
 
-ipcMain.handle('profiles:list', () => withEmails(loadProfiles()))
-ipcMain.handle('profiles:add', (_e, name: string) => {
-  const { state, added } = addProfile(String(name ?? ''))
-  watchProfile(added)
-  delegationSync(true) // the new account's CLAUDE.md gets the block too
-  return withEmails(state)
-})
-ipcMain.handle('profiles:rename', (_e, id: string, name: string) => withEmails(renameProfile(String(id ?? ''), String(name ?? ''))))
-ipcMain.handle('profiles:remove', (_e, id: string) => {
-  const { state, removed } = removeProfile(String(id ?? ''))
-  if (removed) {
-    // everything that holds the folder open has to let go first: the watcher's handles, then the
-    // shells (and the claude inside them) that were started under this account
-    unwatchProfile(removed.id)
-    for (const [ptyId, pid] of ptyProfile) {
-      if (pid !== removed.id) continue
-      ptys.get(ptyId)?.kill()
-      ptys.delete(ptyId)
-      ptyProfile.delete(ptyId)
-    }
-    deleteProfileDir(removed)
+/** a line of an error the UI can show next to what failed */
+const errorText = (e: unknown): string => String((e as Error)?.message ?? e).slice(0, 200)
+
+/**
+ * An account change that could not happen answers with the list as it now is and why, instead of an
+ * exception the renderer can only swallow (preload.ts `ProfilesAnswer`).
+ */
+async function profilesAnswer(change: () => ProfilesState | Promise<ProfilesState>): Promise<ProfilesState & { error?: string }> {
+  try {
+    return withEmails(await change())
+  } catch (e) {
+    logError('profiles', e)
+    return { ...withEmails(loadProfiles()), error: errorText(e) }
   }
-  return withEmails(state)
-})
-ipcMain.handle('profiles:setCurrent', (_e, id: string) => withEmails(setCurrentProfile(String(id ?? ''))))
+}
+
+handle('profiles:list', () => withEmails(loadProfiles()))
+handle('profiles:add', (_e, name: string) =>
+  profilesAnswer(() => {
+    const { state, added } = addProfile(String(name ?? ''))
+    watchProfile(added)
+    delegationSync(true) // the new account's CLAUDE.md gets the block too
+    return state
+  }),
+)
+handle('profiles:rename', (_e, id: string, name: string) => profilesAnswer(() => renameProfile(String(id ?? ''), String(name ?? ''))))
+handle('profiles:remove', (_e, id: string) =>
+  profilesAnswer(async () => {
+    const { state, removed } = removeProfile(String(id ?? ''))
+    if (removed) {
+      // everything that holds the folder open has to let go first: the watcher's handles, then the
+      // shells (and the claude inside them) that were started under this account — and those have
+      // to be *gone*, not just told to go, before the folder can be deleted
+      unwatchProfile(removed.id)
+      const kills: Promise<void>[] = []
+      for (const [ptyId, pid] of ptyProfile) {
+        if (pid !== removed.id) continue
+        const h = ptys.get(ptyId)
+        ptys.delete(ptyId)
+        ptyProfile.delete(ptyId)
+        waitingGate.forget(ptyId)
+        if (h) kills.push(h.kill())
+      }
+      await Promise.race([Promise.allSettled(kills), new Promise<void>((r) => setTimeout(r, KILL_CAP_MS).unref())])
+      deleteProfileDir(removed)
+    }
+    return state
+  }),
+)
+handle('profiles:setCurrent', (_e, id: string) => profilesAnswer(() => setCurrentProfile(String(id ?? ''))))
 /** the CLI's own account, taken off the list earlier, comes back — and is watched again */
-ipcMain.handle('profiles:showDefault', () => {
-  const state = showDefaultProfile()
-  const cli = state.list.find((p) => p.id === DEFAULT_PROFILE_ID)
-  if (cli) watchProfile(cli)
-  delegationSync(true)
-  return withEmails(state)
-})
-ipcMain.handle('profiles:openFolder', (_e, id: string) => shell.openPath(baseDirOf(String(id ?? ''))))
+handle('profiles:showDefault', () =>
+  profilesAnswer(() => {
+    const state = showDefaultProfile()
+    const cli = state.list.find((p) => p.id === DEFAULT_PROFILE_ID)
+    if (cli) watchProfile(cli)
+    delegationSync(true)
+    return state
+  }),
+)
+handle('profiles:openFolder', (_e, id: string) => shell.openPath(baseDirOf(String(id ?? ''))))
 
 // ---- IPC: status line (usage), version, dialogs
-// Each account has its own settings.json, so the status line is switched on per account.
+// Each account has its own settings.json, so the status line is switched on per account. A switch
+// that could not happen — a settings.json that is there but cannot be read, or cannot be replaced —
+// changes nothing and says why (preload.ts `StatusLineResult`).
 
-ipcMain.handle('statusline:state', (_e, profileId?: string) => statusLineState(configDirOf(profileId)))
-ipcMain.handle('statusline:install', (_e, profileId?: string) => {
-  installStatusLine(configDirOf(profileId))
-  return statusLineState(configDirOf(profileId))
-})
-ipcMain.handle('statusline:uninstall', (_e, profileId?: string) => {
-  uninstallStatusLine(configDirOf(profileId))
-  return statusLineState(configDirOf(profileId))
-})
+function statusLineChange(profileId: string | undefined, change: (configDir: string | null) => void): { state: ReturnType<typeof statusLineState>; error: string | null } {
+  const dir = configDirOf(profileId)
+  try {
+    change(dir)
+    return { state: statusLineState(dir), error: null }
+  } catch (e) {
+    logError('statusline', e)
+    return { state: statusLineState(dir), error: errorText(e) }
+  }
+}
 
-ipcMain.handle('version:check', async (_e, force?: boolean) => {
+handle('statusline:state', (_e, profileId?: string) => statusLineState(configDirOf(profileId)))
+handle('statusline:install', (_e, profileId?: string) => statusLineChange(profileId, installStatusLine))
+handle('statusline:uninstall', (_e, profileId?: string) => statusLineChange(profileId, uninstallStatusLine))
+
+handle('version:check', async (_e, force?: boolean) => {
   const v = await checkVersion(force === true)
   emitDesk({ kind: 'version', ...v })
   return v
@@ -684,14 +908,14 @@ async function appUpdate(force = false, manual = force): Promise<AppUpdateInfo> 
   return u
 }
 
-ipcMain.handle('appUpdate:check', (_e, force?: boolean) => appUpdate(force === true))
+handle('appUpdate:check', (_e, force?: boolean) => appUpdate(force === true))
 
 /**
  * 'updating': the app is about to quit and come back rebuilt. 'downloading': the release is on its
  * way down, and "update" has to be pressed again once it is there. 'opened': the commits page, to
  * update by hand.
  */
-ipcMain.handle('appUpdate:run', () => {
+handle('appUpdate:run', () => {
   if (installedBuild()) {
     // installed: the downloaded setup runs with its progress window once we are gone, and reopens the app
     if (installRelease()) return 'updating'
@@ -708,7 +932,7 @@ ipcMain.handle('appUpdate:run', () => {
 })
 
 // the renderer says when the app is on screen and usable; that closes the boot log's line
-ipcMain.on('boot:done', () => {
+listen('boot:done', () => {
   bootMark('booted')
   // same rule as window-state.ts and the saved tabs: a capture run writes nothing to the user's folder
   if (process.env.HAMSTER_CAPTURE) return
@@ -719,23 +943,55 @@ ipcMain.on('boot:done', () => {
 // ---- IPC: folder browser
 
 const SKIP_DIRS = new Set(['node_modules', '$recycle.bin', 'system volume information', '.git', 'windows'])
+/** entries a listing takes, of each kind — the first 500 by name, not whichever the disk handed out first */
+const LIST_MAX = 500
+/**
+ * Every probe below is asynchronous, a few at a time. They used to be `existsSync`, up to 1,500 of
+ * them per folder listing, on the main thread — which also carries every terminal's output — and on
+ * a network share that stopped answering each one waited out the SMB timeout. A few at a time also
+ * leaves the rest of libuv's small thread pool to the watchers.
+ */
+const PROBES_AT_ONCE = 4
+/** a drive that has not answered by then (a mapped share that is gone) is left off the list */
+const DRIVE_PROBE_MS = 1500
 
-ipcMain.handle('fs:listDirs', async (_e, p: string) => {
-  const { promises: fsp, existsSync } = await import('node:fs')
-  const { join, dirname, resolve } = await import('node:path')
+const byName = (a: { name: string }, b: { name: string }): number => a.name.localeCompare(b.name, undefined, { sensitivity: 'base', numeric: true })
+
+/** `fn` over `items`, `limit` at a time, the results in the items' order */
+async function mapLimit<T, R>(items: T[], limit: number, fn: (item: T) => Promise<R>): Promise<R[]> {
+  const out = new Array<R>(items.length)
+  let next = 0
+  const worker = async (): Promise<void> => {
+    while (next < items.length) {
+      const i = next++
+      out[i] = await fn(items[i])
+    }
+  }
+  await Promise.all(Array.from({ length: Math.min(limit, items.length) }, worker))
+  return out
+}
+
+const exists = (p: string): Promise<boolean> => fsp.access(p).then(() => true, () => false)
+
+/** the folders of a listing, each with whether it is a repository and whether Claude has been set up in it */
+async function dirEntries(path: string, ents: Dirent[]): Promise<DirEntry[]> {
+  const names = ents
+    .filter((e) => e.isDirectory() && !e.name.startsWith('.') && !SKIP_DIRS.has(e.name.toLowerCase()))
+    .sort(byName)
+    .slice(0, LIST_MAX)
+  return mapLimit(names, PROBES_AT_ONCE, async (e) => {
+    const full = join(path, e.name)
+    return { name: e.name, path: full, git: await exists(join(full, '.git')), claude: (await exists(join(full, 'CLAUDE.md'))) || (await exists(join(full, '.claude'))) }
+  })
+}
+
+handle('fs:listDirs', async (_e, p: string) => {
+  const { dirname, resolve } = await import('node:path')
   const path = p ? resolve(String(p)) : browseHome()
   const parentRaw = dirname(path)
   const parent = parentRaw === path ? null : parentRaw
   try {
-    const ents = await fsp.readdir(path, { withFileTypes: true })
-    const dirs = ents
-      .filter((e) => e.isDirectory() && !e.name.startsWith('.') && !SKIP_DIRS.has(e.name.toLowerCase()))
-      .slice(0, 500)
-      .map((e) => {
-        const full = join(path, e.name)
-        return { name: e.name, path: full, git: existsSync(join(full, '.git')), claude: existsSync(join(full, 'CLAUDE.md')) || existsSync(join(full, '.claude')) }
-      })
-      .sort((a, b) => a.name.localeCompare(b.name, undefined, { sensitivity: 'base', numeric: true }))
+    const dirs = await dirEntries(path, await fsp.readdir(path, { withFileTypes: true }))
     return { path, parent, dirs, error: null }
   } catch (e) {
     return { path, parent, dirs: [], error: (e as Error).message }
@@ -751,28 +1007,16 @@ ipcMain.handle('fs:listDirs', async (_e, p: string) => {
 const browseHome = (): string => app.getPath('home')
 
 /** Like fs:listDirs but folders *and* files — the folder panel doubles as a small file browser. */
-ipcMain.handle('fs:list', async (_e, p: string) => {
-  const { promises: fsp, existsSync } = await import('node:fs')
-  const { extname, join, dirname, resolve } = await import('node:path')
+handle('fs:list', async (_e, p: string) => {
+  const { extname, dirname, resolve } = await import('node:path')
   const path = p ? resolve(String(p)) : browseHome()
   const parentRaw = dirname(path)
   const parent = parentRaw === path ? null : parentRaw
-  const byName = (a: { name: string }, b: { name: string }): number =>
-    a.name.localeCompare(b.name, undefined, { sensitivity: 'base', numeric: true })
   try {
     const ents = await fsp.readdir(path, { withFileTypes: true })
-    const dirs = ents
-      .filter((e) => e.isDirectory() && !e.name.startsWith('.') && !SKIP_DIRS.has(e.name.toLowerCase()))
-      .slice(0, 500)
-      .map((e) => {
-        const full = join(path, e.name)
-        return { name: e.name, path: full, git: existsSync(join(full, '.git')), claude: existsSync(join(full, 'CLAUDE.md')) || existsSync(join(full, '.claude')) }
-      })
-      .sort(byName)
-    const files: FileEntry[] = []
-    for (const e of ents) {
-      if (files.length >= 500) break
-      if (!e.isFile() || e.name.startsWith('.')) continue
+    const dirs = await dirEntries(path, ents)
+    const names = ents.filter((e) => e.isFile() && !e.name.startsWith('.')).sort(byName).slice(0, LIST_MAX)
+    const files: FileEntry[] = await mapLimit(names, PROBES_AT_ONCE, async (e) => {
       const full = join(path, e.name)
       let size = 0
       let mtime = 0
@@ -783,9 +1027,8 @@ ipcMain.handle('fs:list', async (_e, p: string) => {
       } catch {
         /* vanished or unreadable; still list the name */
       }
-      files.push({ name: e.name, path: full, size, mtime, ext: extname(e.name).replace(/^\./, '').toLowerCase() })
-    }
-    files.sort(byName)
+      return { name: e.name, path: full, size, mtime, ext: extname(e.name).replace(/^\./, '').toLowerCase() }
+    })
     return { path, parent, dirs, files, error: null }
   } catch (e) {
     return { path, parent, dirs: [], files: [], error: (e as Error).message }
@@ -793,49 +1036,42 @@ ipcMain.handle('fs:list', async (_e, p: string) => {
 })
 
 /** Which of these folders are still there — the recent list greys out the ones that are gone. */
-ipcMain.handle('fs:exists', async (_e, paths: unknown) => {
-  const { existsSync } = await import('node:fs')
+handle('fs:exists', async (_e, paths: unknown) => {
   const out: Record<string, boolean> = {}
   if (!Array.isArray(paths)) return out
-  for (const p of paths.slice(0, 200)) {
-    if (typeof p !== 'string' || !p) continue
-    try {
-      out[p] = existsSync(p)
-    } catch {
-      out[p] = false
-    }
-  }
+  const list = paths.slice(0, 200).filter((p): p is string => typeof p === 'string' && !!p)
+  const found = await mapLimit(list, PROBES_AT_ONCE, exists)
+  list.forEach((p, i) => (out[p] = found[i]))
   return out
 })
 
-ipcMain.handle('fs:openPath', (_e, p: string) => shell.openPath(String(p || '')))
-ipcMain.on('fs:showInFolder', (_e, p: string) => shell.showItemInFolder(String(p || '')))
+handle('fs:openPath', (_e, p: string) => shell.openPath(String(p || '')))
+listen('fs:showInFolder', (_e, p: string) => shell.showItemInFolder(String(p || '')))
 
 /**
  * What kind of project the folder is and what can be run in it (electron/project-actions.ts). Asked
  * together with fs:list on every folder change, so it reads the folder's top level only and caches
  * on the markers' mtimes; no shell is spawned to find out.
  */
-ipcMain.handle('fs:project', async (_e, p: string) => {
+handle('fs:project', async (_e, p: string) => {
   const { resolve } = await import('node:path')
   return detectProject(p ? resolve(String(p)) : browseHome())
 })
 
-ipcMain.handle('fs:drives', async () => {
+/** A..Z that are there. A mapped drive whose share is gone can take the SMB timeout to say so; it is left off, not waited for. */
+handle('fs:drives', async () => {
   if (process.platform !== 'win32') return ['/']
-  const { existsSync } = await import('node:fs')
-  const out: string[] = []
-  for (let c = 65; c <= 90; c++) {
-    const d = `${String.fromCharCode(c)}:\\`
-    if (existsSync(d)) out.push(d)
-  }
-  return out
+  const letters = Array.from({ length: 26 }, (_, i) => `${String.fromCharCode(65 + i)}:\\`)
+  const probe = (d: string): Promise<boolean> =>
+    Promise.race([exists(d), new Promise<boolean>((r) => setTimeout(() => r(false), DRIVE_PROBE_MS).unref())])
+  const found = await mapLimit(letters, PROBES_AT_ONCE, probe)
+  return letters.filter((_, i) => found[i])
 })
 
 // ---- IPC: clipboard (the preload runs sandboxed and cannot reach the clipboard itself)
 
-ipcMain.handle('clipboard:readText', () => clipboard.readText())
-ipcMain.on('clipboard:writeText', (_e, text: string) => clipboard.writeText(String(text ?? '')))
+handle('clipboard:readText', () => clipboard.readText())
+listen('clipboard:writeText', (_e, text: string) => clipboard.writeText(String(text ?? '')))
 
 // ---- IPC: speech bubble summaries (headless claude -p, see electron/summarize.ts)
 
@@ -844,9 +1080,9 @@ function summarizer(): BubbleSummarizer {
   return bubbles
 }
 
-ipcMain.handle('bubble:summarize', (_e, req: BubbleRequest) => summarizer().summarize(req))
-ipcMain.handle('bubble:state', () => summarizer().state())
-ipcMain.handle('bubble:resetStats', () => summarizer().reset())
+handle('bubble:summarize', (_e, req: BubbleRequest) => summarizer().summarize(req))
+handle('bubble:state', () => summarizer().state())
+handle('bubble:resetStats', () => summarizer().reset())
 
 // ---- IPC: "멀티 에이전트" — the sub-agent instruction block in every account's CLAUDE.md (electron/delegation.ts)
 
@@ -859,8 +1095,8 @@ function delegationSync(write: boolean): DelegationState {
   return syncDelegation(accounts, !write || !!process.env.HAMSTER_CAPTURE)
 }
 
-ipcMain.handle('delegation:get', () => delegationSync(false))
-ipcMain.handle('delegation:set', (_e, config: unknown) => {
+handle('delegation:get', () => delegationSync(false))
+handle('delegation:set', (_e, config: unknown) => {
   storeDelegation(sanitizeDelegation(config))
   return delegationSync(true)
 })
@@ -868,53 +1104,53 @@ ipcMain.handle('delegation:set', (_e, config: unknown) => {
 // ---- IPC: start the next 5-hour window as soon as the last one ends (electron/five-hour.ts, per account)
 
 /** the usage popover's "다시 확인": ask the CLI now, for one account or all; the answers arrive as events */
-ipcMain.handle('usage:refresh', (_e, profileId?: string) => (process.env.HAMSTER_CAPTURE ? [] : (usageQuery?.refresh(profileId ? String(profileId) : undefined) ?? [])))
+handle('usage:refresh', (_e, profileId?: string) => (process.env.HAMSTER_CAPTURE ? [] : (usageQuery?.refresh(profileId ? String(profileId) : undefined) ?? [])))
 
-ipcMain.handle('fiveHour:state', () => fiveHour?.state() ?? {})
-ipcMain.handle('fiveHour:set', (_e, profileId: string, on: boolean) => fiveHour?.set(String(profileId ?? ''), on === true) ?? {})
+handle('fiveHour:state', () => fiveHour?.state() ?? {})
+handle('fiveHour:set', (_e, profileId: string, on: boolean) => fiveHour?.set(String(profileId ?? ''), on === true) ?? {})
 
 // ---- IPC: UI settings (~/.hamster-desk/ui.json — outside the per-run-mode Electron profile)
 
-ipcMain.handle('ui:load', () => loadUi())
+handle('ui:load', () => loadUi())
 // `base`: what the renderer's copy held before this patch, so a list it changed is merged into the
 // file by difference (electron/ui-store.ts) instead of replacing what another process added
-ipcMain.handle('ui:save', (_e, patch: UiState, base?: UiState) => saveUi(patch, base))
+handle('ui:save', (_e, patch: UiState, base?: UiState) => saveUi(patch, base))
 
-ipcMain.handle('dialog:pickFolder', async (_e, defaultPath?: string) => {
+handle('dialog:pickFolder', async (_e, defaultPath?: string) => {
   if (!win) return null
   const r = await dialog.showOpenDialog(win, { properties: ['openDirectory'], defaultPath, title: tr().main.pickFolder })
   return r.canceled ? null : (r.filePaths[0] ?? null)
 })
 
-ipcMain.on('win:alwaysOnTop', (_e, on: boolean) => {
+listen('win:alwaysOnTop', (_e, on: boolean) => {
   // mini mode pins the window itself; the renderer keeps re-sending `mini || prefs.onTop`, and an
   // `onTop:false` that slipped through mid-mini would un-pin the one window that must stay up
   if (isMini() && !on) return
   win?.setAlwaysOnTop(on, 'floating')
 })
 
-ipcMain.on('win:opacity', (_e, v: number) => {
+listen('win:opacity', (_e, v: number) => {
   win?.setOpacity(Math.min(1, Math.max(0.3, v)))
 })
 
 // ---- IPC: notifications and mini mode (electron/notify.ts, electron/window-state.ts)
 
-ipcMain.handle('notify:show', (_e, req: NotifyRequest) => showNotification(req, win, toasts))
-ipcMain.handle('win:mini', (_e, on: boolean) => setMini(win, on === true))
+handle('notify:show', (_e, req: NotifyRequest) => showNotification(req, win, toasts))
+handle('win:mini', (_e, on: boolean) => setMini(win, on === true))
 
 // ---- IPC: past conversations of a folder (electron/transcripts.ts)
 // `live` is the set the watcher already knows is running, so the list can grey those rows out.
 
-ipcMain.handle('transcripts:list', (_e, cwd: string, profileId?: string) =>
+handle('transcripts:list', (_e, cwd: string, profileId?: string) =>
   listTranscripts(String(cwd ?? ''), new Set(liveSessions().map((s) => s.sessionId)), configDirOf(profileId) ?? undefined),
 )
 
 // ---- IPC: git, read-only (electron/git.ts)
 
-ipcMain.handle('git:info', (_e, cwd: string) => gitInfo(String(cwd ?? '')))
-ipcMain.handle('git:diff', (_e, cwd: string, file: string) => gitDiff(String(cwd ?? ''), String(file ?? '')))
+handle('git:info', (_e, cwd: string) => gitInfo(String(cwd ?? '')))
+handle('git:diff', (_e, cwd: string, file: string) => gitDiff(String(cwd ?? ''), String(file ?? '')))
 
-ipcMain.handle('app:info', () => {
+handle('app:info', () => {
   let debugPrefs: Record<string, unknown> | null = null
   if (process.env.HAMSTER_PREFS && !app.isPackaged) {
     try {
@@ -1002,16 +1238,19 @@ function scheduleCapture(): void {
  * path goes through: `window-all-closed` is NOT emitted when the quit was started by app.quit()
  * (the capture smoke, the menu, Cmd+Q), and the shells used to survive that — node-pty's ConPTY
  * handle then kept the main process alive after the `quit` event, leaving an invisible electron.exe
- * plus an orphaned pwsh/claude tree behind. Idempotent: the window-all-closed path calls it too.
+ * plus an orphaned pwsh/claude tree behind. Idempotent: every caller gets the one teardown.
+ *
+ * The shells go last and together, and the quit waits for them (at most `KILL_CAP_MS`): each one is a
+ * `taskkill` of its tree, which used to run one after the other, synchronously, with nothing to stop
+ * a hung one from holding the quit for ever.
  */
 let shuttingDown = false
-function shutdown(): void {
-  if (shuttingDown) return
+let teardown: Promise<void> | null = null
+function shutdown(): Promise<void> {
+  if (teardown) return teardown
   shuttingDown = true
   persistWindowState(win) // quitting from mini mode stores the bounds mini took over, not 480×360
   flushUi() // a setting changed in the last 300 ms is still only in memory
-  for (const p of ptys.values()) p.kill()
-  ptys.clear()
   for (const w of watchers.values()) w.stop()
   watchers.clear()
   status?.stop()
@@ -1022,6 +1261,8 @@ function shutdown(): void {
   fiveHour = null
   usageQuery?.stop()
   usageQuery = null
+  teardown = killAllPtys()
+  return teardown
 }
 
 /**
@@ -1047,6 +1288,26 @@ function scheduleShortcutRepair(): void {
 }
 
 // ---- lifecycle
+
+/**
+ * One piece of the start-up. One that throws is logged (~/.hamster-desk/error.log, boot-log.ts) and
+ * the rest still happen: a status folder that could not be made used to take the version check, the
+ * update check, the shortcut repair and the resume handler down with it, without a word anywhere.
+ */
+function step(name: string, fn: () => void): void {
+  try {
+    fn()
+  } catch (e) {
+    logError(`start:${name}`, e)
+  }
+}
+
+// Whatever no code of ours caught, anywhere in main, is written down and the app carries on.
+// Electron's default for an uncaught exception is a modal error box over terminals that are, as far
+// as anyone can tell, still working — and a rejection nobody handled left no trace at all.
+process.on('uncaughtException', (e) => logError('uncaught', e))
+process.on('unhandledRejection', (e) => logError('unhandled', e))
+
 // Only the instance holding the lock registers these: after app.quit() a ready handler would
 // still race to create a window.
 
@@ -1058,29 +1319,43 @@ if (gotLock) {
     win.focus()
   })
 
-  app.whenReady().then(() => {
-    bootMark('ready')
-    // this app used to write agent files and settings.agent; take those back out once
-    const legacy = cleanupLegacyHarness()
-    if (legacy.length) console.log(`[legacy] removed collaboration-mode leftovers: ${legacy.join(', ')}`)
-    createWindow()
-    startWatchers()
-    scheduleCapture()
-    scheduleKeys()
-    scheduleMouse()
-    scheduleShortcutRepair()
-    // every timer is late after a sleep; a window that ended meanwhile gets its message once the
-    // network is back, not up to half a minute later
-    powerMonitor.on('resume', () => setTimeout(() => void fiveHour?.tick(), 20_000))
-    app.on('activate', () => {
-      if (BrowserWindow.getAllWindows().length === 0) createWindow()
+  app
+    .whenReady()
+    .then(() => {
+      bootMark('ready')
+      // no page of ours asks the browser for a permission (camera, notifications, …): whoever does is refused
+      session.defaultSession.setPermissionRequestHandler((_wc, _permission, callback) => callback(false))
+      step('legacy', () => {
+        // this app used to write agent files and settings.agent; take those back out once
+        const legacy = cleanupLegacyHarness()
+        if (legacy.length) console.log(`[legacy] removed collaboration-mode leftovers: ${legacy.join(', ')}`)
+      })
+      createWindow()
+      step('watchers', startWatchers)
+      step('capture', scheduleCapture)
+      step('keys', scheduleKeys)
+      step('mouse', scheduleMouse)
+      step('shortcuts', scheduleShortcutRepair)
+      // every timer is late after a sleep; a window that ended meanwhile gets its message once the
+      // network is back, not up to half a minute later
+      powerMonitor.on('resume', () => setTimeout(() => void fiveHour?.tick(), 20_000))
+      app.on('activate', () => {
+        if (BrowserWindow.getAllWindows().length === 0) createWindow()
+      })
+    })
+    .catch((e: unknown) => logError('ready', e))
+
+  // The quit is held until the teardown is done — the shells' trees are killed in parallel and
+  // waited for (at most KILL_CAP_MS) — and then carries on by itself.
+  let quitReady = false
+  app.on('before-quit', (e) => {
+    if (quitReady) return
+    e.preventDefault()
+    void shutdown().finally(() => {
+      quitReady = true
+      app.quit()
     })
   })
 
-  app.on('before-quit', () => shutdown())
-
-  app.on('window-all-closed', () => {
-    shutdown()
-    app.quit()
-  })
+  app.on('window-all-closed', () => app.quit())
 }

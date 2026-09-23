@@ -183,6 +183,14 @@ export function nodeCommand(pm: PackageManager, script: string): string {
   return NODE_KNOWN_NAMES.has(script) ? `${pm} ${script}` : `${pm} run ${script}`
 }
 
+/**
+ * What a script name may look like to be offered at all. The name is typed into a shell as it is
+ * (`npm run <name>`), and a package.json is only somebody's text: a key like `x; curl … | iex` or
+ * one with a line break in it would be a second command. Real script names are words, `:`, `.`,
+ * `@`, `/`, `+` and `-`.
+ */
+export const SAFE_SCRIPT = /^[\w:.@/+-]+$/
+
 /** `build:vite` belongs with `build`, `test:unit` with `test`; anything else is 기타 */
 function nodeGroupOf(script: string): ProjectActionGroup {
   const head = script.split(':')[0]
@@ -200,7 +208,7 @@ async function detectNode(f: Folder): Promise<ProjectKindInfo | null> {
   }
   const pm = packageManagerOf(pkg, f.names)
   const scriptsRaw = pkg.scripts && typeof pkg.scripts === 'object' ? (pkg.scripts as Record<string, unknown>) : {}
-  const scripts = Object.keys(scriptsRaw).filter((s) => typeof scriptsRaw[s] === 'string' && s.trim() === s && s.length > 0)
+  const scripts = Object.keys(scriptsRaw).filter((s) => typeof scriptsRaw[s] === 'string' && SAFE_SCRIPT.test(s))
 
   const actions: ProjectAction[] = []
   for (const k of NODE_KNOWN) if (scripts.includes(k.name)) actions.push(action('node', k.name, k.name, nodeCommand(pm, k.name), k.group))

@@ -102,6 +102,22 @@ test('answered before the record arrived, or an old question from a catch-up: no
   assert.equal(said.length, 0)
 })
 
+test('answered() says whether there was anything to clear', () => {
+  const { g, clock } = gate()
+  assert.equal(g.answered(1), false, 'Enter in a terminal nobody asked anything in')
+  clock.now += 1000
+  g.waiting(1, 'permission')
+  clock.now += 1000
+  assert.equal(g.answered(1), true, 'the answer to the prompt')
+  clock.now += 1000
+  assert.equal(g.answered(1), false, 'a second Enter: already answered')
+  clock.now += 1000
+  g.waiting(1, 'question') // the next prompt
+  clock.now += 1000
+  assert.equal(g.answered(1), true)
+  assert.equal(g.answered(2), false, 'terminals are separate')
+})
+
 test('a new prompt right after an answer is said again; one without an answer is not', () => {
   const { g, said, clock } = gate()
   g.waiting(1, 'permission')

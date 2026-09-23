@@ -1,4 +1,4 @@
-import { contextBridge, ipcRenderer } from 'electron'
+import { contextBridge, ipcRenderer, webUtils } from 'electron'
 import type {
   AppUpdateInfo,
   BubbleRequest,
@@ -31,10 +31,28 @@ export interface SeqEvent {
 
 export type StatusLineState = 'installed' | 'foreign' | 'none'
 
+/**
+ * What switching the status line did. `error`: settings.json is there but could not be read (or
+ * replaced), and nothing was changed — the words to show next to the button that was pressed.
+ */
+export interface StatusLineResult {
+  state: StatusLineState
+  error: string | null
+}
+
+/** The account list after a change; `error` when the change could not happen (the list is then as it was). */
+export type ProfilesAnswer = ProfilesState & { error?: string }
+
 export interface DeskBridge {
   onEvent(cb: (e: SeqEvent) => void): () => void
+  /** everything after `after` — the events the ring has dropped that everything else hangs on first (main.ts `replay`) */
   backlog(after: number): Promise<SeqEvent[]>
   sessions(): Promise<SessionInfo[]>
+  /**
+   * The path of a file dropped on the page (`webUtils`; the old `File.path` is gone); '' for one that
+   * is not on disk. The page asks this instead of letting Chromium open the file in its place.
+   */
+  pathForFile(file: File): string
   pty: {
     /** `profileId` = the account the shell runs under (its `CLAUDE_CONFIG_DIR`); none = the default one */
     create(cols: number, rows: number, cwd?: string, profileId?: string): Promise<PtyInfo>
@@ -47,19 +65,19 @@ export interface DeskBridge {
   /** per account: each one has its own settings.json */
   statusline: {
     state(profileId?: string): Promise<StatusLineState>
-    install(profileId?: string): Promise<StatusLineState>
-    uninstall(profileId?: string): Promise<StatusLineState>
+    install(profileId?: string): Promise<StatusLineResult>
+    uninstall(profileId?: string): Promise<StatusLineResult>
   }
-  /** several Claude Code accounts, one config folder each (electron/profiles.ts) */
+  /** several Claude Code accounts, one config folder each (electron/profiles.ts); a change that failed says why in `error` */
   profiles: {
     list(): Promise<ProfilesState>
-    add(name: string): Promise<ProfilesState>
-    rename(id: string, name: string): Promise<ProfilesState>
+    add(name: string): Promise<ProfilesAnswer>
+    rename(id: string, name: string): Promise<ProfilesAnswer>
     /** deletes the account: its shells are closed and its folder (login, settings, conversations) goes with it */
-    remove(id: string): Promise<ProfilesState>
-    setCurrent(id: string): Promise<ProfilesState>
+    remove(id: string): Promise<ProfilesAnswer>
+    setCurrent(id: string): Promise<ProfilesAnswer>
     /** put the CLI's own account (~/.claude) back on the list after it was taken off */
-    showDefault(): Promise<ProfilesState>
+    showDefault(): Promise<ProfilesAnswer>
     openFolder(id: string): Promise<string>
   }
   version: { check(force?: boolean): Promise<VersionInfo> }
@@ -174,29 +192,55 @@ export interface DeskBridge {
   onDebugType(cb: (ptyId: number, text: string) => void): () => void
 }
 
+/**
+ * One ipcRenderer listener per channel however many subscribe. Every terminal pane listens to the
+ * pty channels, and past ten listeners on one channel Node warns of a leak that is not one — with
+ * the tab strip scrolling, a dozen tabs is an ordinary day.
+ */
+function fanOut<A extends unknown[]>(channel: string): (cb: (...args: A) => void) => () => void {
+  const subs = new Set<(...args: A) => void>()
+  const h = (_e: unknown, ...args: unknown[]): void => {
+    for (const sub of [...subs]) sub(...(args as A)) // a copy: a pane may unsubscribe mid-dispatch
+  }
+  return (cb) => {
+    const sub = (...args: A): void => cb(...args) // its own entry, even for a callback given twice
+    if (!subs.size) ipcRenderer.on(channel, h)
+    subs.add(sub)
+    return () => {
+      if (subs.delete(sub) && !subs.size) ipcRenderer.off(channel, h)
+    }
+  }
+}
+
+const onPtyData = fanOut<[number, string]>('pty:data')
+const onPtyExit = fanOut<[number, number]>('pty:exit')
+const onDebugType = fanOut<[number, string]>('debug:type')
+
 const bridge: DeskBridge = {
   onEvent(cb) {
-    const h = (_e: unknown, ev: SeqEvent): void => cb(ev)
-    ipcRenderer.on('desk:event', h)
-    return () => ipcRenderer.off('desk:event', h)
+    // main sends them in batches, one per turn of its event loop (main.ts `emitDesk`)
+    const h = (_e: unknown, items: SeqEvent[]): void => {
+      for (const item of items) cb(item)
+    }
+    ipcRenderer.on('desk:events', h)
+    return () => ipcRenderer.off('desk:events', h)
   },
   backlog: (after) => ipcRenderer.invoke('desk:backlog', after),
   sessions: () => ipcRenderer.invoke('desk:sessions'),
+  pathForFile: (file) => {
+    try {
+      return webUtils.getPathForFile(file)
+    } catch {
+      return '' // not a File at all
+    }
+  },
   pty: {
     create: (cols, rows, cwd, profileId) => ipcRenderer.invoke('pty:create', cols, rows, cwd, profileId),
     input: (id, data) => ipcRenderer.send('pty:input', id, data),
     resize: (id, cols, rows) => ipcRenderer.send('pty:resize', id, cols, rows),
     kill: (id) => ipcRenderer.send('pty:kill', id),
-    onData(cb) {
-      const h = (_e: unknown, id: number, data: string): void => cb(id, data)
-      ipcRenderer.on('pty:data', h)
-      return () => ipcRenderer.off('pty:data', h)
-    },
-    onExit(cb) {
-      const h = (_e: unknown, id: number, code: number): void => cb(id, code)
-      ipcRenderer.on('pty:exit', h)
-      return () => ipcRenderer.off('pty:exit', h)
-    },
+    onData: (cb) => onPtyData(cb),
+    onExit: (cb) => onPtyExit(cb),
   },
   statusline: {
     state: (profileId) => ipcRenderer.invoke('statusline:state', profileId),
@@ -278,11 +322,7 @@ const bridge: DeskBridge = {
     diff: (cwd, file) => ipcRenderer.invoke('git:diff', cwd, file),
   },
   info: () => ipcRenderer.invoke('app:info'),
-  onDebugType(cb) {
-    const h = (_e: unknown, id: number, text: string): void => cb(id, text)
-    ipcRenderer.on('debug:type', h)
-    return () => ipcRenderer.off('debug:type', h)
-  },
+  onDebugType: (cb) => onDebugType(cb),
 }
 
 contextBridge.exposeInMainWorld('desk', bridge)

@@ -1,6 +1,7 @@
-import { existsSync, mkdirSync, readFileSync, renameSync, rmSync, writeFileSync } from 'node:fs'
+import { existsSync, readFileSync, rmSync } from 'node:fs'
 import { join } from 'node:path'
 import { DELEGATION_MODELS, DELEGATION_PRESETS, EFFORT_LEVELS, type DelegationConfig, type DelegationEffort, type DelegationFileState, type DelegationModel, type DelegationPreset, type DelegationState } from '../shared/events'
+import { linkTarget, writeFileAtomic } from './atomic-write'
 import { tr } from './lang'
 import { loadUi, saveUi } from './ui-store'
 import { claudeDir } from './watcher/paths'
@@ -136,9 +137,12 @@ export function fileState(file: string, c: DelegationConfig): DelegationFileStat
 }
 
 /**
- * Make the file match the config. Atomic (temp + rename), keeps the file's own line endings, and
- * a file this leaves empty is removed rather than left as a zero-byte CLAUDE.md. Returns the state
- * the file is in afterwards and the reason when it could not be written.
+ * Make the file match the config. Atomic and flushed (electron/atomic-write.ts), keeps the file's
+ * own line endings, and a file this leaves empty is removed rather than left as a zero-byte
+ * CLAUDE.md — unless it is a symlink: then the file it points at is what gets written (a rename onto
+ * the link would have made it a plain file, cut loose from the dotfiles it came from), and emptied
+ * rather than deleted from under the link. Returns the state the file is in afterwards and the
+ * reason when it could not be written.
  */
 export function applyToFile(file: string, c: DelegationConfig): { state: DelegationFileState; error: string | null } {
   try {
@@ -148,14 +152,13 @@ export function applyToFile(file: string, c: DelegationConfig): { state: Delegat
     const next = withBlock(raw.replace(/\r\n/g, '\n'), c)
     const out = crlf ? next.replace(/\n/g, '\r\n') : next
     if (out === raw) return { state: fileState(file, c), error: null }
-    if (!out) {
+    const linked = linkTarget(file) !== file
+    if (!out && !linked) {
       if (existed) rmSync(file, { force: true })
       return { state: 'installed', error: null }
     }
-    mkdirSync(join(file, '..'), { recursive: true }) // a brand-new account has no folder yet
-    const tmp = `${file}.hamster-tmp`
-    writeFileSync(tmp, out, 'utf8')
-    renameSync(tmp, file)
+    // a brand-new account has no folder yet; the writer makes it
+    writeFileAtomic(file, out)
     return { state: fileState(file, c), error: null }
   } catch (e) {
     return { state: 'error', error: String((e as Error)?.message ?? e).slice(0, 160) }
