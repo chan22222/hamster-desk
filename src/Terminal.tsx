@@ -1,10 +1,12 @@
-import { useEffect, useRef, useState } from 'react'
+import { memo, useEffect, useRef, useState } from 'react'
 import { Terminal as XTerm } from '@xterm/xterm'
 import { FitAddon } from '@xterm/addon-fit'
 import { WebglAddon } from '@xterm/addon-webgl'
 import '@xterm/xterm/css/xterm.css'
+import { ui } from './i18n'
 import { runInTerminal, useDesk, type Workspace } from './store'
 import { usePainted, type Painted } from './widgets/theme'
+import { pathsForPaste, sanitizePaste } from './term/paste'
 import { createSearchAddon, probeTermVerbose, searchOptions, termLog, type TermSearcher } from './term/search'
 import { TermSearch } from './term/TermSearch'
 
@@ -36,6 +38,13 @@ const THEME: Record<Painted, Record<string, string>> = {
 const FONT = { min: 10, max: 24, def: 14 }
 export const clampFont = (n: number): number => Math.max(FONT.min, Math.min(FONT.max, Math.round(n) || FONT.def))
 
+/**
+ * How often a pane that is being resized refits, at most. A refit that changes the grid reflows
+ * the scrollback and resizes the pty, and a TUI such as Claude Code repaints itself for each one;
+ * dragging the splitter used to do all of that on every frame. The last size always gets its refit.
+ */
+const FIT_EVERY_MS = 100
+
 /** The desktop app owns the clipboard; the browser preview falls back to the async clipboard API. */
 function writeClipboard(text: string): void {
   if (window.desk) window.desk.clipboard.writeText(text)
@@ -47,6 +56,16 @@ async function readClipboard(): Promise<string> {
     return (await navigator.clipboard?.readText()) ?? ''
   } catch {
     return ''
+  }
+}
+
+/** A link a program printed, if it is one the browser should open: web links only, never `file:` and friends. */
+function webLink(uri: string): string | null {
+  try {
+    const url = new URL(uri)
+    return url.protocol === 'http:' || url.protocol === 'https:' ? url.href : null
+  } catch {
+    return null
   }
 }
 
@@ -67,14 +86,19 @@ function isWindowShortcut(e: KeyboardEvent): boolean {
   return key.length === 1 && key >= '1' && key <= '9'
 }
 
-/** One embedded terminal per workspace. Hidden panes stay mounted so their scrollback survives tab switches. */
-export function TerminalPane({ ws, visible }: { ws: Workspace; visible: boolean }) {
+/**
+ * One embedded terminal per workspace. Hidden panes stay mounted so their scrollback survives tab
+ * switches. Memoized: the tab strip above re-renders on every store change, and a pane only has to
+ * when its own workspace or its visibility does.
+ */
+export const TerminalPane = memo(function TerminalPane({ ws, visible }: { ws: Workspace; visible: boolean }) {
   const hostRef = useRef<HTMLDivElement>(null)
   const bind = useDesk((s) => s.bindWorkspacePty)
   const fitRef = useRef<{ fit: () => void; focus: () => void } | null>(null)
+  /** the GPU renderer's switch, which the pane's visibility flips (see the effect below) */
+  const gpuRef = useRef<{ on: () => void; off: () => void } | null>(null)
   const termRef = useRef<XTerm | null>(null)
   const searchRef = useRef<TermSearcher | null>(null)
-  const ptyIdRef = useRef<number | null>(null)
   const painted = usePainted()
   // the pane is built once per workspace, so the theme it started with is read from a ref
   const paintedRef = useRef(painted)
@@ -139,16 +163,56 @@ export function TerminalPane({ ws, visible }: { ws: Workspace; visible: boolean 
       allowProposedApi: true,
       scrollback: 5000,
       windowsPty: { backend: 'conpty' },
+      // Hyperlinks a program prints (OSC 8). xterm's own handler asks an English confirm() and then
+      // points an empty window at the link, which main hands to the browser as about:blank — the
+      // link itself was lost. A web link now goes out as it is, on Ctrl+click the way Windows
+      // Terminal follows one, so a plain click in the terminal stays a click in the terminal.
+      linkHandler: {
+        activate: (e, uri) => {
+          const url = webLink(uri)
+          if (url && e.ctrlKey) window.open(url)
+        },
+        hover: (_e, uri) => {
+          const url = webLink(uri)
+          if (url) host.title = ui().terminal.linkTip(url)
+        },
+        leave: () => host.removeAttribute('title'),
+      },
     })
     const fit = new FitAddon()
     term.loadAddon(fit)
     term.open(host)
     termRef.current = term
-    try {
-      term.loadAddon(new WebglAddon())
-    } catch {
-      /* canvas renderer fallback */
+
+    // The GPU renderer, only while the pane is on screen. Chromium keeps at most 16 live WebGL
+    // contexts and drops the oldest past that: the studio holds one, and fifteen hidden tabs each
+    // holding their own would cost the studio, or the first terminal, theirs. A context lost anyway
+    // (sleep, a driver reset) falls back to the DOM renderer instead of leaving the pane blank; the
+    // next time the tab comes to the front it tries the GPU again.
+    let gpu: WebglAddon | null = null
+    /** no WebGL2 on this machine: asking again every time the tab is shown would not change that */
+    let noGpu = false
+    const gpuOff = (): void => {
+      const addon = gpu
+      gpu = null
+      addon?.dispose()
     }
+    const gpuOn = (): void => {
+      if (gpu || noGpu) return
+      try {
+        const addon = new WebglAddon()
+        addon.onContextLoss(() => {
+          termLog('[term] webgl context lost: back to the DOM renderer')
+          if (gpu === addon) gpuOff()
+        })
+        term.loadAddon(addon)
+        gpu = addon
+      } catch {
+        noGpu = true // the DOM renderer draws
+      }
+    }
+    gpuRef.current = { on: gpuOn, off: gpuOff }
+
     // The add-on is loaded behind a try: if it ever stops agreeing with the xterm it is bundled
     // with, the terminal still has to come up — the find box is the only thing that goes away.
     let offResults: { dispose(): void } | null = null
@@ -173,33 +237,44 @@ export function TerminalPane({ ws, visible }: { ws: Workspace; visible: boolean 
       term.clearSelection()
       return true
     }
+    /** every paste goes through here: filtered first (src/term/paste.ts), then bracketed by xterm */
+    const pasteText = (text: string): void => {
+      const clean = sanitizePaste(text)
+      if (clean) term.paste(clean) // bracketed paste, so Claude Code sees one paste
+    }
     const paste = (): void => {
-      void readClipboard().then((text) => {
-        if (text) term.paste(text) // bracketed paste, so Claude Code sees one paste
-      })
+      void readClipboard().then(pasteText)
+    }
+    // A key handled here is also cancelled. Returning false only keeps xterm's hands off, and the
+    // browser's own default then still runs: for Ctrl+V and Shift+Insert that is a native paste
+    // into xterm's textarea, which xterm pastes a second time. Copy is cancelled for the same
+    // reason — the browser's copy must not race the one written here.
+    const handled = (e: KeyboardEvent): false => {
+      e.preventDefault()
+      return false
     }
     term.attachCustomKeyEventHandler((e) => {
       if (e.type !== 'keydown') return true
       const key = e.key.toLowerCase()
       if (e.ctrlKey && !e.altKey) {
         // Ctrl+C copies when there is a selection, and interrupts when there is not
-        if (key === 'c' && !e.shiftKey) return !copySelection()
+        if (key === 'c' && !e.shiftKey) return copySelection() ? handled(e) : true
         if (key === 'c' && e.shiftKey) {
           copySelection()
-          return false
+          return handled(e)
         }
         if (e.key === 'Insert') {
           copySelection()
-          return false
+          return handled(e)
         }
         if (key === 'v') {
           paste()
-          return false
+          return handled(e)
         }
       }
       if (e.shiftKey && e.key === 'Insert') {
         paste()
-        return false
+        return handled(e)
       }
       // the find box is open and the caret wandered back into the terminal: Esc still closes it
       if (e.key === 'Escape' && actionsRef.current.isOpen()) {
@@ -231,17 +306,19 @@ export function TerminalPane({ ws, visible }: { ws: Workspace; visible: boolean 
       return () => {
         host.removeEventListener('contextmenu', onContextMenu)
         offResults?.dispose()
+        gpuRef.current = null
         term.dispose()
       }
     }
 
     let id: number | null = null
     let disposed = false
+    let firstRun: ReturnType<typeof setTimeout> | null = null
     const offData = bridge.pty.onData((pid, data) => {
       if (pid === id) term.write(data)
     })
     const offExit = bridge.pty.onExit((pid, code) => {
-      if (pid === id) term.writeln(`\r\n\x1b[2m[shell exited ${code}]\x1b[0m`)
+      if (pid === id) term.writeln(`\r\n\x1b[2m${ui().terminal.shellExited(code)}\x1b[0m`)
     })
     const offType = bridge.onDebugType((pid, text) => {
       if (pid === id) term.input(text) // smoke tests: keystrokes through xterm
@@ -249,44 +326,92 @@ export function TerminalPane({ ws, visible }: { ws: Workspace; visible: boolean 
     const onInput = term.onData((d) => {
       if (id !== null) bridge.pty.input(id, d)
     })
-    void bridge.pty.create(term.cols, term.rows, ws.cwd, ws.profileId).then((info) => {
-      if (disposed) {
-        bridge.pty.kill(info.id)
-        return
-      }
-      id = info.id
-      ptyIdRef.current = info.id
-      bind(ws.id, info.id, info.cwd)
-      bridge.pty.resize(info.id, term.cols, term.rows)
-      const first = ws.initialCommand ?? ws.runOnce
-      // give the shell a moment to print its prompt before typing into it
-      if (first) setTimeout(() => runInTerminal(info.id, first), 1200)
-      if (visible) term.focus()
+    // the pty hears about a size only when the grid really changed — a refit often lands on the same one
+    const onResize = term.onResize(({ cols, rows }) => {
+      if (id !== null) bridge.pty.resize(id, cols, rows)
     })
+    void bridge.pty.create(term.cols, term.rows, ws.cwd, ws.profileId).then(
+      (info) => {
+        if (disposed) {
+          bridge.pty.kill(info.id)
+          return
+        }
+        id = info.id
+        bind(ws.id, info.id, info.cwd)
+        bridge.pty.resize(info.id, term.cols, term.rows) // the grid may have changed while it started
+        const first = ws.initialCommand ?? ws.runOnce
+        // give the shell a moment to print its prompt before typing into it
+        if (first) firstRun = setTimeout(() => runInTerminal(info.id, first), 1200)
+        if (visible) term.focus()
+      },
+      (err: unknown) => {
+        // a pane with nothing in it would look like a shell that is slow to start, forever
+        termLog(`[term] pty create failed: ${String(err)}`)
+        if (!disposed) term.writeln(`\x1b[31m${ui().terminal.startFailed(err instanceof Error ? err.message : String(err))}\x1b[0m`)
+      },
+    )
 
+    // Files dropped on the terminal are typed in as their paths, the way Windows Terminal does it
+    // (the usual way to hand Claude Code a screenshot). The document refuses every other drop, so
+    // one never navigates the window away (src/main.tsx).
+    const onDragOver = (e: DragEvent): void => {
+      if (!e.dataTransfer?.types.includes('Files')) return
+      e.preventDefault()
+      e.dataTransfer.dropEffect = 'copy'
+    }
+    const onDrop = (e: DragEvent): void => {
+      e.preventDefault()
+      const files = [...(e.dataTransfer?.files ?? [])]
+      const text = pathsForPaste(files.map((f) => bridge.pathForFile(f)))
+      if (!text) return
+      pasteText(text)
+      term.focus()
+    }
+    host.addEventListener('dragover', onDragOver)
+    host.addEventListener('drop', onDrop)
+
+    let fitTimer: ReturnType<typeof setTimeout> | null = null
+    let lastFit = 0
     const ro = new ResizeObserver(() => {
-      if (host.offsetParent === null) return // hidden tab
-      safeFit()
-      if (id !== null) bridge.pty.resize(id, term.cols, term.rows)
+      if (fitTimer) return
+      fitTimer = setTimeout(
+        () => {
+          fitTimer = null
+          lastFit = performance.now()
+          if (host.offsetParent !== null) safeFit() // a hidden tab refits when it is shown
+        },
+        Math.max(0, FIT_EVERY_MS - (performance.now() - lastFit)),
+      )
     })
     ro.observe(host)
 
     return () => {
       disposed = true
       ro.disconnect()
+      if (fitTimer) clearTimeout(fitTimer)
+      if (firstRun) clearTimeout(firstRun)
       host.removeEventListener('contextmenu', onContextMenu)
+      host.removeEventListener('dragover', onDragOver)
+      host.removeEventListener('drop', onDrop)
       onInput.dispose()
+      onResize.dispose()
       offResults?.dispose()
       offData()
       offExit()
       offType()
       if (id !== null) bridge.pty.kill(id)
-      ptyIdRef.current = null
-      term.dispose()
+      gpuRef.current = null
+      term.dispose() // the add-ons, the GPU renderer included, go with it
     }
     // the pty lives as long as the pane; workspace identity never changes
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [ws.id])
+
+  // the GPU renderer follows the pane on and off screen (see `gpuOn` above)
+  useEffect(() => {
+    if (visible) gpuRef.current?.on()
+    else gpuRef.current?.off()
+  }, [visible])
 
   useEffect(() => {
     if (!visible) return
@@ -312,8 +437,9 @@ export function TerminalPane({ ws, visible }: { ws: Workspace; visible: boolean 
     if (term) term.options.theme = THEME[painted]
   }, [painted])
 
-  // Font size. Changing it changes how many columns fit, so the pty has to be told — otherwise the
-  // program inside keeps wrapping at the old width.
+  // Font size. Changing it changes how many columns fit, and the pty has to be told — otherwise the
+  // program inside keeps wrapping at the old width. The refit does that: a new grid reaches the pty
+  // through `onResize`.
   const termFont = useDesk((s) => s.prefs.termFont)
   useEffect(() => {
     const term = termRef.current
@@ -322,8 +448,6 @@ export function TerminalPane({ ws, visible }: { ws: Workspace; visible: boolean 
     if (term.options.fontSize === n) return
     term.options.fontSize = n
     fitRef.current?.fit()
-    const id = ptyIdRef.current
-    if (id !== null) window.desk?.pty.resize(id, term.cols, term.rows)
     termLog(`[term] font ${n}px cols=${term.cols} rows=${term.rows}`)
   }, [termFont])
 
@@ -363,4 +487,4 @@ export function TerminalPane({ ws, visible }: { ws: Workspace; visible: boolean 
       )}
     </div>
   )
-}
+})

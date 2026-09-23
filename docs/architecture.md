@@ -68,8 +68,8 @@ src/desk/skins.ts        모델별 스킨 · src/desk/anim.ts 상태→애니메
 src/desk/signs.ts        북쪽·서쪽 벽의 Spritfy 액자: 로고 PNG(src/assets/spritfy-logo.png) + 캡션을 캔버스에 그려 텍스처 평면으로 거는 것, 올리면 버튼처럼(떠오름·빛·캡션, 120ms), 클릭 = 사이트 열기
 src/sidebar/            사이드바(Sidebar.tsx: 바뀐 파일·탐색·실행 메뉴·폭 핸들) · recent.ts(ui.json 의 최근/즐겨찾기·상대 시간)
 src/dev/                브라우저 재생(replay-driver.ts) · 데모 햄스터(demo.ts) · debug.ts(HAMSTER_EVENTS 재생 · HAMSTER_CLICK)
-src/Terminal.tsx        xterm 탭(복사·붙여넣기 키 처리, 테마 연동, 검색 애드온, 글꼴 크기, 앱 단축키는 셸로 안 보냄)
-src/term/               TermSearch.tsx(검색 오버레이) · search.ts(검색 옵션, 캡처 실행용 꼬리표 로그)
+src/Terminal.tsx        xterm 탭(복사·붙여넣기 키 처리, 파일 끌어 놓기, OSC 8 링크, 앞 탭만 WebGL, 테마 연동, 검색 애드온, 글꼴 크기, 앱 단축키는 셸로 안 보냄)
+src/term/               TermSearch.tsx(검색 오버레이) · search.ts(검색 옵션, 캡처 실행용 꼬리표 로그) · paste.ts(붙여넣기 거르기·끌어 놓은 파일 경로, 순수)
 src/shortcuts.ts        전역 단축키 전부(창 keydown 한 곳)
 src/session/            SessionBar.tsx(컨트롤 바) · ContextMeter.tsx(탭의 % · 바의 미터) · TranscriptList.tsx(지난 대화)
 src/log/                FileLog.tsx(바뀐 파일) · FeedLog.tsx(말풍선 로그) · TurnToast.tsx(턴 요약 토스트) · turn.ts(summarizeTurn, 순수)

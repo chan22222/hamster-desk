@@ -6,7 +6,7 @@
 // `step()` the usage chips use, so 70 % and 90 % mean the same thing everywhere in the window.
 
 import { useEffect, useState } from 'react'
-import { t, useUi } from '../i18n'
+import { useUi } from '../i18n'
 import type { SessionState } from '../store'
 import { Meter, step } from '../widgets/Usage'
 import './session.css'
@@ -28,23 +28,16 @@ function windowSize(n: number | null | undefined): string {
 }
 
 /**
- * True while a compaction is going on.
- *
- * `compact` is not kept in the store (that side of it belongs to another agent's file), but it does
- * reach the main hamster's feed as the one fixed phrase `t().compacting`, with a `born` stamp. That
- * row is the signal, and it is the only one the renderer gets.
+ * True while a compaction is going on: for a while after the session's last compact boundary
+ * (`compactedAt`, the transcript's own time). It used to look for the bubble the boundary puts over
+ * the main hamster, by its text — which is in whatever language was set when it was said, so
+ * switching languages lost it. The transcript's time also keeps a boundary from long ago, replayed
+ * when the window reloads, from saying it again.
  */
 function useCompacting(session: SessionState | null): boolean {
-  const feed = session?.hamsters.main?.feed
-  const [until, setUntil] = useState(0)
+  const at = session?.compactedAt ?? null
+  const until = at === null ? 0 : at + COMPACT_MS
   const [, tick] = useState(0)
-
-  useEffect(() => {
-    if (!feed) return
-    const row = feed.find((f) => f.raw === t().compacting)
-    if (!row) return
-    setUntil((u) => (row.born + COMPACT_MS > u ? row.born + COMPACT_MS : u))
-  }, [feed])
 
   useEffect(() => {
     const left = until - Date.now()

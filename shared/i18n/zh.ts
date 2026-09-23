@@ -488,6 +488,12 @@ export const zh: UiStrings = {
     truncated: '内容太长，只显示开头部分。',
   },
 
+  terminal: {
+    shellExited: (code) => `[Shell 已退出 ${code}]`,
+    startFailed: (why) => `[无法打开终端：${why}]`,
+    linkTip: (url) => `Ctrl+单击打开 · ${url}`,
+  },
+
   search: {
     placeholder: '在终端中查找',
     prev: '上一个结果',

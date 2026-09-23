@@ -8,6 +8,7 @@
 // Pointing the camera at the speaker, which a row click used to do, is a button inside the detail.
 
 import { useEffect, useMemo, useRef, useState } from 'react'
+import type { LogItem } from '@shared/events'
 import { useUi, type UiStrings } from '../i18n'
 import { useDesk, type SessionState } from '../store'
 import './log.css'
@@ -26,6 +27,12 @@ function timeOf(ts: number): string {
   return `${String(d.getHours()).padStart(2, '0')}:${String(d.getMinutes()).padStart(2, '0')}:${String(d.getSeconds()).padStart(2, '0')}`
 }
 
+/**
+ * Who said it. The main hamster is named in the current language: the name a row carries was
+ * worded when its session began, and the language may have changed since.
+ */
+const whoOf = (u: UiStrings, l: LogItem): string => (l.hid === 'main' ? u.common.mainHamster : l.hidName)
+
 export function FeedLog({ session }: { session: SessionState | null }) {
   const u = useUi()
   const requestHamsterFocus = useDesk((s) => s.requestHamsterFocus)
@@ -40,9 +47,9 @@ export function FeedLog({ session }: { session: SessionState | null }) {
   const needle = q.trim().toLowerCase()
   const rows = useMemo(() => {
     const log = session?.log ?? []
-    const out = log.filter((l) => (filter === 'all' || l.kind === filter) && (!needle || l.text.toLowerCase().includes(needle) || l.raw.toLowerCase().includes(needle) || l.hidName.toLowerCase().includes(needle)))
+    const out = log.filter((l) => (filter === 'all' || l.kind === filter) && (!needle || l.text.toLowerCase().includes(needle) || l.raw.toLowerCase().includes(needle) || whoOf(u, l).toLowerCase().includes(needle)))
     return out.slice().reverse() // newest first, like a chat log read from the top
-  }, [session?.log, filter, needle])
+  }, [session?.log, filter, needle, u])
 
   // a bubble was clicked: whatever is typed or filtered must not be what hides its row
   useEffect(() => {
@@ -89,14 +96,14 @@ export function FeedLog({ session }: { session: SessionState | null }) {
               onClick={() => setOpenId(open ? null : l.id)}
             >
               <span className="log-time">{timeOf(l.ts)}</span>
-              <span className="log-who">{l.hidName}</span>
+              <span className="log-who">{whoOf(u, l)}</span>
               <span className="log-text">{l.text}</span>
               {l.count > 1 && <span className="log-n">×{l.count}</span>}
             </button>
             {open && (
               <div className="log-detail">
                 <div className="log-meta">
-                  {l.hidName} · {timeOf(l.ts)} · {l.kind === 'say' ? u.feed.say : u.feed.act}
+                  {whoOf(u, l)} · {timeOf(l.ts)} · {l.kind === 'say' ? u.feed.say : u.feed.act}
                   {l.count > 1 ? u.feed.times(l.count) : ''}
                   {gone ? u.feed.gone : ''}
                 </div>

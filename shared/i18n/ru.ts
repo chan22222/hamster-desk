@@ -489,6 +489,12 @@ export const ru: UiStrings = {
     truncated: 'Слишком длинно; показано только начало.',
   },
 
+  terminal: {
+    shellExited: (code) => `[оболочка завершилась: ${code}]`,
+    startFailed: (why) => `[Не удалось открыть терминал: ${why}]`,
+    linkTip: (url) => `Ctrl+щелчок — открыть · ${url}`,
+  },
+
   search: {
     placeholder: 'Поиск в терминале',
     prev: 'Предыдущее совпадение',

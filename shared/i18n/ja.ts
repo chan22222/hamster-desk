@@ -489,6 +489,12 @@ export const ja: UiStrings = {
     truncated: '長すぎるため先頭だけ表示しています。',
   },
 
+  terminal: {
+    shellExited: (code) => `[シェル終了 ${code}]`,
+    startFailed: (why) => `[ターミナルを開けませんでした: ${why}]`,
+    linkTip: (url) => `Ctrl+クリックで開く · ${url}`,
+  },
+
   search: {
     placeholder: 'ターミナル内を検索',
     prev: '前の結果',

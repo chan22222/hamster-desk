@@ -489,6 +489,12 @@ export const es: UiStrings = {
     truncated: 'Demasiado largo; solo se muestra el principio.',
   },
 
+  terminal: {
+    shellExited: (code) => `[shell terminado ${code}]`,
+    startFailed: (why) => `[No se pudo abrir la terminal: ${why}]`,
+    linkTip: (url) => `Ctrl+clic para abrir · ${url}`,
+  },
+
   search: {
     placeholder: 'Buscar en la terminal',
     prev: 'Coincidencia anterior',

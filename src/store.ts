@@ -115,6 +115,8 @@ export interface SessionState {
   lastTurn: TurnSummary | null
   /** a permanent copy of the feed rows; bubbles expire, this does not (LOG_MAX rows) */
   log: LogItem[]
+  /** when the last compact boundary went by (transcript time), for the meter's `정리 중…` */
+  compactedAt: number | null
 }
 
 /** how many feed rows one session keeps in `log` */
@@ -296,7 +298,9 @@ interface DeskStore {
 }
 
 const ARRIVE_MS = 900
-const LEAVE_MS = 2600 // long enough to walk back to the door in the 3D view
+// How long a finished hamster stays in the store as 'leaving'. The 3D view no longer depends on it:
+// a walker still on its way out keeps walking to the door after the id is gone (src/desk/DeskStudio.tsx).
+const LEAVE_MS = 2600
 
 const actionState: Record<ToolAction, HamsterState> = {
   read: 'reading',
@@ -559,6 +563,7 @@ function newSession(info: SessionInfo): SessionState {
     lastSaid: '',
     lastTurn: null,
     log: [],
+    compactedAt: null,
   }
 }
 
@@ -581,18 +586,47 @@ export function shortName(text: string, max = 22): string {
   return t.length > max ? t.slice(0, max - 1) + '…' : t
 }
 
+type PtyWaiting = DeskStore['ptyWaiting']
+
+/** `ptyWaiting` without one terminal — the very same object when that terminal was not in it */
+function withoutPty(waiting: PtyWaiting, ptyId: number | null | undefined): PtyWaiting {
+  if (ptyId === null || ptyId === undefined || !(ptyId in waiting)) return waiting
+  const next = { ...waiting }
+  delete next[ptyId]
+  return next
+}
+
+/** The git snapshots some tab still shows: a closed tab's folder, or the one a tab left, goes. */
+function gitOfTabs(git: Record<string, GitInfo>, workspaces: Workspace[]): Record<string, GitInfo> {
+  const shown = new Set(workspaces.map((w) => gitKey(w.cwd)))
+  if (Object.keys(git).every((k) => shown.has(k))) return git
+  return Object.fromEntries(Object.entries(git).filter(([k]) => shown.has(k)))
+}
+
+/**
+ * How long a status snapshot waits for a session that has not shown up. It is seconds, normally
+ * (the session file and the snapshot are written moments apart); a snapshot of a session this app
+ * never sees — another account's, a claude that has already exited — is let go after this.
+ */
+const PENDING_STATUS_MS = 5 * 60_000
+
 let nextWorkspaceId = 1
 /** feed row ids only have to be unique per hamster; one running counter is plenty */
 let feedSeq = 0
 
 export const useDesk = create<DeskStore>((set, get) => {
   const timers = new Map<string, ReturnType<typeof setTimeout>>()
-  const pendingStatus = new Map<string, StatusSnapshot>()
+  /** status snapshots that arrived before their session did, and when they arrived */
+  const pendingStatus = new Map<string, { snap: StatusSnapshot; at: number }>()
 
   const updSession = (id: string, fn: (s: SessionState) => SessionState): void => {
     const cur = get().sessions[id]
     if (!cur) return
-    set({ sessions: { ...get().sessions, [id]: fn(cur) } })
+    const next = fn(cur)
+    // An update that changed nothing hands out no new `sessions`: the whole window is subscribed
+    // to it, and would render again for nothing.
+    if (next === cur) return
+    set({ sessions: { ...get().sessions, [id]: next } })
   }
 
   const updHamster = (sessionId: string, hid: string, fn: (h: Hamster) => Hamster): void => {
@@ -647,9 +681,22 @@ export const useDesk = create<DeskStore>((set, get) => {
     if (changed) set({ sessions: next })
     if (soonest !== Infinity) scheduleSweep(soonest - now)
   }
-  /** Book the next sweep: at the first expiry, and never more than three seconds away. */
+  /** when the booked sweep runs; 0 while none is booked */
+  let sweepAt = 0
+  /**
+   * Book the next sweep: at the first expiry, and never more than three seconds away. A sweep that
+   * is already booked is only ever brought forward, never put off. Every push books one, and while
+   * the hamsters keep talking faster than that, a later booking replacing the earlier one would
+   * put the sweep off again and again, and the rows that had expired would stay in the feed.
+   */
   const scheduleSweep = (inMs = 0): void => {
-    later('feed:sweep', Math.max(200, Math.min(3000, inMs)), sweepFeeds)
+    const at = Date.now() + Math.max(200, Math.min(3000, inMs))
+    if (sweepAt && sweepAt <= at) return
+    sweepAt = at
+    later('feed:sweep', at - Date.now(), () => {
+      sweepAt = 0
+      sweepFeeds()
+    })
   }
 
   /**
@@ -817,9 +864,13 @@ export const useDesk = create<DeskStore>((set, get) => {
 
     setActiveTab: (id) => set({ activeTab: id }),
     addWorkspace(cwd, title, initialCommand, profileId, runOnce) {
-      const { profiles, currentProfileId } = get()
+      const { profiles, currentProfileId, cliAccountMergedInto } = get()
+      // The CLI's own account folded into its twin (the same login, added here) is not on the list,
+      // and a tab that ran under it comes back under that twin — not under whichever account is
+      // current, which may be somebody else's login.
+      const want = profileId === DEFAULT_PROFILE_ID && cliAccountMergedInto ? cliAccountMergedInto : profileId
       // an account that was forgotten since (a stored tab, a stale menu) opens under the current one
-      const pid = profileId && profiles.some((p) => p.id === profileId) ? profileId : currentProfileId
+      const pid = want && profiles.some((p) => p.id === want) ? want : currentProfileId
       const ws: Workspace = { id: nextWorkspaceId++, ptyId: null, cwd, title: title ?? (baseName(cwd) || cwd), initialCommand, profileId: pid, ...(runOnce ? { runOnce } : {}) }
       set({ workspaces: [...get().workspaces, ws], activeTab: `ws:${ws.id}` })
       return ws
@@ -836,14 +887,15 @@ export const useDesk = create<DeskStore>((set, get) => {
     },
     moveWorkspace(id, cwd) {
       if (!get().workspaces.some((w) => w.id === id && w.cwd !== cwd)) return // the same folder: nothing to rename or save
-      set({
-        workspaces: get().workspaces.map((w) => (w.id === id ? { ...w, cwd, title: w.initialCommand ? w.title : baseName(cwd) || w.title } : w)),
-      })
+      const workspaces = get().workspaces.map((w) => (w.id === id ? { ...w, cwd, title: w.initialCommand ? w.title : baseName(cwd) || w.title } : w))
+      set({ workspaces, git: gitOfTabs(get().git, workspaces) })
     },
     removeWorkspace(id) {
+      const gone = get().workspaces.find((w) => w.id === id)
       const left = get().workspaces.filter((w) => w.id !== id)
       const activeTab = get().activeTab === `ws:${id}` ? (left.length ? `ws:${left[left.length - 1].id}` : null) : get().activeTab
-      set({ workspaces: left, activeTab })
+      // the terminal goes, and with it whatever it was waiting on and the git chip it had
+      set({ workspaces: left, activeTab, ptyWaiting: withoutPty(get().ptyWaiting, gone?.ptyId), git: gitOfTabs(get().git, left) })
     },
     setSessionEffort(sessionId, level) {
       updSession(sessionId, (s) => ({
@@ -879,7 +931,7 @@ export const useDesk = create<DeskStore>((set, get) => {
           if (!existing) {
             let ns = newSession(info)
             // a status-line snapshot may have arrived before the session file was seen
-            const early = pendingStatus.get(info.sessionId)
+            const early = pendingStatus.get(info.sessionId)?.snap
             if (early) {
               pendingStatus.delete(info.sessionId)
               ns = {
@@ -912,10 +964,16 @@ export const useDesk = create<DeskStore>((set, get) => {
           return
         }
         case 'session_gone': {
+          const gone = st.sessions[e.sessionId]
           const sessions = { ...st.sessions }
           delete sessions[e.sessionId]
           const activeTab = st.activeTab === `session:${e.sessionId}` ? (st.workspaces.length ? `ws:${st.workspaces[0].id}` : null) : st.activeTab
-          set({ sessions, activeTab })
+          // Nothing keyed by the session outlives it: a summary still in its debounce (a Haiku call
+          // about a conversation that has ended), a snapshot that never met its session, and the
+          // terminal's "waiting for an answer" — the claude that asked has exited.
+          pendingStatus.delete(e.sessionId)
+          for (const hid of Object.keys(gone?.hamsters ?? {})) cancelSummary(laneOf(e.sessionId, hid))
+          set({ sessions, activeTab, ptyWaiting: withoutPty(st.ptyWaiting, gone?.info.ptyId) })
           return
         }
         case 'title':
@@ -1044,7 +1102,10 @@ export const useDesk = create<DeskStore>((set, get) => {
           updSession(e.sessionId, (s) => {
             const h = s.hamsters[hid]
             const hamsters = h && (h.model !== e.model || (e.effort && h.effort !== e.effort)) ? { ...s.hamsters, [hid]: { ...h, model: e.model, effort: e.effort ?? h.effort } } : s.hamsters
-            return e.agentId ? { ...s, hamsters } : { ...s, hamsters, model: e.model, effort: e.effort ?? s.effort }
+            // every assistant message says its model again; the same model twice changes nothing
+            if (e.agentId) return hamsters === s.hamsters ? s : { ...s, hamsters }
+            const effort = e.effort ?? s.effort
+            return hamsters === s.hamsters && s.model === e.model && s.effort === effort ? s : { ...s, hamsters, model: e.model, effort }
           })
           return
         }
@@ -1072,6 +1133,8 @@ export const useDesk = create<DeskStore>((set, get) => {
           updSession(e.sessionId, (s) => ({ ...s, linesAdded: e.linesAdded, linesRemoved: e.linesRemoved, costUSD: e.costUSD }))
           return
         case 'compact':
+          // the meter reads the time, not the bubble: the phrase is in whatever language was set then
+          updSession(e.sessionId, (s) => ({ ...s, compactedAt: e.ts }))
           say(e.sessionId, 'main', fixed(t().compacting, 'talk'))
           return
         case 'usage_windows': {
@@ -1119,7 +1182,11 @@ export const useDesk = create<DeskStore>((set, get) => {
           const kept = mine && Object.keys(snap.otherWindows).length === 0 ? { ...snap, otherWindows: mine.otherWindows } : snap
           const usageByProfile = hasWindows && (!mine || snap.ts >= mine.ts) ? { ...st.usageByProfile, [pid]: kept } : st.usageByProfile
           set({ usage, usageByProfile })
-          if (!st.sessions[snap.sessionId]) pendingStatus.set(snap.sessionId, snap)
+          if (!st.sessions[snap.sessionId]) {
+            const now = Date.now()
+            for (const [sid, p] of pendingStatus) if (now - p.at > PENDING_STATUS_MS) pendingStatus.delete(sid)
+            pendingStatus.set(snap.sessionId, { snap, at: now })
+          }
           updSession(snap.sessionId, (s) => ({
             ...s,
             status: snap,
@@ -1156,9 +1223,10 @@ export const useDesk = create<DeskStore>((set, get) => {
           return
         }
         case 'waiting_clear': {
-          const ptyWaiting = { ...st.ptyWaiting }
-          delete ptyWaiting[e.ptyId]
-          set({ ptyWaiting })
+          // Only a terminal that was waiting has anything to clear. A new `ptyWaiting` for every key
+          // that might have answered a prompt would render the whole window again each time.
+          if (!(e.ptyId in st.ptyWaiting)) return
+          set({ ptyWaiting: withoutPty(st.ptyWaiting, e.ptyId) })
           const s = sessionOfPty(e.ptyId)
           if (!s) return
           updSession(s.info.sessionId, (ss) => {

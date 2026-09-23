@@ -33,6 +33,8 @@ npm run smoke:ui                   # ~/.hamster-desk/ui.json: 병합·null 삭�
 | `turn-git.test.ts` | `summarizeTurn` 이 그 턴의 편집만 세는지, `parseStatus`(`## main...origin/main [ahead 1]`, CRLF, detached, 새 저장소), `classifyDiffLine` |
 | `window-state.test.ts` | `fitBounds`(화면 밖·과소·정상·최대화), `miniPlacement`(보조 모니터 포함), 탭 직렬화(업데이트 탭 제외, 외부 세션이 앞일 때) |
 | `contracts.test.ts` | 새 prefs 기본값과 `adoptPrefs` 의 `notify` 깊은 병합 |
+| `store.test.ts` | 렌더러 스토어(`src/store.ts`)를 가짜 시계로: 대기 중이 아닌 터미널의 `waiting_clear` 는 새 객체를 안 만듦, 대기는 답·세션 종료·탭 닫기에 풀림, 다른 햄스터가 계속 말해도 만료된 말풍선이 제때 빠짐, 같은 모델이 또 와도 `sessions` 가 그대로, compact 는 시각으로 남음, 세션보다 먼저 온 상태 스냅샷은 기다리되 5분 넘으면 버림, 합쳐진 CLI 계정의 탭은 쌍둥이 계정으로(그냥 감춘 것은 활성 계정으로), 닫거나 옮긴 탭의 git 칩 정리 |
+| `paste.test.ts` | 붙여넣기 거르기(`src/term/paste.ts`): 글 안의 `ESC[201~` 가 붙여넣기를 끝내지 못함, 탭·줄바꿈 말고 C0·DEL·C1 제거, 한글·이모지는 그대로, 끌어 놓은 파일 경로(빈칸이면 큰따옴표, 경로 없는 파일은 무시) |
 | `watcher.test.ts` | 감시기(`electron/watcher/`)를 임시 폴더로: `open()` 전의 `poll()` 은 아무것도 안 읽고 함께 불려도 줄이 두 번 안 나옴, 1MB 경계에 걸친 줄·2.5MB 한 줄·멀티바이트·CRLF, 다시 쓰인(줄어든) 파일은 꼬리부터, `model` 은 바뀔 때만(effort 없는 줄은 이어받음 · N 이벤트마다 되풀이 · 끝난 에이전트·세션은 잊음), 다시 추적한 세션은 제목·모델을 다시 받음, 슬러그 폴더 → 전체 탐색, 밖의 세션은 한 번만 묻고 새 셸이 생기면 다시(부모 표는 가짜로 넘김 — PowerShell 안 씀), 표가 pid 를 모르면 다시 물음, 트랜스크립트 없는 세션의 전체 탐색 간격, `start()` 중의 `stop()` 이 타이머를 안 남김 |
 | `model-choices.test.ts` | 모델 드롭다운의 별칭이 `fable·opus·sonnet·haiku` 넷뿐인지, 각 별칭이 가리키는 id 를 스킨이 알아 `Fable 5.1·Opus 5·Sonnet 5·Haiku 4.5` 로 이름 붙는지, 날짜 붙은 id·옛 세대는 가족으로 체크되고 `mythos`·없음은 체크되지 않는지 |
 | `ui-store.test.ts` | 못 읽는 파일은 덮어쓰지 않음, 첫 실행, 깨진 파일 → `ui.bak.json`, **다른 프로세스가 파일에 더한 키·목록이 이쪽의 쓰기에 살아남음**(목록은 차이만 적용, 지운 것은 지워짐, 같은 폴더의 다른 표기는 하나), 캡처 실행은 읽기 전용, 쓰는 순간 못 읽는 파일은 나중에 씀 |

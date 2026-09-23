@@ -545,6 +545,16 @@ export const ko = {
     truncated: '너무 길어서 앞부분만 보여 줘요.',
   },
 
+  /** the embedded terminal itself (src/Terminal.tsx) */
+  terminal: {
+    /** written into the pane when its shell ends */
+    shellExited: (code: number) => `[셸 종료 ${code}]`,
+    /** written into the pane when the shell could not be started at all */
+    startFailed: (why: string) => `[터미널을 열지 못했어요: ${why}]`,
+    /** the tooltip over a link a program printed (OSC 8) */
+    linkTip: (url: string) => `Ctrl+클릭으로 열기 · ${url}`,
+  },
+
   /** find in terminal (src/term/TermSearch.tsx) */
   search: {
     placeholder: '터미널에서 찾기',

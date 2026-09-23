@@ -16,8 +16,10 @@ const EDIT_DEBOUNCE_MS = 1500
 export function useGit(cwd: string, active: boolean): GitInfo | null {
   const info = useDesk((s) => s.git[gitKey(cwd)] ?? null)
   const setGit = useDesk((s) => s.setGit)
-  // only the active tab tracks edits: an inactive one is not polling anyway
-  const edits = useDesk((s) => (active ? sessionForTab(s, s.activeTab)?.edits.length ?? 0 : 0))
+  // Only the active tab tracks edits: an inactive one is not polling anyway. It watches the newest
+  // edit rather than how many there are — the list stops growing at its cap (store.ts), and a count
+  // that has stopped moving would stop the re-read along with it.
+  const lastEdit = useDesk((s) => (active ? sessionForTab(s, s.activeTab)?.edits.at(-1)?.id ?? null : null))
   const first = useRef(true)
 
   useEffect(() => {
@@ -56,7 +58,7 @@ export function useGit(cwd: string, active: boolean): GitInfo | null {
       alive = false
       clearTimeout(timer)
     }
-  }, [edits, active, cwd, setGit])
+  }, [lastEdit, active, cwd, setGit])
 
   return info
 }
