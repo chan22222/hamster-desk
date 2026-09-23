@@ -80,7 +80,7 @@ src/notify/             notifier.ts(store 구독 → 알림, 네 겹 게이트, 
 src/toast/              알림 창 페이지(toast.html · toast.ts · toast.css): 배너와 같은 토큰, styles.css 를 같이 읽어 라이트/다크가 같다 — React 없음
 src/mini/               MiniShell.tsx(미니 모드: 스튜디오 + 상태줄)
 src/workspaces-persist.ts 터미널 탭 저장·복원(ui.json 의 workspaces)
-scripts/unit/           단위 테스트(app-update · atomic-write · backlog · contracts · declutter · delegation · env · five-hour · focus · i18n · layout · model-choices · pace · paste · patrol · profiles · project-actions · prompt · recent · shortcuts · statusline · store · toast-stack · transcripts · turn-git · ui-store · usage-query · walk · watcher · window-state) · furniture.ts(걷기 테스트가 쓰는 사무실 가구 배치) · temp-home.ts(로드할 때 경로를 고정하는 모듈 앞에 `HAMSTER_HOME` 을 임시 폴더로)
+scripts/unit/           단위 테스트(app-update · atomic-write · backlog · contracts · declutter · delegation · env · five-hour · focus · i18n · layout · model-choices · pace · paste · patrol · profiles · project-actions · prompt · recent · release-guard · shortcuts · statusline · store · toast-stack · transcripts · turn-git · ui-store · usage-query · walk · watcher · window-state) · furniture.ts(걷기 테스트가 쓰는 사무실 가구 배치) · temp-home.ts(로드할 때 경로를 고정하는 모듈 앞에 `HAMSTER_HOME` 을 임시 폴더로)
 ```
 
 ## 앱이 쓰는 파일
@@ -156,7 +156,7 @@ scripts/unit/           단위 테스트(app-update · atomic-write · backlog �
 
 ### 릴리스 스크립트
 
-릴리스를 올리는 절차는 [개발·검증 › 릴리스 올리기](development.md#릴리스-올리기). 스크립트가 하는 일: `scripts/release.ts` 가 작업 폴더가 깨끗하고 `HEAD` 가 `origin/main` 과 같은지, 그 버전이 이미 나가지 않았는지 확인한 뒤, 설치 파일을 빌드하고(`--publish never`) 세 파일(`Hamster-Desk-Setup-<버전>.exe` · `.blockmap` · `latest.yml`)이 다 있는지 본 다음 `gh release create` 로 올린다 — gh 는 초안에 전부 올린 뒤에야 공개하므로 반만 올라간 릴리스를 설치된 앱이 보는 일이 없다. 태그 `v<버전>` 은 빌드한 그 커밋에 찍힌다. 릴리스 노트는 `CHANGELOG.md` 의 그 버전 절이다(없으면 이전 태그 이후의 커밋 제목). GitHub CLI 로그인(`gh auth login`)이 필요하다. 버전을 올리지 않으면 설치된 앱은 새 릴리스로 보지 않는다(semver 비교). electron-builder 의 자체 게시를 쓰지 않는 이유는 [설계 노트](design-notes.md#electron-builder-의-자체-게시를-쓰지-않는-이유).
+릴리스를 올리는 절차는 [개발·검증 › 릴리스 올리기](development.md#릴리스-올리기). 스크립트가 하는 일: `scripts/release.ts` 가 작업 폴더가 깨끗하고 `HEAD` 가 `origin/main` 과 같은지, 그 버전이 이미 나가지 않았는지 확인한 뒤, 설치 파일을 빌드하고(`--publish never`) 세 파일(`Hamster-Desk-Setup-<버전>.exe` · `.blockmap` · `latest.yml`)이 다 있는지 본 다음 `gh release create` 로 올린다 — gh 는 초안에 전부 올린 뒤에야 공개하므로 반만 올라간 릴리스를 설치된 앱이 보는 일이 없다. 태그 `v<버전>` 은 빌드한 그 커밋에 찍힌다. 릴리스 노트는 `CHANGELOG.md` 의 그 버전 절이다(없으면 이전 태그 이후의 커밋 제목). GitHub CLI 로그인(`gh auth login`)이 필요하다. 버전을 올리지 않으면 설치된 앱은 새 릴리스로 보지 않는다(semver 비교). 그래서 CI(`--ci`)에서 버전이 그대로인 푸시는 `scripts/release-guard.ts` 로 검사한다: 워크플로가 넘기는 `PUSH_BEFORE`(`github.event.before`)부터 `HEAD` 까지의 커밋 가운데 제목이 버전인 것이 있으면 실패하고, 마지막 릴리스 태그 이후 앱 코드를 바꾼 커밋은 경고 주석과 실행 요약(`GITHUB_STEP_SUMMARY`)에 나열한다. electron-builder 의 자체 게시를 쓰지 않는 이유는 [설계 노트](design-notes.md#electron-builder-의-자체-게시를-쓰지-않는-이유).
 
 ### 작업 표시줄 고정
 

@@ -18,9 +18,10 @@
 // anything is built or uploaded.
 
 import { execFileSync, execSync } from 'node:child_process'
-import { existsSync, mkdtempSync, readFileSync, writeFileSync } from 'node:fs'
+import { appendFileSync, existsSync, mkdtempSync, readFileSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
+import { APP_PATHS, annotation, bumpMissingMessage, pendingMessage, releaseCommitsWithoutBump, type Commit } from './release-guard'
 
 const ROOT = join(__dirname, '..')
 const REPO = 'chan22222/hamster-desk'
@@ -56,10 +57,49 @@ if (git('status', '--porcelain')) fail('커밋하지 않은 변경이 있습니�
 git('fetch', 'origin', 'main', '--tags')
 if (!ci && git('rev-parse', 'HEAD') !== git('rev-parse', 'origin/main')) fail('HEAD 가 origin/main 과 다릅니다. 먼저 푸시(또는 pull) 하세요.')
 
+/** `git log` of a range as commits (full SHAs), optionally only those that touch `paths` */
+function commitsIn(range: string, paths: string[] = []): Commit[] {
+  const text = tryOut('git', ['log', '--no-merges', '--format=%H%x09%s', range, ...(paths.length ? ['--', ...paths] : [])]) ?? ''
+  return text
+    .split(/\r?\n/)
+    .filter(Boolean)
+    .map((line) => ({ sha: line.slice(0, line.indexOf('\t')), subject: line.slice(line.indexOf('\t') + 1) }))
+}
+
+/**
+ * A push that did not raise the version (scripts/release-guard.ts). A commit in it titled as a
+ * release fails the run — it meant to ship and did not. App changes since the release are listed
+ * on the run as a warning, since installed apps will keep calling themselves up to date.
+ */
+function guardUnreleased(): void {
+  const releasedSha = tryOut('git', ['rev-list', '-n', '1', tag])
+  // the commits this push brought (the workflow passes github.event.before); a manual run, a first
+  // push or a history the runner does not have falls back to everything since the release
+  const before = process.env.PUSH_BEFORE ?? ''
+  const known = /^[0-9a-f]{40}$/.test(before) && !/^0+$/.test(before) && tryOut('git', ['cat-file', '-e', `${before}^{commit}`]) !== null
+  const summary = (markdown: string): void => {
+    if (process.env.GITHUB_STEP_SUMMARY) appendFileSync(process.env.GITHUB_STEP_SUMMARY, `${markdown}\n`, 'utf8')
+  }
+  const wrong = releaseCommitsWithoutBump(commitsIn(known ? `${before}..HEAD` : `${tag}..HEAD`), releasedSha)
+  if (wrong.length) {
+    const message = bumpMissingMessage(wrong, version)
+    console.log(annotation('error', '버전을 올리지 않은 릴리스 커밋', message))
+    summary(`### ✖ 버전을 올리지 않은 릴리스 커밋\n\n${message}`)
+    fail(message)
+  }
+  const pending = commitsIn(`${tag}..HEAD`, APP_PATHS)
+  if (pending.length) {
+    const message = pendingMessage(tag, pending)
+    console.log(annotation('warning', '릴리스되지 않은 앱 변경', message))
+    summary(`### 릴리스되지 않은 앱 변경\n\n${message}`)
+  }
+}
+
 // a published release with this tag (a draft left by a run that died is fine: it is removed below)
 const existing = tryOut('gh', ['release', 'view', tag, '--repo', REPO, '--json', 'isDraft', '--jq', '.isDraft'])
 if (existing === 'false' || git('tag', '--list', tag)) {
   if (ci) {
+    guardUnreleased()
     console.log(`${tag} 은 이미 릴리스되어 있습니다. 이 푸시는 버전을 올리지 않았으므로 할 일이 없습니다.`)
     process.exit(0)
   }

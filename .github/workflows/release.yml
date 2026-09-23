@@ -40,3 +40,6 @@ jobs:
       - run: npm run release -- --ci
         env:
           GH_TOKEN: ${{ github.token }}
+          # the commits this push brought: one titled as a release that did not raise the version
+          # fails the run (scripts/release-guard.ts); empty for a manual run
+          PUSH_BEFORE: ${{ github.event.before }}
