@@ -78,6 +78,11 @@ export const ru: UiStrings = {
     externalTab: (cwd) => `${cwd} (запущен в другом терминале)`,
     externalPane: 'Эта сессия запущена в другом терминале. Здесь за ней можно только наблюдать на столе выше; вводите в том терминале.',
     studioPreview: 'Предпросмотр студии · терминал доступен в настольном приложении.',
+    stripLabel: 'Вкладки терминала',
+    stateBusy: 'claude работает',
+    stateIdle: 'claude готов',
+    waitPermission: 'Ждёт вашего разрешения',
+    waitQuestion: 'Ждёт вашего ответа',
   },
 
   plus: {
@@ -171,6 +176,8 @@ export const ru: UiStrings = {
     showCli: 'Снова показать аккаунт CLI (~/.claude)',
     showCliTip: 'Возвращает в список убранный аккаунт ~/.claude',
     mergedNote: (name) => `У ~/.claude тот же вход, поэтому он показан как <b>${name}</b>. Удалите этот аккаунт — и он вернётся.`,
+    addFailed: 'Не удалось добавить аккаунт. Попробуйте ещё раз.',
+    changeFailed: 'Не удалось изменить. Попробуйте ещё раз.',
   },
 
   usage: {
@@ -390,6 +397,12 @@ export const ru: UiStrings = {
     contextSoon: ' · скоро понадобится сжатие',
     contextWindow: (size) => ` · окно ${size}`,
     compacting: 'сжатие…',
+    effortHead: 'Уровень усилий (/effort)',
+    more: 'Ещё',
+    runTip: 'Запускает claude в этом терминале',
+    historyHereTip: 'Продолжить прошлый диалог из этой папки в этом терминале',
+    continueLabel: 'Продолжить',
+    continueTip: 'claude --continue\nПродолжает последний диалог этой папки в этом терминале',
   },
 
   history: {

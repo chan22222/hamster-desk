@@ -24,14 +24,14 @@
 
 /* ---- the speech-bubble log (a sidebar section) -------------------------------------------- */
 .side-feedlog { flex: none; max-height: 33%; border-bottom: 1px solid var(--line); }
-.log-tools { display: flex; align-items: center; gap: 6px; padding: 2px 8px 6px; }
-.log-search {
-  flex: 1; min-width: 0; height: 26px; padding: 0 8px;
-  border: 1px solid var(--line); border-radius: var(--radius);
-  background: var(--surface-2); color: var(--text); font: inherit; font-size: 12px; outline: none;
-}
-.log-search:focus { border-color: var(--accent); box-shadow: 0 0 0 3px var(--accent-soft); }
-.log-search::placeholder { color: var(--text-3); }
+/* The filter keeps its natural width, and in a long language (de `Alle · Gesagt · Getan`) it left the
+   search box ~60px — a placeholder cut to `Sprechbl`. Below 110px the filter wraps to a line of its own. */
+.log-tools { display: flex; flex-wrap: wrap; align-items: center; gap: 6px; padding: 2px 8px 6px; }
+/* Height, fill, border, focus ring and placeholder are the chrome's one search box (styles.css,
+   next to `.side-search`); this file loads after it, so repeating them here overrode that. */
+.log-search { flex: 1 1 110px; min-width: 0; padding: 0 8px; color: var(--text); font: inherit; font-size: 12px; outline: none; }
+/* that ring is the focus mark; the global `input:focus-visible` outline (styles.css) drew a second one around it */
+.log-search:focus-visible { outline: none; }
 .log-tools .seg { flex: none; }
 .log-row {
   display: flex; align-items: baseline; gap: 6px; width: 100%;

@@ -1,12 +1,14 @@
-import { useEffect, useMemo, useRef, useState } from 'react'
+import { useEffect, useLayoutEffect, useMemo, useRef, useState, type KeyboardEvent as ReactKeyboardEvent, type ReactNode } from 'react'
+import { createPortal } from 'react-dom'
 import type { ProjectActionGroup, ProjectInfo } from '@shared/events'
 import { useUi } from '../i18n'
 import { explorerDir, favDirs, isFav, lastCwd, toggleFav } from './recent'
 import { changedFiles, FileLog } from '../log/FileLog'
 import { FeedLog } from '../log/FeedLog'
 import { useDesk, type SessionState } from '../store'
-import { IconBranch, IconChevron, IconFile, IconFolder, IconMore, IconPlay, IconSearch, IconStar } from '../widgets/icons'
+import { IconBranch, IconChevron, IconClose, IconFile, IconFolder, IconMore, IconPlay, IconSearch, IconStar } from '../widgets/icons'
 import { Popover } from '../widgets/Popover'
+import { arrowInMenu, listStep, rove } from '../widgets/focus'
 
 /** the sidebar's own limits; the handle on its right edge writes `prefs.sidebarW` */
 export const SIDEBAR_MIN = 200
@@ -104,42 +106,115 @@ function RunMenu({ project, onRun }: { project: ProjectInfo; onRun: (command: st
       {(close) => (
         <div className="pop-body run-menu">
           <p className="pop-note run-badge">{badge}</p>
-          {groups.map((g) => (
-            <div key={g.id} className="run-group">
-              <div className="run-head">{g.label}</div>
-              {g.rows.map((a) => {
-                const [step, cmd] = splitCommand(a.command)
-                return (
-                  <button
-                    key={a.id}
-                    className="pop-item run-row"
-                    data-debug-click={`run-${a.n}`}
-                    title={u.run.rowTip(a.command)}
-                    onClick={() => {
-                      onRun(a.command)
-                      close()
-                    }}
-                  >
-                    {/* a known command is worded by the UI; a script the app does not know keeps its own name */}
-                    <span className="run-label">{a.labelKey ? u.run.actions[a.labelKey] + (a.detail ? ` (${a.detail})` : '') : a.label}</span>
-                    <span className="run-cmd dim">
-                      {step && <span className="run-cmd-step">{step}</span>}
-                      <span className="run-cmd-main">{cmd}</span>
-                    </span>
-                  </button>
-                )
-              })}
-            </div>
-          ))}
+          {/* one menu of groups: ↑ ↓ run through every row, the heading names its group */}
+          <div className="run-groups" role="menu" aria-label={u.run.run}>
+            {groups.map((g) => (
+              <div key={g.id} className="run-group" role="group" aria-label={g.label}>
+                <div className="run-head" aria-hidden="true">
+                  {g.label}
+                </div>
+                {g.rows.map((a) => {
+                  const [step, cmd] = splitCommand(a.command)
+                  return (
+                    <button
+                      key={a.id}
+                      className="pop-item run-row"
+                      role="menuitem"
+                      data-debug-click={`run-${a.n}`}
+                      title={u.run.rowTip(a.command)}
+                      onClick={() => {
+                        onRun(a.command)
+                        close()
+                      }}
+                    >
+                      {/* a known command is worded by the UI; a script the app does not know keeps its own name */}
+                      <span className="run-label">{a.labelKey ? u.run.actions[a.labelKey] + (a.detail ? ` (${a.detail})` : '') : a.label}</span>
+                      <span className="run-cmd dim">
+                        {step && <span className="run-cmd-step">{step}</span>}
+                        <span className="run-cmd-main">{cmd}</span>
+                      </span>
+                    </button>
+                  )
+                })}
+              </div>
+            ))}
+          </div>
         </div>
       )}
     </Popover>
   )
 }
 
+/**
+ * A file's right-click menu, also opened from the keyboard (the menu key, Shift+F10). Portalled to
+ * `<body>` like the popovers: it is placed in viewport pixels. It is kept on screen — a file near
+ * the bottom of the window used to open it half below the edge — and it is a menu to the keyboard
+ * too: the focus starts on the first row, ↑ ↓ move, Esc or Tab closes it and hands the focus back.
+ */
+function FileMenu({ x, y, from, onClose, children }: { x: number; y: number; from: HTMLElement | null; onClose: () => void; children: ReactNode }) {
+  const ref = useRef<HTMLDivElement>(null)
+  const [at, setAt] = useState<{ left: number; top: number } | null>(null)
+  const back = (): void => {
+    if (from?.isConnected) from.focus()
+    onClose()
+  }
+
+  useLayoutEffect(() => {
+    const el = ref.current
+    if (!el) return
+    setAt({
+      left: Math.max(8, Math.min(x, window.innerWidth - el.offsetWidth - 8)),
+      top: Math.max(8, Math.min(y, window.innerHeight - el.offsetHeight - 8)),
+    })
+  }, [x, y])
+
+  useEffect(() => {
+    const el = ref.current
+    if (at && el) rove(el)?.focus()
+  }, [at])
+
+  useEffect(() => {
+    const off = (e: MouseEvent): void => {
+      if (!ref.current?.contains(e.target as Node)) onClose()
+    }
+    const key = (e: KeyboardEvent): void => {
+      if (e.key === 'Escape') back()
+    }
+    document.addEventListener('mousedown', off)
+    document.addEventListener('keydown', key)
+    return () => {
+      document.removeEventListener('mousedown', off)
+      document.removeEventListener('keydown', key)
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [])
+
+  return createPortal(
+    <div
+      ref={ref}
+      className="ctx-menu"
+      role="menu"
+      style={{ left: at?.left ?? x, top: at?.top ?? y, visibility: at ? 'visible' : 'hidden' }}
+      onKeyDown={(e) => {
+        if (arrowInMenu(e)) return
+        if (e.key === 'Tab') {
+          e.preventDefault()
+          back()
+        }
+      }}
+    >
+      {children}
+    </div>,
+    document.body,
+  )
+}
+
+/** a row of the file browser: a folder (click goes in) or a file (double-click or Enter opens it) */
+type BrowseRow = { kind: 'dir'; entry: DirEntry } | { kind: 'file'; entry: FileEntry }
+
 /** a dragged section never gets smaller than its header plus a couple of rows */
 export const SECTION_MIN = 84
-/** what a drag may not take from the rest of the sidebar (the search box and the file browser) */
+/** what a drag may not take from the rest of the sidebar (the file browser under the two sections) */
 const SIDE_RESERVE = 180
 
 /** which preference holds a section's dragged height */
@@ -282,15 +357,23 @@ export function Sidebar({
   const favs = useMemo(() => favDirs(), [rev])
   const [filter, setFilter] = useState('')
   const [loading, setLoading] = useState(false)
-  const [menu, setMenu] = useState<{ x: number; y: number; path: string } | null>(null)
+  /** the file menu, where it opens, and what gets the focus back when it closes */
+  const [menu, setMenu] = useState<{ x: number; y: number; path: string; from: HTMLElement | null } | null>(null)
   const [notice, setNotice] = useState<string | null>(null)
-  const menuRef = useRef<HTMLDivElement>(null)
+  /** the browser row that holds the list's one Tab stop (↑ ↓ move it) */
+  const [cursor, setCursor] = useState(0)
+  const rowsRef = useRef<HTMLDivElement>(null)
+  const filterRef = useRef<HTMLInputElement>(null)
   const changed = useMemo(() => changedFiles(session).length, [session])
   const logged = session?.log.length ?? 0
 
   const go = async (p: string): Promise<void> => {
     if (!window.desk || !p) return
     const seq = ++goSeq.current
+    // the note about a file that would not open, and the filter, were for the folder being left
+    setNotice(null)
+    setFilter('')
+    setCursor(0)
     setLoading(true)
     try {
       // the project question rides along with the listing: one round trip per folder change, and
@@ -328,22 +411,6 @@ export function Sidebar({
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [start])
 
-  useEffect(() => {
-    if (!menu) return
-    const off = (e: MouseEvent): void => {
-      if (!menuRef.current?.contains(e.target as Node)) setMenu(null)
-    }
-    const key = (e: KeyboardEvent): void => {
-      if (e.key === 'Escape') setMenu(null)
-    }
-    document.addEventListener('mousedown', off)
-    document.addEventListener('keydown', key)
-    return () => {
-      document.removeEventListener('mousedown', off)
-      document.removeEventListener('keydown', key)
-    }
-  }, [menu])
-
   const star = (dir: string): void => void toggleFav(dir) // the bag changes → `favs` is derived again
 
   const browse = async (): Promise<void> => {
@@ -379,16 +446,62 @@ export function Sidebar({
   const cur = listing?.path ?? start
   const q = filter.trim().toLowerCase()
   const match = (s: string): boolean => !q || s.toLowerCase().includes(q)
-  const dirs = (listing?.dirs ?? []).filter((d) => match(d.name))
-  const files = (listing?.files ?? []).filter((f) => match(f.name))
+  const rows: BrowseRow[] = [
+    ...(listing?.dirs ?? []).filter((d) => match(d.name)).map((entry) => ({ kind: 'dir' as const, entry })),
+    ...(listing?.files ?? []).filter((f) => match(f.name)).map((entry) => ({ kind: 'file' as const, entry })),
+  ]
+  const stop = Math.min(cursor, Math.max(0, rows.length - 1))
+  // `터미널 이동` wears the accent while it can be pressed. While it cannot — claude runs in the
+  // terminal in front, or there is none, which is most of the time — the accent goes to the button
+  // that works, and why the other does not is a line under them: a tooltip on a disabled button is
+  // out of reach of the keyboard, and was the only place that said it.
+  const canMove = !moveWhy
+  // At the default 248px, two words and three icons on one line left each word ~50px, and
+  // `터미널 이동` · `Nouvel onglet` · `Новая вкладка` all lost their tails. Narrower than this the
+  // words get a line of their own and the icons the next (styles.css `.sidebar.is-narrow`). The
+  // width is the user's own preference, so it is known here without measuring anything.
+  const narrow = prefs.sidebarW < 340
+
+  const focusRow = (i: number): void => {
+    setCursor(i)
+    rowsRef.current?.querySelectorAll<HTMLButtonElement>('.fs-main')[i]?.focus()
+  }
+  /** what Enter does to a row: a folder is gone into (as a click does), a file opened (as a double-click does) */
+  const act = (r: BrowseRow): void => {
+    if (r.kind === 'dir') void go(r.entry.path)
+    else void openFile(r.entry.path)
+  }
+  /** the file menu: from a right-click where it was, from the keyboard under the row */
+  const openMenu = (path: string, el: HTMLElement, at?: { x: number; y: number }): void => {
+    const b = el.getBoundingClientRect()
+    const inside = at && at.x >= b.left && at.x <= b.right && at.y >= b.top && at.y <= b.bottom
+    setMenu({ x: inside ? at.x : b.left + 24, y: inside ? at.y : b.bottom, path, from: el })
+  }
+  const closeMenu = (): void => {
+    const from = menu?.from
+    setMenu(null)
+    if (from?.isConnected) from.focus()
+  }
+  const onRowKey = (e: ReactKeyboardEvent<HTMLButtonElement>, i: number, r: BrowseRow): void => {
+    if (r.kind === 'file' && (e.key === 'ContextMenu' || (e.shiftKey && e.key === 'F10'))) {
+      e.preventDefault()
+      openMenu(r.entry.path, e.currentTarget)
+      return
+    }
+    if (r.kind === 'file' && e.key === 'Enter') {
+      e.preventDefault()
+      act(r)
+      return
+    }
+    const j = listStep(e.key, i, rows.length)
+    if (j === null) return
+    e.preventDefault()
+    if (j < 0) filterRef.current?.focus()
+    else focusRow(j)
+  }
 
   return (
-    <aside className="sidebar" style={{ width: prefs.sidebarW }}>
-      <div className="side-search">
-        <IconSearch size={14} />
-        <input className="side-filter" placeholder={u.sidebar.searchHere} value={filter} onChange={(e) => setFilter(e.target.value)} aria-label={u.sidebar.searchLabel} />
-      </div>
-
+    <aside className={`sidebar ${narrow ? 'is-narrow' : ''}`} style={{ width: prefs.sidebarW }}>
       <Section
         title={u.sidebar.changedFiles}
         count={changed}
@@ -436,13 +549,12 @@ export function Sidebar({
 
         <div className="side-actions">
           {/* `터미널 이동`: the terminal in front goes to this folder (a `cd`, and the tab follows);
-              `터미널 새 탭`: a terminal of the folder's own. The move is the accent one — it is what
-              the browser is mostly for — and the one that is sometimes not possible (a shell with
-              claude running in it), which its title then says. */}
-          <button className="side-primary" onClick={() => onMove(cur)} disabled={!!moveWhy} title={moveWhy ?? u.sidebar.moveTip(cur)}>
+              `터미널 새 탭`: a terminal of the folder's own. The accent is on whichever can be
+              pressed now (`canMove` above); the two keep their places either way. */}
+          <button className={canMove ? 'side-primary' : 'side-second'} onClick={() => onMove(cur)} disabled={!canMove} title={moveWhy ?? u.sidebar.moveTip(cur)}>
             {u.sidebar.moveTerminal}
           </button>
-          <button className="side-second" onClick={() => onOpen(cur)} title={u.sidebar.newTabTip(cur)}>
+          <button className={canMove ? 'side-second' : 'side-primary'} onClick={() => onOpen(cur)} title={u.sidebar.newTabTip(cur)}>
             {u.sidebar.newTab}
           </button>
           <button className="side-mini" onClick={() => listing?.parent && void go(listing.parent)} disabled={!listing?.parent} title={u.sidebar.parent} aria-label={u.sidebar.parent}>
@@ -455,6 +567,7 @@ export function Sidebar({
             <IconMore size={14} />
           </button>
         </div>
+        {moveWhy && <p className="side-why">{moveWhy}</p>}
         {/* only a folder that is something gets the pill; an empty menu would be a question with no answer */}
         {project && onRun && listing && !listing.error && (
           <div className="side-run">
@@ -462,43 +575,102 @@ export function Sidebar({
           </div>
         )}
 
+        {/* It filters this list, so it lives with it. At the top of the sidebar it read as a search of
+            everything under it (the changed files, the bubble log), and with this section folded it
+            took what was typed and showed nothing. It is for the folder in view: going to another
+            one empties it. Enter does the first match (goes in, or opens the file); ↓ goes to the list. */}
+        <div className="side-search side-browse-search">
+          <IconSearch size={14} />
+          <input
+            ref={filterRef}
+            className="side-filter"
+            placeholder={u.sidebar.searchHere}
+            value={filter}
+            onChange={(e) => {
+              setFilter(e.target.value)
+              setCursor(0)
+            }}
+            onKeyDown={(e) => {
+              if (e.key === 'Enter' && rows[0]) {
+                e.preventDefault()
+                act(rows[0])
+              } else if (e.key === 'ArrowDown' && rows.length > 0) {
+                e.preventDefault()
+                focusRow(0)
+              }
+            }}
+            aria-label={u.sidebar.searchLabel}
+          />
+        </div>
+
         {loading && <div className="side-empty">{u.common.reading}</div>}
         {listing?.error && <div className="side-empty warn-line">{listing.error}</div>}
-        {notice && <div className="side-empty warn-line">{notice}</div>}
-        {!loading && !listing?.error && dirs.length === 0 && files.length === 0 && <div className="side-empty">{u.common.empty}</div>}
-
-        {dirs.map((d) => (
-          <div key={d.path} className="fs-row" title={u.sidebar.dirTip(d.path)} onClick={() => void go(d.path)} onDoubleClick={() => onOpen(d.path)}>
-            <span className="fs-ico">{dirIcon(d)}</span>
-            <span className="fs-name">{d.name}</span>
-            <button
-              className="fs-open"
-              onClick={(e) => {
-                e.stopPropagation()
-                onOpen(d.path)
-              }}
-            >
-              {u.common.open}
+        {notice && (
+          <div className="side-empty side-notice warn-line" role="status">
+            <span>{notice}</span>
+            <button className="side-notice-x" onClick={() => setNotice(null)} title={u.common.close} aria-label={u.common.close}>
+              <IconClose size={12} />
             </button>
           </div>
-        ))}
-        {files.map((f) => (
-          <div
-            key={f.path}
-            className="fs-row is-file"
-            title={u.sidebar.fileTip(f.path)}
-            onDoubleClick={() => void openFile(f.path)}
-            onContextMenu={(e) => {
-              e.preventDefault()
-              setMenu({ x: e.clientX, y: e.clientY, path: f.path })
-            }}
-          >
-            <span className={`fs-ico ${fileKind(f.ext)}`}>
-              <IconFile size={14} />
-            </span>
-            <span className="fs-name">{f.name}</span>
-          </div>
-        ))}
+        )}
+        {!loading && !listing?.error && rows.length === 0 && <div className="side-empty">{q ? u.common.noResults : u.common.empty}</div>}
+
+        {/* One Tab stop for the list (the row the arrows left off on): ↑ ↓ Home End move, ↑ off the
+            first row goes back to the filter. A folder's `열기` is the next stop after its row. */}
+        <div ref={rowsRef}>
+          {rows.map((r, i) => {
+            const tab = i === stop ? 0 : -1
+            if (r.kind === 'dir') {
+              const d = r.entry
+              return (
+                <div key={d.path} className="fs-row" title={u.sidebar.dirTip(d.path)}>
+                  <button
+                    className="fs-main"
+                    tabIndex={tab}
+                    onClick={(e) => {
+                      // from the keyboard (a click with no mouse behind it): the row goes away with
+                      // the folder, so the focus goes on to the first row of the new one
+                      const keyboard = e.detail === 0
+                      void go(d.path).then(() => keyboard && requestAnimationFrame(() => focusRow(0)))
+                    }}
+                    onDoubleClick={() => onOpen(d.path)}
+                    onFocus={() => setCursor(i)}
+                    onKeyDown={(e) => onRowKey(e, i, r)}
+                  >
+                    <span className="fs-ico">{dirIcon(d)}</span>
+                    <span className="fs-name">{d.name}</span>
+                  </button>
+                  <button className="fs-open" tabIndex={tab} onClick={() => onOpen(d.path)}>
+                    {u.common.open}
+                  </button>
+                </div>
+              )
+            }
+            const f = r.entry
+            return (
+              <div key={f.path} className="fs-row is-file" title={u.sidebar.fileTip(f.path)}>
+                <button
+                  className="fs-main"
+                  tabIndex={tab}
+                  onDoubleClick={() => void openFile(f.path)}
+                  onContextMenu={(e) => {
+                    e.preventDefault()
+                    // the menu key sends this as well as its keydown, which has opened it already
+                    if (menu?.path === f.path) return
+                    openMenu(f.path, e.currentTarget, { x: e.clientX, y: e.clientY })
+                  }}
+                  onFocus={() => setCursor(i)}
+                  onKeyDown={(e) => onRowKey(e, i, r)}
+                >
+                  <span className={`fs-ico ${fileKind(f.ext)}`}>
+                    <IconFile size={14} />
+                  </span>
+                  <span className="fs-name">{f.name}</span>
+                </button>
+              </div>
+            )
+          })}
+        </div>
       </Section>
 
       <div
@@ -512,12 +684,12 @@ export function Sidebar({
       />
 
       {menu && (
-        <div ref={menuRef} className="ctx-menu" role="menu" style={{ left: Math.min(menu.x, window.innerWidth - 190), top: menu.y }}>
+        <FileMenu key={`${menu.path}:${menu.x}:${menu.y}`} x={menu.x} y={menu.y} from={menu.from} onClose={() => setMenu(null)}>
           <button
             role="menuitem"
             onClick={() => {
               window.desk?.clipboard.writeText(menu.path)
-              setMenu(null)
+              closeMenu()
             }}
           >
             {u.sidebar.copyPath}
@@ -526,7 +698,7 @@ export function Sidebar({
             role="menuitem"
             onClick={() => {
               window.desk?.fs.showInFolder(menu.path)
-              setMenu(null)
+              closeMenu()
             }}
           >
             {u.sidebar.showInExplorer}
@@ -535,12 +707,12 @@ export function Sidebar({
             role="menuitem"
             onClick={() => {
               void openFile(menu.path)
-              setMenu(null)
+              closeMenu()
             }}
           >
             {u.sidebar.openDefault}
           </button>
-        </div>
+        </FileMenu>
       )}
     </aside>
   )

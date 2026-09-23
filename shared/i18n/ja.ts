@@ -78,6 +78,11 @@ export const ja: UiStrings = {
     externalTab: (cwd) => `${cwd} (別のターミナルで実行中)`,
     externalPane: 'このセッションは別のターミナルで実行中です。上の机で見守るだけで、入力はそのターミナルで行ってください。',
     studioPreview: 'スタジオのプレビュー · ターミナルはデスクトップアプリで使えます。',
+    stripLabel: 'ターミナルのタブ',
+    stateBusy: 'claude 作業中',
+    stateIdle: 'claude 待機中',
+    waitPermission: '許可を待っています',
+    waitQuestion: '回答を待っています',
   },
 
   plus: {
@@ -171,6 +176,8 @@ export const ja: UiStrings = {
     showCli: 'CLI アカウント (~/.claude) を再表示',
     showCliTip: '一覧から外した ~/.claude アカウントをもう一度表示します',
     mergedNote: (name) => `~/.claude も同じログインなので <b>${name}</b> としてまとめて表示しています。このアカウントを削除すると再び現れます。`,
+    addFailed: 'アカウントを追加できませんでした。もう一度お試しください。',
+    changeFailed: '変更できませんでした。もう一度お試しください。',
   },
 
   usage: {
@@ -390,6 +397,12 @@ export const ja: UiStrings = {
     contextSoon: ' · まもなく圧縮が必要です',
     contextWindow: (size) => ` · ウィンドウ ${size}`,
     compacting: '整理中…',
+    effortHead: 'エフォートレベル (/effort)',
+    more: 'その他',
+    runTip: 'このターミナルで claude を開始',
+    historyHereTip: 'このフォルダーの過去の会話をこのターミナルで続ける',
+    continueLabel: '続き',
+    continueTip: 'claude --continue\nこのフォルダーの最後の会話をこのターミナルで続けます',
   },
 
   history: {

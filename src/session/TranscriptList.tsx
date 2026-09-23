@@ -4,13 +4,14 @@
 // The rows come straight from the transcript files (electron/transcripts.ts); nothing here talks to
 // `~/.claude/history.jsonl`, which docs/architecture.md ("읽기만 한다") promises never to read.
 
-import { useEffect, useLayoutEffect, useRef, useState } from 'react'
+import { useEffect, useLayoutEffect, useRef, useState, type KeyboardEvent as ReactKeyboardEvent } from 'react'
 import type { TranscriptEntry } from '@shared/events'
 import { useUi } from '../i18n'
 import { useDesk } from '../store'
 import { relTime } from '../sidebar/recent'
 import { termLog } from '../term/search'
 import { IconBranch, IconSearch } from '../widgets/icons'
+import { listStep } from '../widgets/focus'
 import './session.css'
 
 /** the tallest the list gets, and the least it is squeezed to */
@@ -71,6 +72,7 @@ export function TranscriptList({ cwd, profileId, onPick, run }: { cwd: string; p
   // popover's own layout effect, which runs after this one. (A resize closes the popover, so there
   // is nothing to follow.)
   const listRef = useRef<HTMLDivElement>(null)
+  const searchRef = useRef<HTMLInputElement>(null)
   const [room, setRoom] = useState<number | null>(null)
   const loaded = rows !== null
   const searchable = (rows?.length ?? 0) > 2
@@ -86,6 +88,18 @@ export function TranscriptList({ cwd, profileId, onPick, run }: { cwd: string; p
 
   const q = filter.trim().toLowerCase()
   const shown = q && rows ? rows.filter((r) => r.title.toLowerCase().includes(q) || r.subtitle.toLowerCase().includes(q)) : rows
+
+  /** ↑ ↓ Home End between the rows; ↑ off the first one goes back to the search box */
+  const onRowKey = (e: ReactKeyboardEvent<HTMLButtonElement>): void => {
+    const list = listRef.current
+    if (!list) return
+    const all = [...list.querySelectorAll<HTMLButtonElement>('.tl-row:not(:disabled)')]
+    const j = listStep(e.key, all.indexOf(e.currentTarget), all.length)
+    if (j === null) return
+    e.preventDefault()
+    if (j < 0) searchRef.current?.focus()
+    else all[j].focus()
+  }
 
   /** Carry a conversation on: in the caller's terminal, or in a new one that types the command itself. */
   const resume = (e: TranscriptEntry): void => {
@@ -109,7 +123,25 @@ export function TranscriptList({ cwd, profileId, onPick, run }: { cwd: string; p
       {rows && rows.length > 2 && (
         <div className="side-search tl-search">
           <IconSearch size={14} />
-          <input className="side-filter" placeholder={u.history.search} value={filter} onChange={(ev) => setFilter(ev.target.value)} aria-label={u.history.search} />
+          {/* Enter carries on the first match, ↓ goes down into the list */}
+          <input
+            ref={searchRef}
+            className="side-filter"
+            placeholder={u.history.search}
+            value={filter}
+            onChange={(ev) => setFilter(ev.target.value)}
+            aria-label={u.history.search}
+            onKeyDown={(ev) => {
+              const first = (shown ?? []).find((r) => !r.live)
+              if (ev.key === 'Enter' && first) {
+                ev.preventDefault()
+                resume(first)
+              } else if (ev.key === 'ArrowDown') {
+                ev.preventDefault()
+                listRef.current?.querySelector<HTMLButtonElement>('.tl-row:not(:disabled)')?.focus()
+              }
+            }}
+          />
         </div>
       )}
       <div ref={listRef} className="tl-list" style={room === null ? undefined : { maxHeight: room }}>
@@ -124,6 +156,7 @@ export function TranscriptList({ cwd, profileId, onPick, run }: { cwd: string; p
             disabled={e.live}
             title={e.live ? u.history.live : u.history.rowTip(e.title, e.path, where)}
             onClick={() => resume(e)}
+            onKeyDown={onRowKey}
           >
             <span className="tl-title">{e.title}</span>
             {/* a conversation that is one prompt long has that prompt as both; saying it twice is noise */}

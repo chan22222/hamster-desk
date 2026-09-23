@@ -53,7 +53,7 @@ shared/events.ts        이벤트 타입
 shared/i18n/            UI 문구 사전, 언어마다 한 파일(ko 가 기준 타입) · lang.ts(언어 코드·codeOfLanguage) — 렌더러·메인 공용
 electron/lang.ts        메인의 언어 판정(ui.json 의 lang → Claude Code language → 시스템 로캘, HAMSTER_LANG 으로 고정) · tr()
 src/store.ts            zustand: 세션·햄스터 상태기계(말풍선 = 수명이 있는 채팅 피드)·작업 공간(터미널 탭)·사용량·버전·설정
-src/App.tsx             상단 바·레이아웃(책상 위/오른쪽, 스플리터)·부팅 순서 · src/widgets/ Popover(공용)·사용량 게이지 둘·버전·⋯ 메뉴·+ 메뉴(새 터미널)·RecentList·theme.ts(라이트/다크 판정)·icons.tsx(인라인 SVG 아이콘 한 벌)
+src/App.tsx             상단 바(탭 줄: 탭마다 자기 세션만 구독)·레이아웃(책상 위/오른쪽, 스플리터, 터미널 최소 크기)·부팅 순서 · src/widgets/ Popover(공용)·사용량 게이지 둘·버전·⋯ 메뉴·+ 메뉴(새 터미널)·RecentList·theme.ts(라이트/다크 판정)·icons.tsx(인라인 SVG 아이콘 한 벌)·focus.ts(팝오버·메뉴·모달의 키보드: Tab 가두기, 메뉴 ↑↓, 포커스 돌려주기)·hscroll.ts(넘치는 한 줄: 휠 → 가로 스크롤, 가려진 끝 흐림)
 src/styles.css          라이트/다크 토큰 두 벌(`:root` · `:root[data-theme='dark']`)과 모든 크롬 스타일, 3D 오버레이용 공용 토큰
 src/i18n.ts             사전 선택(useUi()/ui()/t(), 언어 변경 구독) · 효과 언어 판정(codeOfLanguage: 원어 이름·영어 이름·로캘 코드) · formatDuration · src/bubbles/summarize.ts 요약 요청(lane 별 600ms 디바운스, 늦은 답 폐기)
 src/desk/DeskStudio.tsx three.js 렌더러·씬·리그·라벨·UI(모듈 싱글턴 렌더러라 접었다 펴도 컨텍스트를 새로 만들지 않음)

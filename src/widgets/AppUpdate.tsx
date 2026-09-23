@@ -1,9 +1,10 @@
-import { useEffect, useState } from 'react'
+import { useEffect, useRef, useState } from 'react'
 import type { AppUpdateInfo } from '@shared/events'
 import { useDesk } from '../store'
 import { useUi } from '../i18n'
 import { rich } from '../rich'
 import { Popover } from './Popover'
+import { isTopTrap, useFocusTrap } from './focus'
 import { IconDownload, IconRefresh } from './icons'
 
 // The app's own updates, in three places that say the same thing:
@@ -129,14 +130,19 @@ export function AppUpdatePrompt() {
   const txt = useUi()
   const u = useDesk((s) => s.appUpdate)
   const [dismissed, setDismissed] = useState<string | null>(null)
+  const dialogRef = useRef<HTMLDivElement>(null)
   const what = pending(u)
   const key = !u || !what ? null : what.release ? `release:${what.release.version}` : `commits:${u.commits[0]?.sha ?? u.behind}`
-  const open = key !== null && key !== dismissed
+  const open = !!u && key !== null && key !== dismissed
+
+  // a modal: the focus comes in, Tab stays in, and it goes back where it was on "later"
+  useFocusTrap(dialogRef, open)
 
   useEffect(() => {
     if (!open) return
     const onKey = (e: KeyboardEvent): void => {
-      if (e.key === 'Escape') setDismissed(key)
+      // the account question can be open over this one; its Esc is not a "later" for this
+      if (e.key === 'Escape' && isTopTrap(dialogRef.current)) setDismissed(key)
     }
     window.addEventListener('keydown', onKey)
     return () => window.removeEventListener('keydown', onKey)
@@ -146,7 +152,7 @@ export function AppUpdatePrompt() {
   const later = (): void => setDismissed(key)
   return (
     <div className="upd-veil" onMouseDown={(e) => e.target === e.currentTarget && later()}>
-      <div className="upd-dialog" role="dialog" aria-modal="true" aria-label={txt.update.appUpdate}>
+      <div ref={dialogRef} className="upd-dialog" role="dialog" aria-modal="true" aria-label={txt.update.appUpdate}>
         <div className="upd-title">{txt.update.dialogTitle}</div>
         <UpdateBody u={u} close={later} />
         <button className="pop-ghost upd-later" onClick={later}>

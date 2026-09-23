@@ -91,6 +91,13 @@ export const ko = {
     externalTab: (cwd: string) => `${cwd} (다른 터미널에서 실행 중)`,
     externalPane: '이 세션은 다른 터미널에서 실행 중입니다. 위 책상에서 지켜볼 수만 있고, 입력은 그 터미널에서 하세요.',
     studioPreview: '스튜디오 미리보기 · 터미널은 데스크톱 앱에서 사용할 수 있어요.',
+    /** the tab strip, to a screen reader */
+    stripLabel: '터미널 탭',
+    /** a tab's state in words — its tooltip and what a screen reader says; on screen it is the mark before the title */
+    stateBusy: 'claude 작업 중',
+    stateIdle: 'claude 대기 중',
+    waitPermission: '권한 요청에 답을 기다려요',
+    waitQuestion: '질문에 답을 기다려요',
   },
 
   /** the `+` menu (src/widgets/PlusMenu.tsx) */
@@ -193,6 +200,10 @@ export const ko = {
     showCliTip: '목록에서 뺐던 ~/.claude 계정을 다시 보이게 합니다',
     /** the CLI's own account is folded into another one with the same login (electron/profiles.ts) */
     mergedNote: (name: string) => `~/.claude 도 같은 로그인이라 <b>${name}</b> 하나로 보여요. 이 계정을 지우면 다시 나타나요.`,
+    /** main did not add the account: the name stays in the box, and this goes under it */
+    addFailed: '계정을 추가하지 못했어요. 다시 해 보세요.',
+    /** main turned a rename or a removal down */
+    changeFailed: '바꾸지 못했어요. 다시 해 보세요.',
   },
 
   /** the usage gauge and its popover (src/widgets/Usage.tsx) */
@@ -430,6 +441,15 @@ export const ko = {
     contextSoon: ' · 곧 압축이 필요해요',
     contextWindow: (size: string) => ` · 창 ${size}`,
     compacting: '정리 중…',
+    /** the dropdown the effort segments fold into when the terminal's column is narrow */
+    effortHead: '노력 수준 (/effort)',
+    /** `⋯`: /compact · /clear · 지난 대화 folded into one when the column is narrower still */
+    more: '더 보기',
+    /** the bar over a terminal with no claude in it: the ways to start one, typed into that terminal */
+    runTip: '이 터미널에서 claude 시작',
+    historyHereTip: '이 폴더에서 나눈 지난 대화를 이 터미널에서 이어서',
+    continueLabel: '이어서',
+    continueTip: 'claude --continue\n이 폴더의 마지막 대화를 이 터미널에서 이어서 열어요',
   },
 
   /** past conversations (src/session/TranscriptList.tsx) */

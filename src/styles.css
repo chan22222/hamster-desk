@@ -112,6 +112,14 @@ code { font-family: ui-monospace, Consolas, monospace; background: var(--surface
 .ok { color: var(--accent); }
 .warn-line { color: var(--warn); }
 button:focus-visible, select:focus-visible, input:focus-visible { outline: 2px solid var(--accent); outline-offset: 1px; }
+/* One focus mark per control. A text box shows its focus itself — the search boxes on their
+   container (`:focus-within`), the log's and the account name's on their own border — so the ring
+   above would be a second one around it. And a button in a scrolling list or strip draws its ring
+   inside itself: the list clips anything drawn outside it. */
+.side-filter:focus-visible, .log-search:focus-visible, .acct-name-input:focus-visible { outline: none; }
+.tabs button:focus-visible, .side-rows button:focus-visible, .rl-list button:focus-visible { outline-offset: -2px; }
+/* words for a screen reader that the screen already says another way (a tab's state is its mark) */
+.sr-only { position: absolute; width: 1px; height: 1px; margin: -1px; padding: 0; overflow: hidden; clip-path: inset(50%); white-space: nowrap; border: 0; }
 
 ::-webkit-scrollbar { width: 10px; height: 10px; }
 ::-webkit-scrollbar-track { background: transparent; }
@@ -136,8 +144,15 @@ button:focus-visible, select:focus-visible, input:focus-visible { outline: 2px s
 .icon-btn:hover:not(:disabled) { background: var(--surface-2); color: var(--text); }
 .icon-btn.is-open, .icon-btn[aria-pressed='true'] { background: var(--surface-3); color: var(--text); }
 
-.tabs { display: flex; align-items: center; gap: 4px; flex: 1; min-width: 0; overflow-x: auto; }
+/* As wide as its tabs, and no wider than the bar leaves it: `+` follows the last tab (outside this
+   box, so it never scrolls away with them) and the status pills keep to the right (`.status`). A
+   strip that holds more than fits scrolls with the wheel, and fades out at an end where there is
+   more (src/widgets/hscroll.ts sets the attributes) — its scrollbar is hidden, so nothing else says so. */
+.tabs { display: flex; align-items: center; gap: 4px; flex: 0 1 auto; min-width: 0; overflow-x: auto; overflow-y: hidden; }
 .tabs::-webkit-scrollbar { height: 0; }
+.tabs[data-fade-r] { mask-image: linear-gradient(to right, #000 calc(100% - 28px), transparent); }
+.tabs[data-fade-l] { mask-image: linear-gradient(to left, #000 calc(100% - 28px), transparent); }
+.tabs[data-fade-l][data-fade-r] { mask-image: linear-gradient(to right, transparent, #000 28px, #000 calc(100% - 28px), transparent); }
 /* Two lines: the title alone on top, folder + chips underneath (src/App.tsx TabText). One line
    held all of it and every title read `예약메시지 및 5시…`. 36px inside the 44px bar. */
 .tab { display: flex; align-items: center; flex: none; height: 36px; max-width: 250px; border-radius: var(--radius); color: var(--text-2); }
@@ -150,12 +165,20 @@ button:focus-visible, select:focus-visible, input:focus-visible { outline: 2px s
 .tab.ext .tab-label { font-style: italic; }
 .tab-meta { display: flex; align-items: center; gap: 5px; min-width: 0; height: 15px; font-size: 10.5px; color: var(--text-3); }
 .tab-meta:empty { display: none; } /* nothing to say yet: the title sits alone in the middle */
+/* --text-3 only clears 4.5:1 on white; on the darker tab surfaces it was 3.9:1 (active) and 4.2:1
+   (hover) at 10.5px, so the lower line steps up with them (the usage chip does the same) */
+.tab.active .tab-meta, .tab:hover .tab-meta, .tab.is-waiting .tab-meta { color: var(--text-2); }
 .tab-folder { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; flex: 0 1 auto; }
 .tab-meta .tab-git { line-height: 15px; font-size: 10.5px; }
 .tab .dot { width: 7px; height: 7px; border-radius: 50%; background: var(--line-strong); flex: none; }
 .tab .dot.idle { background: var(--line-strong); }
 .tab .dot.busy { background: var(--accent); box-shadow: 0 0 0 2px var(--accent-soft); }
-.tab .dot.wait { background: var(--danger); box-shadow: 0 0 0 2px var(--danger-soft); }
+/* Waiting on the user — the tab that matters most when it is not the one in front — used to be the
+   same 7px dot in red. Not by colour alone: the dot becomes a `!` badge and the whole tab turns
+   amber, with an edge. The words are in the tab's tooltip and its screen-reader text (App.tsx). */
+.tab.is-waiting { background: var(--warn-soft); box-shadow: inset 0 0 0 1px var(--warn); }
+.tab.is-waiting.active { background: var(--warn-soft); }
+.tab-alert { display: inline-flex; align-items: center; justify-content: center; width: 14px; height: 14px; flex: none; border-radius: 50%; background: var(--danger); color: var(--surface); font-size: 10px; font-weight: 700; line-height: 1; }
 .tab .count { flex: none; padding: 0 5px; border-radius: 999px; background: var(--accent-soft); color: var(--accent); font-size: 10.5px; line-height: 15px; }
 .tab-x { display: flex; align-items: center; align-self: stretch; padding: 0 6px; border-radius: var(--radius); color: var(--text-3); }
 .tab-x:hover, .tab-x.is-open { color: var(--text); background: var(--surface-3); }
@@ -163,7 +186,7 @@ button:focus-visible, select:focus-visible, input:focus-visible { outline: 2px s
 .tab-plus:hover { background: var(--surface-2); color: var(--text); }
 .tab-plus.is-open { background: var(--surface-3); color: var(--text); }
 
-.status { display: flex; align-items: center; gap: 6px; flex: none; }
+.status { display: flex; align-items: center; gap: 6px; flex: none; margin-left: auto; }
 .pill { display: flex; align-items: center; gap: 6px; height: 28px; padding: 0 9px; border-radius: var(--radius); border: 1px solid var(--line); background: var(--surface); color: var(--text-2); font-size: 12px; white-space: nowrap; }
 /* `.dim` alone (above) loses to `.pill` on colour — same specificity, earlier in the file — so a
    dim pill needs its own rule; it sits before the hover and open states so those still win */
@@ -263,8 +286,9 @@ button:focus-visible, select:focus-visible, input:focus-visible { outline: 2px s
 .pop-tick { display: inline-flex; align-items: center; justify-content: center; width: 16px; flex: none; color: var(--accent); }
 .pop-label { flex: 1; }
 .pop-item { display: flex; align-items: center; gap: 8px; width: 100%; min-height: 32px; padding: 5px 6px; border-radius: var(--radius); font-size: 13px; text-align: left; color: var(--text-2); }
-.pop-item:hover { background: var(--surface-2); color: var(--text); }
+.pop-item:hover:not(:disabled) { background: var(--surface-2); color: var(--text); }
 .pop-item:hover .dim { color: var(--text-2); }
+.pop-item:disabled { opacity: 0.45; cursor: default; }
 .pop-item-ico { display: inline-flex; align-items: center; justify-content: center; width: 16px; flex: none; color: var(--text-3); font-size: 12px; }
 .pop-item-ico .git { color: var(--accent); }
 .pop-item-text { display: flex; flex-direction: column; gap: 1px; min-width: 0; flex: 1; }
@@ -287,12 +311,19 @@ button:focus-visible, select:focus-visible, input:focus-visible { outline: 2px s
 /* `책상 위치: 오른쪽` — the same three children, laid out across instead of down */
 .column.is-beside { flex-direction: row; }
 .column.is-beside > .desk-wrap { width: var(--desk-w); flex: none; }
+/* src/layout.ts keeps the studio off the terminal's minimum (360px across, 180px down, + the 8px
+   splitter; floors 200/120) as the column changes; these say the same for the frame between a
+   resize and the column being measured again */
+.column.is-beside > .desk-wrap:not(.is-story) { width: min(var(--desk-w), max(200px, calc(100% - 368px))); }
+.column:not(.is-beside) > .desk-wrap:not(.is-story) { max-height: max(120px, calc(100% - 188px)); }
 .splitter { position: relative; flex: none; height: 8px; cursor: row-resize; background: var(--bg); border-top: 1px solid var(--line); border-bottom: 1px solid var(--line); }
 .splitter::after { content: ''; position: absolute; width: 32px; height: 3px; left: calc(50% - 16px); top: 2px; border-radius: 2px; background: var(--line-strong); }
 .splitter:hover { background: var(--accent-soft); }
 .splitter.is-v { height: auto; width: 8px; cursor: col-resize; border: 0; border-left: 1px solid var(--line); border-right: 1px solid var(--line); }
 .splitter.is-v::after { width: 3px; height: 32px; left: 2px; top: calc(50% - 16px); }
-.panes { flex: 1; min-height: 0; min-width: 0; display: flex; flex-direction: column; position: relative; }
+/* the container the session bar measures itself against (session.css, `@container panes`): the
+   terminal's own column, whatever the sidebar and a studio beside it have taken of the window */
+.panes { flex: 1; min-height: 0; min-width: 0; display: flex; flex-direction: column; position: relative; container: panes / inline-size; }
 /* the one dark panel: Claude Code paints this with its own theme, and a light background would
    swallow every dim colour it uses */
 .term-host { flex: 1; min-height: 0; padding: 6px 0 0 10px; background: var(--term-bg); border-top: 1px solid var(--line); }
@@ -311,11 +342,18 @@ button:focus-visible, select:focus-visible, input:focus-visible { outline: 2px s
 .sidebar { position: relative; flex: none; display: flex; flex-direction: column; min-height: 0; background: var(--surface); border-right: 1px solid var(--line); }
 .side-resize { position: absolute; top: 0; right: -2px; width: 4px; height: 100%; z-index: 5; cursor: col-resize; }
 .side-resize:hover, .side-resize:active { background: var(--accent-soft); }
-.side-search { display: flex; align-items: center; gap: 6px; height: 30px; margin: 8px; padding: 0 8px; background: var(--surface-2); border: 1px solid var(--line); border-radius: var(--radius); color: var(--text-3); }
+/* One search box for the whole chrome — the explorer's filter, the bubble log's (a bare input,
+   src/log), the `+` menu's and 지난 대화's: the same 28px box, fill, border, focus ring and
+   placeholder. They were 30px and 26px, with placeholders in two different greys. */
+.side-search { display: flex; align-items: center; gap: 6px; height: 28px; margin: 8px; padding: 0 8px; background: var(--surface-2); border: 1px solid var(--line); border-radius: var(--radius); color: var(--text-3); }
 .side-search:focus-within { border-color: var(--accent); box-shadow: 0 0 0 3px var(--accent-soft); }
 .side-search svg { flex: none; }
 .side-filter { flex: 1; min-width: 0; background: none; border: 0; color: var(--text); font: inherit; font-size: 12px; outline: none; }
-.side-filter::placeholder { color: var(--text-2); }
+.log-search { height: 28px; background: var(--surface-2); border: 1px solid var(--line); border-radius: var(--radius); font-size: 12px; }
+.log-search:focus { border-color: var(--accent); box-shadow: 0 0 0 3px var(--accent-soft); }
+.side-filter::placeholder, .log-search::placeholder { color: var(--text-2); }
+/* in the explorer it sits over the list it filters, inside the section's side margins */
+.side-search.side-browse-search { margin: 0 8px 6px; }
 .side-section { position: relative; display: flex; flex-direction: column; min-height: 0; }
 /* Three sections share the sidebar evenly: what changed and the bubble log each take at most a third
    (less when they have little to show) and scroll inside themselves; the browser fills the rest and
@@ -347,9 +385,17 @@ body.is-row-resizing * { cursor: row-resize !important; }
 .side-count { padding: 0 6px; border-radius: 999px; background: var(--surface-2); color: var(--text-2); font-size: 11px; line-height: 16px; font-variant-numeric: tabular-nums; }
 .side-caret { display: inline-flex; align-items: center; justify-content: center; width: 14px; color: var(--text-3); }
 .side-empty { margin: 4px 6px; padding: 10px 12px; border-radius: var(--radius); background: var(--bg); color: var(--text-2); font-size: 13px; line-height: 1.6; }
-.rec-row { display: flex; align-items: center; gap: 8px; height: 34px; margin: 0 6px; padding: 0 8px; border-radius: var(--radius); cursor: pointer; user-select: none; }
-.rec-row:hover { background: var(--surface-2); }
-.rec-row:hover .rec-path, .rec-row:hover .rec-when { color: var(--text-2); }
+/* a file that would not open: said until dismissed, or until the browser moves to another folder */
+.side-notice { display: flex; align-items: flex-start; gap: 8px; padding-right: 6px; }
+.side-notice > span { flex: 1; min-width: 0; overflow-wrap: anywhere; }
+.side-notice-x { display: inline-flex; align-items: center; justify-content: center; width: 20px; height: 20px; flex: none; border-radius: 4px; color: var(--text-3); }
+.side-notice-x:hover { background: var(--surface-3); color: var(--text); }
+/* a row is a button (the project) with ★ and × beside it — buttons cannot hold buttons, so the
+   row is only the frame; the main button fills it, padding and all, so the whole row still opens */
+.rec-row { display: flex; align-items: center; gap: 4px; height: 34px; margin: 0 6px; padding-right: 6px; border-radius: var(--radius); user-select: none; }
+.rec-row:hover, .rec-row:focus-within { background: var(--surface-2); }
+.rec-row:hover .rec-path, .rec-row:hover .rec-when, .rec-row:focus-within .rec-path, .rec-row:focus-within .rec-when { color: var(--text-2); }
+.rec-main { display: flex; align-items: center; gap: 8px; flex: 1; min-width: 0; height: 100%; padding: 0 4px 0 8px; border-radius: var(--radius); text-align: left; }
 .rec-ico { display: inline-flex; align-items: center; justify-content: center; width: 16px; flex: none; color: var(--text-3); font-size: 12px; }
 .rec-ico .git { color: var(--accent); }
 .rec-text { display: flex; flex-direction: column; gap: 1px; min-width: 0; flex: 1; }
@@ -357,11 +403,13 @@ body.is-row-resizing * { cursor: row-resize !important; }
 .rec-path { font-size: 11px; color: var(--text-3); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .rec-when { font-size: 11px; color: var(--text-3); flex: none; }
 .rec-star { display: inline-flex; align-items: center; justify-content: center; width: 18px; height: 18px; border-radius: 4px; flex: none; color: var(--text-3); opacity: 0; }
-.rec-row:hover .rec-star, .rec-star.is-on { opacity: 1; }
+.rec-row:hover .rec-star, .rec-row:focus-within .rec-star, .rec-star.is-on { opacity: 1; }
 .rec-star:hover { background: var(--surface-3); color: var(--text); }
 .rec-star.is-on { color: var(--warn); }
 .rec-x { display: inline-flex; align-items: center; justify-content: center; width: 18px; height: 18px; border-radius: 4px; flex: none; color: var(--text-3); opacity: 0; }
-.rec-row:hover .rec-x { opacity: 1; }
+/* shown on hover and while the row has the focus: a focused control that is not there (opacity 0
+   hid the focus ring with it) was where Tab used to land */
+.rec-row:hover .rec-x, .rec-row:focus-within .rec-x { opacity: 1; }
 .rec-x:hover { background: var(--surface-3); color: var(--danger); }
 /* a folder that has since been deleted or renamed: still listed, but plainly not openable */
 .rec-row.is-gone .rec-name, .rec-row.is-gone .rec-ico { color: var(--text-3); text-decoration: line-through; }
@@ -373,12 +421,20 @@ body.is-row-resizing * { cursor: row-resize !important; }
 .crumb { padding: 2px 4px; border-radius: 4px; color: var(--text-2); font-size: 11px; }
 .crumb:hover { background: var(--surface-2); color: var(--text); }
 .side-actions { display: flex; gap: 4px; padding: 6px 8px 10px; }
+/* narrower than 340px (src/sidebar/Sidebar.tsx `narrow`): the two words share a line, the three
+   icons take the next — at 248px one line left each word ~50px and every language lost its tail */
+.sidebar.is-narrow .side-actions { flex-wrap: wrap; }
+.sidebar.is-narrow .side-actions > .side-primary, .sidebar.is-narrow .side-actions > .side-second { flex: 1 1 calc(50% - 2px); }
+.sidebar.is-narrow .side-actions > .side-mini { flex: 1 1 0; }
+/* why `터미널 이동` cannot be pressed right now, said where it can be read (not only in a tooltip) */
+.side-why { margin: -6px 8px 10px; font-size: 11px; line-height: 1.5; color: var(--text-3); }
 .side-primary { flex: 1; min-width: 0; height: 30px; padding: 0 8px; border-radius: var(--radius); background: var(--accent); color: var(--on-accent); font-size: 12px; font-weight: 500; text-align: center; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .side-primary:hover:not(:disabled) { background: var(--accent-hover); }
 .side-primary:disabled { opacity: 0.45; cursor: default; }
 /* `터미널 새 탭` beside it: the same shape in the icon buttons' quiet colours */
 .side-second { flex: 1; min-width: 0; height: 30px; padding: 0 8px; border-radius: var(--radius); border: 1px solid var(--line); background: var(--surface); color: var(--text-2); font-size: 12px; font-weight: 500; text-align: center; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.side-second:hover { background: var(--surface-2); border-color: var(--line-strong); color: var(--text); }
+.side-second:hover:not(:disabled) { background: var(--surface-2); border-color: var(--line-strong); color: var(--text); }
+.side-second:disabled { opacity: 0.45; cursor: default; }
 .side-mini { display: inline-flex; align-items: center; justify-content: center; width: 28px; height: 30px; flex: none; border-radius: var(--radius); border: 1px solid var(--line); background: var(--surface); color: var(--text-2); }
 .side-mini:hover:not(:disabled) { background: var(--surface-2); border-color: var(--line-strong); color: var(--text); }
 .side-mini:disabled { opacity: 0.4; cursor: default; }
@@ -395,6 +451,7 @@ body.is-row-resizing * { cursor: row-resize !important; }
 /* the menu: the badge line, then the groups; a row is the label with the exact command on the right */
 .run-menu { gap: 6px; }
 .run-badge { padding: 0 6px 2px; }
+.run-groups { display: flex; flex-direction: column; gap: 6px; }
 .run-group { display: flex; flex-direction: column; gap: 1px; }
 .run-group + .run-group { margin-top: 3px; padding-top: 5px; border-top: 1px solid var(--line); }
 /* A group's heading is nothing like a row: small, spaced, dim, with an accent tick in front, a
@@ -408,8 +465,11 @@ body.is-row-resizing * { cursor: row-resize !important; }
 /* a venv row's activation step is the same on every row: it gives way first, the command after it last */
 .run-cmd-step { flex: 0 100 auto; min-width: 2.5em; overflow: hidden; text-overflow: ellipsis; white-space: pre; /* keeps the space before the command */ }
 .run-cmd-main { flex: 0 1 auto; min-width: 0; overflow: hidden; text-overflow: ellipsis; }
-.fs-row { display: flex; align-items: center; gap: 8px; height: 30px; margin: 0 6px; padding: 0 8px; border-radius: var(--radius); font-size: 12px; cursor: pointer; user-select: none; }
-.fs-row:hover { background: var(--surface-2); }
+/* like a recent project's row: the frame, a button filling it (the folder or file) and, for a
+   folder, `열기` beside it */
+.fs-row { display: flex; align-items: center; gap: 4px; height: 30px; margin: 0 6px; padding-right: 4px; border-radius: var(--radius); font-size: 12px; user-select: none; }
+.fs-row:hover, .fs-row:focus-within { background: var(--surface-2); }
+.fs-main { display: flex; align-items: center; gap: 8px; flex: 1; min-width: 0; height: 100%; padding: 0 4px 0 8px; border-radius: var(--radius); text-align: left; }
 .fs-ico { display: inline-flex; align-items: center; justify-content: center; width: 16px; flex: none; color: var(--text-3); font-size: 12px; }
 .fs-ico .git { color: var(--accent); }
 .fs-ico.is-code { color: var(--accent); }
@@ -417,9 +477,11 @@ body.is-row-resizing * { cursor: row-resize !important; }
 .fs-ico.is-doc { color: var(--info); }
 .fs-name { flex: 1; color: var(--text); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .fs-row.is-file .fs-name { color: var(--text-2); }
-.fs-open { visibility: hidden; padding: 2px 7px; border-radius: var(--radius); border: 1px solid var(--line-strong); color: var(--text-2); font-size: 11px; }
+/* opacity, not visibility: a hidden button cannot take the focus, and this one has to be reachable
+   from its row by Tab — it shows itself as soon as the row has the focus */
+.fs-open { flex: none; opacity: 0; padding: 2px 7px; border-radius: var(--radius); border: 1px solid var(--line-strong); color: var(--text-2); font-size: 11px; }
 .fs-open:hover { background: var(--surface-3); color: var(--text); }
-.fs-row:hover .fs-open { visibility: visible; }
+.fs-row:hover .fs-open, .fs-row:focus-within .fs-open { opacity: 1; }
 .ctx-menu { position: fixed; z-index: 50; min-width: 190px; /* `Open with default app` at 13px */ padding: 6px; border: 1px solid var(--line); border-radius: var(--radius-lg); background: var(--surface); box-shadow: var(--shadow-pop); }
 .ctx-menu button { display: flex; align-items: center; width: 100%; height: 32px; padding: 0 8px; border-radius: var(--radius); text-align: left; font-size: 13px; color: var(--text-2); }
 .ctx-menu button:hover { background: var(--surface-2); color: var(--text); }
@@ -580,8 +642,8 @@ body.is-row-resizing * { cursor: row-resize !important; }
    1180/1020/900 the two side-by-side pills needed. Nothing is ever lost: the popover has it all. */
 @media (max-width: 1020px) {
   .um-reset { display: none; }
-  /* the session bar's context meter has always folded here too; its number stays */
-  .sb-ctx .meter { display: none; }
+  /* (the session bar's context meter used to fold here too; it now folds with the bar's own
+     column — session.css, `@container panes`) */
 }
 @media (max-width: 900px) {
   .um .meter { display: none; }

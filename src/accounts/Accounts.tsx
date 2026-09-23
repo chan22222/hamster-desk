@@ -27,17 +27,24 @@ import { useUi } from '../i18n'
 import { rich } from '../rich'
 import { lastCwd } from '../sidebar/recent'
 import { IconCheck, IconClose, IconFolder, IconPlus } from '../widgets/icons'
+import { useFocusTrap } from '../widgets/focus'
 import { AccountUsageLine } from '../widgets/Usage'
 import './accounts.css'
 
-/** Ask main to change the accounts, then adopt whatever it says they are now. */
-async function change(call: (p: NonNullable<typeof window.desk>['profiles']) => Promise<ProfilesState>): Promise<void> {
+/**
+ * Ask main to change the accounts, then adopt whatever it says they are now. False when main
+ * could not — it answers the unchanged list with an `error` rather than throwing — and the list on
+ * screen is then still the last one it confirmed, and the caller says so.
+ */
+async function change(call: (p: NonNullable<typeof window.desk>['profiles']) => Promise<ProfilesState & { error?: string }>): Promise<boolean> {
   const bridge = window.desk
-  if (!bridge) return
+  if (!bridge) return false
   try {
-    useDesk.getState().setProfiles(await call(bridge.profiles))
+    const answer = await call(bridge.profiles)
+    useDesk.getState().setProfiles(answer)
+    return !answer.error
   } catch {
-    /* the list on screen is still the last one main confirmed */
+    return false
   }
 }
 
@@ -99,16 +106,31 @@ export async function addAccount(name: string): Promise<boolean> {
   }
 }
 
-/** `계정 추가`: a name, and the rest happens by itself (`addAccount`); `onAdded` runs once it has. */
+/**
+ * `계정 추가`: a name, and the rest happens by itself (`addAccount`); `onAdded` runs once it has.
+ * The box stays until main has answered: it used to close on Enter, before the answer, and an add
+ * that failed then looked exactly like one that had not been asked for — the name gone with it.
+ */
 function AddAccount({ onAdded }: { onAdded: () => void }) {
   const u = useUi()
   const [adding, setAdding] = useState(false)
   const [name, setName] = useState('')
+  const [busy, setBusy] = useState(false)
+  const [failed, setFailed] = useState(false)
   const add = (): void => {
-    const n = name.trim()
-    setAdding(false)
-    setName('')
-    void addAccount(n).then((ok) => ok && onAdded())
+    if (busy) return
+    setBusy(true)
+    setFailed(false)
+    void addAccount(name.trim()).then((ok) => {
+      setBusy(false)
+      if (!ok) {
+        setFailed(true)
+        return
+      }
+      setAdding(false)
+      setName('')
+      onAdded()
+    })
   }
   if (!adding) {
     return (
@@ -121,28 +143,40 @@ function AddAccount({ onAdded }: { onAdded: () => void }) {
     )
   }
   return (
-    <div className="acct-add">
-      <input
-        className="acct-name-input"
-        value={name}
-        autoFocus
-        maxLength={24}
-        placeholder={u.accounts.namePlaceholder}
-        aria-label={u.accounts.newNameLabel}
-        onChange={(e) => setName(e.target.value)}
-        onKeyDown={(e) => {
-          e.stopPropagation()
-          if (e.key === 'Enter') add()
-          if (e.key === 'Escape') {
-            setAdding(false)
-            setName('')
-          }
-        }}
-      />
-      <button className="acct-btn is-primary" onClick={add}>
-        {u.accounts.addAndLogin}
-      </button>
-    </div>
+    <>
+      <div className="acct-add">
+        <input
+          className="acct-name-input"
+          value={name}
+          autoFocus
+          maxLength={24}
+          placeholder={u.accounts.namePlaceholder}
+          aria-label={u.accounts.newNameLabel}
+          aria-invalid={failed || undefined}
+          onChange={(e) => {
+            setName(e.target.value)
+            setFailed(false)
+          }}
+          onKeyDown={(e) => {
+            e.stopPropagation()
+            if (e.key === 'Enter') add()
+            if (e.key === 'Escape') {
+              setAdding(false)
+              setName('')
+              setFailed(false)
+            }
+          }}
+        />
+        <button className="acct-btn is-primary" onClick={add} disabled={busy}>
+          {u.accounts.addAndLogin}
+        </button>
+      </div>
+      {failed && (
+        <p className="pop-note warn-line" role="alert">
+          {u.accounts.addFailed}
+        </p>
+      )}
+    </>
   )
 }
 
@@ -214,6 +248,7 @@ export function AccountGate() {
   const u = useUi()
   const profiles = useDesk((s) => s.profiles)
   const current = useDesk((s) => s.currentProfileId)
+  const dialogRef = useRef<HTMLDivElement>(null)
   // decided at first mount (the list is read before the stored tabs come back): one logged-in
   // account means no question, and an account added later in the run must not raise it then
   const [done, setDoneState] = useState(() => {
@@ -226,6 +261,8 @@ export function AccountGate() {
     gateAnswered = gateAnswered || v
     setDoneState(v)
   }
+  // a modal: Tab stays in it (it used to walk out into the top bar behind the veil)
+  useFocusTrap(dialogRef, !done)
   if (done) return null
   /** the only account, and it has no login: the question is whether to log in first */
   const fresh = profiles.length < 2
@@ -240,7 +277,7 @@ export function AccountGate() {
   }
   return (
     <div className="upd-veil acct-veil">
-      <div className="upd-dialog acct-gate" role="dialog" aria-modal="true" aria-label={u.accounts.gateLabel}>
+      <div ref={dialogRef} className="upd-dialog acct-gate" role="dialog" aria-modal="true" aria-label={u.accounts.gateLabel}>
         <div className="upd-title">{fresh ? u.accounts.gateTitleFresh : u.accounts.gateTitlePick}</div>
         <p className="pop-note">{fresh ? u.accounts.gateNoteFresh : u.accounts.gateNotePick}</p>
         <div className="acct-gate-list" role="group" aria-label={u.accounts.head}>
@@ -298,6 +335,8 @@ function Row({ p, current, only, onDone }: { p: Profile; current: boolean; only:
   const [editing, setEditing] = useState(false)
   const [name, setName] = useState(p.name)
   const [asking, setAsking] = useState(false)
+  /** main turned a rename or a removal down: said under the row, not swallowed */
+  const [failed, setFailed] = useState(false)
   // Escape takes the input away, and some browsers blur an element on its way out: that blur must
   // not save the name Escape was pressed to throw away
   const cancelled = useRef(false)
@@ -309,8 +348,12 @@ function Row({ p, current, only, onDone }: { p: Profile; current: boolean; only:
       return
     }
     const next = name.trim()
-    if (next && next !== p.name) void change((b) => b.rename(p.id, next))
-    else setName(p.name)
+    if (next && next !== p.name) {
+      void change((b) => b.rename(p.id, next)).then((ok) => {
+        setFailed(!ok)
+        if (!ok) setName(p.name)
+      })
+    } else setName(p.name)
   }
 
   /** the CLI's own account: nothing of it is deleted, it only leaves the list */
@@ -320,7 +363,11 @@ function Row({ p, current, only, onDone }: { p: Profile; current: boolean; only:
   const remove = (): void => {
     const s = useDesk.getState()
     for (const w of s.workspaces.filter((x) => (x.profileId ?? DEFAULT_PROFILE_ID) === p.id)) s.removeWorkspace(w.id)
-    void change((b) => b.remove(p.id))
+    void change((b) => b.remove(p.id)).then((ok) => {
+      if (ok) return
+      setAsking(false)
+      setFailed(true)
+    })
   }
 
   if (asking) {
@@ -340,99 +387,106 @@ function Row({ p, current, only, onDone }: { p: Profile; current: boolean; only:
   const loggedOut = !p.email
 
   return (
-    <div className={`acct-row ${current ? 'is-on' : ''}`}>
-      {editing ? (
-        // not inside the button below: a space typed into an input nested in a button clicks the button
-        <div className="acct-main">
-          <span className="pop-tick">{current && <IconCheck size={14} />}</span>
-          <input
-            className="acct-name-input"
-            value={name}
-            autoFocus
-            maxLength={24}
-            aria-label={u.accounts.nameLabel}
-            onChange={(e) => setName(e.target.value)}
-            onBlur={commit}
-            onKeyDown={(e) => {
-              e.stopPropagation()
-              if (e.key === 'Enter') commit()
-              if (e.key === 'Escape') {
-                cancelled.current = true
-                setName(p.name)
-                setEditing(false)
-              }
-            }}
-          />
-        </div>
-      ) : (
-        <button
-          className="acct-main"
-          role="menuitemradio"
-          aria-checked={current}
-          title={current ? u.accounts.rowTipActive : u.accounts.rowTip}
-          onClick={() => {
-            // switching is for working as that account, so the terminal comes with it — picking the
-            // account and then finding `+` was two steps for one intention
-            setCurrentAccount(p.id)
-            openTerminalUnder(p.id)
-            onDone()
-          }}
-        >
-          <span className="pop-tick">{current && <IconCheck size={14} />}</span>
-          <span className="acct-text">
-            <span className="acct-name">
-              <span className="acct-name-text">{p.name}</span>
-              {current && <span className="acct-active">{u.accounts.active}</span>}
-            </span>
-            <span className="acct-sub">{p.email ?? u.common.notLoggedIn}</span>
-            {/* the last numbers this account reported, however old — it says how old */}
-            <AccountUsageLine profileId={p.id} />
-          </span>
-        </button>
-      )}
-      {!editing && loggedOut && (
-        <button
-          className="acct-btn is-primary acct-login"
-          title={u.accounts.loginTip}
-          onClick={() => {
-            setCurrentAccount(p.id)
-            openLogin(p.id)
-            onDone()
-          }}
-        >
-          {u.accounts.login}
-        </button>
-      )}
-      {!editing && (
-        <span className="acct-tools">
+    <>
+      <div className={`acct-row ${current ? 'is-on' : ''}`}>
+        {editing ? (
+          // not inside the button below: a space typed into an input nested in a button clicks the button
+          <div className="acct-main">
+            <span className="pop-tick">{current && <IconCheck size={14} />}</span>
+            <input
+              className="acct-name-input"
+              value={name}
+              autoFocus
+              maxLength={24}
+              aria-label={u.accounts.nameLabel}
+              onChange={(e) => setName(e.target.value)}
+              onBlur={commit}
+              onKeyDown={(e) => {
+                e.stopPropagation()
+                if (e.key === 'Enter') commit()
+                if (e.key === 'Escape') {
+                  cancelled.current = true
+                  setName(p.name)
+                  setEditing(false)
+                }
+              }}
+            />
+          </div>
+        ) : (
+          // an action (switch, and open a terminal there), not a radio: which one is active is `aria-current`
           <button
-            className="acct-tool"
-            title={u.accounts.rename}
-            aria-label={u.accounts.renameOf(p.name)}
+            className="acct-main"
+            aria-current={current || undefined}
+            title={current ? u.accounts.rowTipActive : u.accounts.rowTip}
             onClick={() => {
-              cancelled.current = false
-              setEditing(true)
+              // switching is for working as that account, so the terminal comes with it — picking the
+              // account and then finding `+` was two steps for one intention
+              setCurrentAccount(p.id)
+              openTerminalUnder(p.id)
+              onDone()
             }}
           >
-            ✎
+            <span className="pop-tick">{current && <IconCheck size={14} />}</span>
+            <span className="acct-text">
+              <span className="acct-name">
+                <span className="acct-name-text">{p.name}</span>
+                {current && <span className="acct-active">{u.accounts.active}</span>}
+              </span>
+              <span className="acct-sub">{p.email ?? u.common.notLoggedIn}</span>
+              {/* the last numbers this account reported, however old — it says how old */}
+              <AccountUsageLine profileId={p.id} />
+            </span>
           </button>
-          <button className="acct-tool" title={u.accounts.openFolder} aria-label={u.accounts.openFolderOf(p.name)} onClick={() => void window.desk?.profiles.openFolder(p.id)}>
-            <IconFolder size={13} />
+        )}
+        {!editing && loggedOut && (
+          <button
+            className="acct-btn is-primary acct-login"
+            title={u.accounts.loginTip}
+            onClick={() => {
+              setCurrentAccount(p.id)
+              openLogin(p.id)
+              onDone()
+            }}
+          >
+            {u.accounts.login}
           </button>
-          {/* the last account stays: a list with nothing in it has nowhere to open a terminal */}
-          {!only && (
+        )}
+        {!editing && (
+          <span className="acct-tools">
             <button
               className="acct-tool"
-              title={cli ? u.accounts.removeCliTip : u.accounts.deleteTip}
-              aria-label={cli ? u.accounts.removeCliOf(p.name) : u.accounts.deleteOf(p.name)}
-              onClick={() => setAsking(true)}
+              title={u.accounts.rename}
+              aria-label={u.accounts.renameOf(p.name)}
+              onClick={() => {
+                cancelled.current = false
+                setEditing(true)
+              }}
             >
-              <IconClose size={13} />
+              ✎
             </button>
-          )}
-        </span>
+            <button className="acct-tool" title={u.accounts.openFolder} aria-label={u.accounts.openFolderOf(p.name)} onClick={() => void window.desk?.profiles.openFolder(p.id)}>
+              <IconFolder size={13} />
+            </button>
+            {/* the last account stays: a list with nothing in it has nowhere to open a terminal */}
+            {!only && (
+              <button
+                className="acct-tool"
+                title={cli ? u.accounts.removeCliTip : u.accounts.deleteTip}
+                aria-label={cli ? u.accounts.removeCliOf(p.name) : u.accounts.deleteOf(p.name)}
+                onClick={() => setAsking(true)}
+              >
+                <IconClose size={13} />
+              </button>
+            )}
+          </span>
+        )}
+      </div>
+      {failed && (
+        <p className="pop-note warn-line" role="alert">
+          {u.accounts.changeFailed}
+        </p>
       )}
-    </div>
+    </>
   )
 }
 

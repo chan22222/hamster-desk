@@ -77,6 +77,11 @@ export const zh: UiStrings = {
     externalTab: (cwd) => `${cwd}（在其他终端中运行）`,
     externalPane: '此会话在其他终端中运行。这里只能在上方的书桌上观看，请到那个终端输入。',
     studioPreview: '工作室预览 · 终端请在桌面应用中使用。',
+    stripLabel: '终端标签页',
+    stateBusy: 'claude 工作中',
+    stateIdle: 'claude 空闲',
+    waitPermission: '等待你的授权',
+    waitQuestion: '等待你的回答',
   },
 
   plus: {
@@ -170,6 +175,8 @@ export const zh: UiStrings = {
     showCli: '重新显示 CLI 账号 (~/.claude)',
     showCliTip: '把之前从列表移除的 ~/.claude 账号放回列表',
     mergedNote: (name) => `~/.claude 使用同一登录，因此只显示为 <b>${name}</b>。删除此账号后它会重新出现。`,
+    addFailed: '无法添加账号，请重试。',
+    changeFailed: '无法更改，请重试。',
   },
 
   usage: {
@@ -389,6 +396,12 @@ export const zh: UiStrings = {
     contextSoon: ' · 即将需要压缩',
     contextWindow: (size) => ` · 窗口 ${size}`,
     compacting: '压缩中…',
+    effortHead: '努力级别 (/effort)',
+    more: '更多',
+    runTip: '在此终端中启动 claude',
+    historyHereTip: '在此终端中继续此文件夹的历史对话',
+    continueLabel: '继续',
+    continueTip: 'claude --continue\n在此终端中继续此文件夹的最后一次对话',
   },
 
   history: {

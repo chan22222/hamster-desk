@@ -78,6 +78,11 @@ export const pt: UiStrings = {
     externalTab: (cwd) => `${cwd} (rodando em outro terminal)`,
     externalPane: 'Esta sessão está rodando em outro terminal. Aqui você só a acompanha na mesa acima; digite naquele terminal.',
     studioPreview: 'Prévia do estúdio · o terminal está disponível no app de desktop.',
+    stripLabel: 'Abas de terminal',
+    stateBusy: 'claude está trabalhando',
+    stateIdle: 'claude está pronto',
+    waitPermission: 'Aguardando sua permissão',
+    waitQuestion: 'Aguardando sua resposta',
   },
 
   plus: {
@@ -171,6 +176,8 @@ export const pt: UiStrings = {
     showCli: 'Mostrar a conta da CLI (~/.claude) de novo',
     showCliTip: 'Coloca de volta na lista a conta ~/.claude que foi tirada',
     mergedNote: (name) => `~/.claude tem o mesmo login, então aparece só como <b>${name}</b>. Exclua esta conta e ela volta.`,
+    addFailed: 'Não foi possível adicionar a conta. Tente de novo.',
+    changeFailed: 'Não foi possível alterar. Tente de novo.',
   },
 
   usage: {
@@ -390,6 +397,12 @@ export const pt: UiStrings = {
     contextSoon: ' · compactar em breve',
     contextWindow: (size) => ` · janela ${size}`,
     compacting: 'compactando…',
+    effortHead: 'Nível de esforço (/effort)',
+    more: 'Mais',
+    runTip: 'Inicia o claude neste terminal',
+    historyHereTip: 'Continuar uma conversa anterior desta pasta neste terminal',
+    continueLabel: 'Continuar',
+    continueTip: 'claude --continue\nRetoma a última conversa desta pasta neste terminal',
   },
 
   history: {

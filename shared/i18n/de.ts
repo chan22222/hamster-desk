@@ -78,6 +78,11 @@ export const de: UiStrings = {
     externalTab: (cwd) => `${cwd} (läuft in anderem Terminal)`,
     externalPane: 'Diese Sitzung läuft in einem anderen Terminal. Hier oben kannst du nur zuschauen; tippe in jenem Terminal.',
     studioPreview: 'Studio-Vorschau · das Terminal gibt es in der Desktop-App.',
+    stripLabel: 'Terminal-Tabs',
+    stateBusy: 'claude arbeitet',
+    stateIdle: 'claude ist bereit',
+    waitPermission: 'Wartet auf deine Erlaubnis',
+    waitQuestion: 'Wartet auf deine Antwort',
   },
 
   plus: {
@@ -171,6 +176,8 @@ export const de: UiStrings = {
     showCli: 'CLI-Konto (~/.claude) wieder zeigen',
     showCliTip: 'Holt das entfernte ~/.claude-Konto zurück in die Liste',
     mergedNote: (name) => `~/.claude hat dieselbe Anmeldung und erscheint deshalb nur als <b>${name}</b>. Lösche dieses Konto, dann taucht es wieder auf.`,
+    addFailed: 'Das Konto konnte nicht hinzugefügt werden. Versuch es noch einmal.',
+    changeFailed: 'Das hat nicht geklappt. Versuch es noch einmal.',
   },
 
   usage: {
@@ -390,6 +397,12 @@ export const de: UiStrings = {
     contextSoon: ' · Komprimieren bald nötig',
     contextWindow: (size) => ` · Fenster ${size}`,
     compacting: 'komprimiert…',
+    effortHead: 'Aufwand (/effort)',
+    more: 'Mehr',
+    runTip: 'Startet claude in diesem Terminal',
+    historyHereTip: 'Ein früheres Gespräch aus diesem Ordner in diesem Terminal fortsetzen',
+    continueLabel: 'Fortsetzen',
+    continueTip: 'claude --continue\nSetzt das letzte Gespräch dieses Ordners in diesem Terminal fort',
   },
 
   history: {

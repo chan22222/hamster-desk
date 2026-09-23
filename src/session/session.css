@@ -17,9 +17,18 @@
   background: var(--surface);
   border-bottom: 1px solid var(--line);
   overflow-x: auto;
+  overflow-y: hidden;
   scrollbar-width: none;
 }
 .session-bar::-webkit-scrollbar { height: 0; }
+/* what is past an edge fades out there (src/widgets/hscroll.ts sets the attributes; the wheel scrolls it) */
+.session-bar[data-fade-r] { mask-image: linear-gradient(to right, #000 calc(100% - 28px), transparent); }
+.session-bar[data-fade-l] { mask-image: linear-gradient(to left, #000 calc(100% - 28px), transparent); }
+.session-bar[data-fade-l][data-fade-r] { mask-image: linear-gradient(to right, transparent, #000 28px, #000 calc(100% - 28px), transparent); }
+/* a terminal with no claude in it: the same line, with the ways in (SessionBar.tsx `ShellBar`) */
+.pill.sb-btn.sb-run { gap: 5px; font-weight: 500; color: var(--text); }
+.pill.sb-btn.sb-run > svg { flex: none; color: var(--accent); }
+.pill.sb-btn.sb-run:disabled > svg { color: inherit; }
 /* While Claude Code is asking something, every control that types into the terminal is disabled and
    dims itself (below); the bar says why in words rather than fading as a whole, because the meter
    and `지난 대화` — which never touch this terminal — stay live. */
@@ -47,11 +56,15 @@
 
 /* "멀티 에이전트": a switch drawn as a pill with a small box on its left, so it reads as on/off and not
    as one more command button. Next to it the preset opens a menu, shaped like the model pill. */
-.pill.sb-btn.sb-deleg { gap: 6px; }
+.pill.sb-btn.sb-deleg { position: relative; gap: 6px; }
 .sb-deleg-mark { display: inline-flex; align-items: center; justify-content: center; width: 13px; height: 13px; border-radius: 3px; border: 1px solid var(--line-strong); color: var(--on-accent); }
 .pill.sb-btn.sb-deleg.on .sb-deleg-mark { background: var(--accent); border-color: transparent; }
+/* the CLAUDE.md write failed: said on the switch itself — the menu that says why is disabled while
+   the switch is off, and a tooltip is where nobody looks */
+.sb-deleg-warn { position: absolute; top: -3px; right: -3px; width: 8px; height: 8px; border-radius: 50%; background: var(--danger); box-shadow: 0 0 0 2px var(--surface); }
 .sb-deleg-custom { width: 100%; min-height: 64px; resize: vertical; padding: 6px 8px; border: 1px solid var(--line); border-radius: var(--radius); background: var(--surface); color: var(--text); font: inherit; font-size: 12px; line-height: 1.5; }
-.sb-deleg-custom:focus { outline: none; border-color: var(--line-strong); }
+/* the accent, not --line-strong: that was 1.5:1 against the page — a focused box has to show it (3:1) */
+.sb-deleg-custom:focus { outline: none; border-color: var(--accent); box-shadow: 0 0 0 3px var(--accent-soft); }
 /* the sub-agents' model and effort: a label over a segmented control of six buttons — too wide to
    share one line with its label in every language, so the two stack, and the seg itself may wrap
    where a language's words are long (the buttons stay whole; `.seg-btn` is nowrap) */
@@ -64,6 +77,34 @@
 .seg.sb-effort .seg-btn:disabled { opacity: 0.45; cursor: default; }
 
 .sb-hint { flex: none; font-size: 11px; color: var(--danger); white-space: nowrap; }
+
+/* ---- a narrow column --------------------------------------------------------------------- */
+/* The bar gives things up in the order they cost least, measured against the column the terminal
+   is in (`.panes` is the container, styles.css) — not the window, which says nothing once the
+   sidebar and a studio beside the terminal have taken their share. Every step keeps the control:
+   it only changes shape. Korean needs ~840px for the whole line; the steps sit where the next one
+   still fits it, and a longer language that still overflows scrolls (with a fade) instead.
+     < 880  effort segments → a dropdown like the model's (−140px)
+     < 740  `멀티 에이전트` keeps only its box, the meter only its number, `압축 권장` goes (−120px)
+     < 600  `/compact` · `/clear` · `지난 대화` → one `⋯` (−170px)
+     < 440  the window size after the percentage goes */
+.pill.sb-btn.sb-effort-dd, .pill.sb-btn.sb-more { display: none; }
+@container panes (max-width: 879px) {
+  .seg.sb-effort { display: none; }
+  .pill.sb-btn.sb-effort-dd { display: flex; }
+}
+@container panes (max-width: 739px) {
+  .sb-deleg-text { display: none; }
+  .sb-ctx .meter { display: none; }
+  .sb-hint { display: none; }
+}
+@container panes (max-width: 599px) {
+  .pill.sb-btn.sb-cmd { display: none; }
+  .pill.sb-btn.sb-more { display: flex; padding: 0 6px; }
+}
+@container panes (max-width: 439px) {
+  .sb-ctx-size { display: none; }
+}
 
 /* ---- context ---------------------------------------------------------------------------- */
 

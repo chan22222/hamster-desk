@@ -6,7 +6,7 @@
 // Every word is read from the dictionary at render time (`useUi`), so a language change applies to
 // the open menu; the preset rows are `delegation.presets[id]`, keyed by the ids in DELEGATION_PRESETS.
 
-import { useEffect, useState } from 'react'
+import { useEffect, useId, useState } from 'react'
 import { DELEGATION_MODELS, DELEGATION_PRESETS, EFFORT_LEVELS, type DelegationConfig, type DelegationEffort, type DelegationModel, type DelegationState } from '@shared/events'
 import { modelSkin } from '../desk/skins'
 import { useUi, type UiStrings } from '../i18n'
@@ -26,6 +26,7 @@ function modelName(m: DelegationModel, d: UiStrings['delegation']): string {
 
 export function DelegationControl({ profileId }: { profileId: string }) {
   const u = useUi()
+  const failId = useId()
   const [state, setState] = useState<DelegationState | null>(null)
   // the custom text is typed here and saved when the box loses focus — every keystroke would
   // otherwise rewrite the file
@@ -52,10 +53,15 @@ export function DelegationControl({ profileId }: { profileId: string }) {
 
   return (
     <>
+      {/* In a narrow column the words go and the box stays (session.css), so the name is on the
+          button itself as well. A failed write puts a red dot on it: the menu that explains it is
+          disabled while the switch is off, and the tooltip alone was easy to never see. */}
       <button
         className={`pill sb-btn sb-deleg ${c.on ? 'on' : ''}`}
         role="switch"
         aria-checked={c.on}
+        aria-label={d.label}
+        aria-describedby={writeFailed ? failId : undefined}
         data-debug-click="bar-delegate"
         title={writeFailed ? `${d.tip}\n${writeFailed}` : d.tip}
         onClick={() => save({ on: !c.on })}
@@ -63,7 +69,15 @@ export function DelegationControl({ profileId }: { profileId: string }) {
         <span className="sb-deleg-mark" aria-hidden="true">
           {c.on && <IconCheck size={11} />}
         </span>
-        {d.label}
+        <span className="sb-deleg-text">{d.label}</span>
+        {writeFailed && (
+          <>
+            <span className="sb-deleg-warn" aria-hidden="true" />
+            <span id={failId} className="sr-only">
+              {writeFailed}
+            </span>
+          </>
+        )}
       </button>
       <Popover
         className="pill sb-btn sb-model"
@@ -86,7 +100,7 @@ export function DelegationControl({ profileId }: { profileId: string }) {
         {() => (
           <div className="pop-body">
             <div className="pop-head">{d.modeLabel}</div>
-            <div className="sb-model-list" role="group" aria-label={d.mode}>
+            <div className="sb-model-list" role="menu" aria-label={d.mode}>
               {DELEGATION_PRESETS.map((p) => {
                 const on = p.id === c.preset
                 const row = d.presets[p.id]

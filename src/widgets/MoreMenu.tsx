@@ -27,9 +27,11 @@ function CheckRow({
   onClick: () => void
 }) {
   return (
+    // a checkbox, not a menuitemcheckbox: this panel is a dialog of settings, not a menu (there is no
+    // role="menu" around it for a menu item to belong to)
     <button
       className={`pop-check ${on ? 'is-on' : ''}`}
-      role="menuitemcheckbox"
+      role="checkbox"
       aria-checked={on}
       data-debug-click={debugClick}
       disabled={disabled}

@@ -22,7 +22,8 @@
 .acct-gate { gap: 8px; }
 .acct-gate-list { display: flex; flex-direction: column; gap: 1px; margin: 0 -6px; }
 .acct-gate .pop-item { width: calc(100% + 12px); margin: 0 -6px; }
-.acct-gate .acct-main:focus-visible { outline: none; border-radius: var(--radius); box-shadow: inset 0 0 0 1px var(--accent); }
+/* drawn inside (the list sits flush with the dialog's edges), and as heavy as every other ring: 2px */
+.acct-gate .acct-main:focus-visible { outline: none; border-radius: var(--radius); box-shadow: inset 0 0 0 2px var(--accent); }
 
 /* ---- the badge on a tab ---------------------------------------------------------------------- */
 .acct-badge {
