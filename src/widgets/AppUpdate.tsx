@@ -103,11 +103,13 @@ export function AppUpdatePill() {
   const rel = what.release
   return (
     <Popover
-      className="pill alert"
+      className="pill alert pill-fold"
       label={
         <>
           <IconDownload size={14} />
-          {rel?.state === 'downloading' ? txt.update.pillDownloading(rel.percent) : txt.update.pill}
+          {/* below 1100px only the icon stays, and the percentage while it downloads (styles.css) */}
+          <span className="pill-text">{rel?.state === 'downloading' ? txt.update.pillDownloading(rel.percent) : txt.update.pill}</span>
+          {rel?.state === 'downloading' && <span className="pill-short">{rel.percent}%</span>}
         </>
       }
       ariaLabel={txt.update.appUpdate}

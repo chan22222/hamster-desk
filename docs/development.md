@@ -28,7 +28,7 @@ npm run smoke:ui                   # ~/.hamster-desk/ui.json: 병합·null 삭�
 
 | 파일 | 지키는 것 |
 |---|---|
-| `i18n.test.ts` | `'한국어'`·`'korean'`·`'ko-KR'`·`'한국어 (Korean)'` → ko, `'Klingon'`·`'Kotava'`·`'it-IT'` → 추측하지 않고 브라우저 언어로, 명시한 언어가 둘 다 이김, 요약기에는 사용자가 쓴 그대로(`한국어`) 넘김, `formatDuration` ko/en |
+| `i18n.test.ts` | `'한국어'`·`'korean'`·`'ko-KR'`·`'한국어 (Korean)'` → ko, `'Klingon'`·`'Kotava'`·`'it-IT'` → 추측하지 않고 브라우저 언어로, 명시한 언어가 둘 다 이김, 요약기에는 사용자가 쓴 그대로(`한국어`) 넘김, `formatDuration` ko/en, 모든 언어의 문구 함수가 한국어와 같은 수의 인자를 받고 같은 인자를 찍는지(tsc 는 인자가 적은 함수를 통과시킨다), 1 이면 단수(`1 summary`·`1 resumen`), `formatDate`(달은 이름으로 — ko `9월 12일`·en `Sep 12`·de `12. Sept.`, 24시간제, 다른 해면 연도) |
 | `transcripts.test.ts` | 첫 줄이 `last-prompt` 인 파일, `ai-title` 이 여럿이면 마지막, 프롬프트 없는 파일·슬래시 명령뿐인 세션은 제외, 제목 우선순위, 앞 64KB 를 넘는 첫 프롬프트 |
 | `turn-git.test.ts` | `summarizeTurn` 이 그 턴의 편집만 세는지, `parseStatus`(`## main...origin/main [ahead 1]`, CRLF, detached, 새 저장소), `classifyDiffLine` |
 | `window-state.test.ts` | `fitBounds`(화면 밖·과소·정상·최대화), `miniPlacement`(보조 모니터 포함), 탭 직렬화(업데이트 탭 제외, 외부 세션이 앞일 때) |
@@ -41,7 +41,7 @@ npm run smoke:ui                   # ~/.hamster-desk/ui.json: 병합·null 삭�
 | `usage-query.test.ts` | CLI 의 `get_usage` 답(실제 응답에서 잘라 옴)에서 5시간·주간(전체)·모델별 주간 창을 읽음, 오류 답·쓰레기는 null, 로그인된 계정만 묻고 실패한 계정은 답에서 빠짐 |
 | `patrol.test.ts` | 사장의 순찰(`src/desk/patrol.ts`)을 가짜 시계와 실제 `Walker` 로 돌린다: 직원이 없으면 10분을 돌려도 안 일어남, 첫 순찰이 12~25초 안에 시작되고 의자 옆·뒤에 서며 2~4초 뒤 돌아와 45~120초 쉼, 주사위가 직원 아무나 고름, `waiting`·새 `say` 줄·그 직원의 퇴근이 도중에 되돌림(다른 직원의 퇴근은 무관), 사무실이 비면 첫 지연이 다시 적용, `off` 는 자리에 묶어 두고 `hurry` 는 즉시·3초·6초. 지름길(`directRoute`): 열두 자리 전부에 대해 **실제 소품 크기**(책상·의자·화분·정수기·커피 테이블·프린터)의 어느 것에도 닿지 않고 왕복하며 갈 때와 올 때 길이가 같고, 첫 줄 가운데 두 자리는 복도 경로의 40% 이하; 차선·통로 자체가 비어 있고, 도중에 끊긴 길은 허브를 거치지 않고 그 자리에서 돌아선다 |
 | `grab.test.ts` | 잡아서 던지기(`src/desk/grab.ts`)를 장난감 섬(데크·잔디·바다)에서: 손과의 오프셋 유지와 들어 올리기, 멈춘 손은 그 자리에 떨어뜨림(0.32초 뒤 데크 높이), 한참 전에 멈춘 손도 떨어뜨림, 느린 이동은 떨어뜨림 · 빠른 튕김은 방향 그대로 상한 속도에 포물선, 세게 던지면 해안을 넘어 물보라 → 가라앉음 → 사라짐(0.45초), 살짝 던지면 데크에 · 가장자리 밖이면 잔디에 착지, 열세 자리 전부에서 책상·의자 위 착지는 가구 밖으로 짧게 밀려남, `worldToTile` 역변환, 안에서는 `directRoute`, 밖에서는 건물을 돌아 계단 → 문 → 복도(사무실 바닥을 가로지르지 않음) |
-| `toast-stack.test.ts` | 알림 창의 카드 스택: 질문·권한이 턴 완료보다 오래 남음, 넷째 카드가 오면 가장 오래된 것이 빠짐, 만료 순서, 호버 정지가 시간을 돌려줌(정지 중 들어온 카드는 풀린 뒤 제 수명 전부), `toastBounds`(오른쪽 아래 16px, 아래 고정으로 위로 자람, 보조 모니터 오프셋, 미니 창 위로 비킴) |
+| `toast-stack.test.ts` | 알림 창의 카드 스택: 태그 셋이 종류 셋(권한·질문·완료, `src/notify/kind.ts`)으로 갈리고 저마다 수명과 아이콘이 있음, 질문·권한이 턴 완료보다 오래 남음, 넷째 카드가 오면 가장 오래된 것이 빠짐, 만료 순서, 호버 정지가 시간을 돌려줌(정지 중 들어온 카드는 풀린 뒤 제 수명 전부), `toastBounds`(오른쪽 아래 16px, 아래 고정으로 위로 자람, 보조 모니터 오프셋, 미니 창 위로 비킴) |
 | `project-actions.test.ts` | 실행 메뉴의 판정을 임시 폴더로: pnpm 잠금의 Vite/React 앱(아는 스크립트 먼저 · `test:unit` 은 테스트 묶음 · `node_modules` 가 없을 때만 설치), `packageManager` 가 잠금 파일을 이김 · npm/yarn/bun 의 명령 꼴, `.venv` 가 있는 Django(Windows 는 `Activate.ps1;` · 그 밖은 `source … &&`, `tests` 가 있으면 pytest), uv·poetry, Cargo · Go · .NET, `.PHONY`·변수·패턴·레시피를 뺀 Makefile 타깃 12개 상한과 `make` 없으면 없음, 아무것도 아닌 폴더·없는 폴더·파일 → 빈 답, Node + Makefile + compose 는 셋 다, 표식이 바뀌기 전까지 같은 객체를 돌려주는 캐시, Maven · Gradle · Rails |
 
 ## 스모크·캡처 실행

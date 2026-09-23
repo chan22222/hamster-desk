@@ -113,7 +113,7 @@ export const pt: UiStrings = {
     cannotSummarize: 'Resumos indisponíveis no momento.',
     noSummaryYet: 'Nada resumido ainda.',
     since: (date) => `desde ${date}`,
-    summaryStats: (calls, total, input, output, cost) => `${calls} resumos · ${total} tokens (entrada ${input} · saída ${output}) · ≈ ${cost}`,
+    summaryStats: (calls, total, input, output, cost) => `${calls} ${calls === 1 ? 'resumo' : 'resumos'} · ${total} tokens (entrada ${input} · saída ${output}) · ≈ ${cost}`,
     resetCounterTip: 'Zerar o contador de uso',
     reset: 'Zerar',
     language: 'Idioma',

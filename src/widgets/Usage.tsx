@@ -1,20 +1,18 @@
 import { useEffect, useState } from 'react'
 import type { RateWindow, StatusSnapshot } from '@shared/events'
 import { resolveProfileId, useDesk } from '../store'
-import { useUi, type UiStrings } from '../i18n'
+import { formatDate, formatTime, useUi, type UiStrings } from '../i18n'
 import { rich } from '../rich'
 import { Popover } from './Popover'
 import '../accounts/accounts.css'
 
 type SLState = 'installed' | 'foreign' | 'none' | 'unknown'
 
+/** `18:20` today, `Sep 13, 18:20` / `9월 13일 18:20` on another day — the day in the UI language's own order */
 export function fmtReset(ms: number | null): string {
   if (!ms) return ''
-  const d = new Date(ms)
-  const now = new Date()
-  const hh = `${String(d.getHours()).padStart(2, '0')}:${String(d.getMinutes()).padStart(2, '0')}`
-  if (d.toDateString() === now.toDateString()) return hh
-  return `${d.getMonth() + 1}/${d.getDate()} ${hh}`
+  if (new Date(ms).toDateString() === new Date().toDateString()) return formatTime(ms)
+  return formatDate(ms, { time: true })
 }
 
 function remaining(ms: number | null, u: UiStrings): string {
@@ -326,10 +324,17 @@ export function UsageMeters() {
   const shown = profiles.find((p) => p.id === shownId)
   /** ` · 회사` after a label, once there is more than one account to be talking about */
   const who = many && shown ? ` · ${shown.name}` : ''
+  /** a pill's words: they give way with an ellipsis, and the account part goes first in a narrow window (styles.css) */
+  const pillLabel = (words: string) => (
+    <span className="pill-text">
+      {words}
+      {who && <span className="pill-who">{who}</span>}
+    </span>
+  )
 
   if (sl === 'none' || sl === 'foreign') {
     return (
-      <Popover className="pill" label={`${u.usage.linkPill}${who}`} title={u.usage.linkPillTip}>
+      <Popover className="pill" label={pillLabel(u.usage.linkPill)} title={`${u.usage.linkPill}${who}\n${u.usage.linkPillTip}`} ariaLabel={`${u.usage.linkPill}${who}`}>
         {(close) => (
           <div className="pop-body">
             <p>{rich(u.usage.linkNote(shown?.dir ? u.usage.accountFile(shown.name) : '<code>~/.claude/settings.json</code>'))}</p>
@@ -361,7 +366,7 @@ export function UsageMeters() {
 
   if (!five && !week) {
     return (
-      <Popover className="pill dim" label={`${u.usage.waitingPill}${who}`} title={u.usage.waitingPillTip}>
+      <Popover className="pill dim" label={pillLabel(u.usage.waitingPill)} title={`${u.usage.waitingPill}${who}\n${u.usage.waitingPillTip}`} ariaLabel={`${u.usage.waitingPill}${who}`}>
         {(close) => (
           <div className="pop-body">
             <p>{many ? u.usage.waitingNoteAccount : u.usage.waitingNote}</p>

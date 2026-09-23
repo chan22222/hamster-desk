@@ -11,6 +11,7 @@ import './toast.css'
 import type { ToastBridge, ToastState } from '../../electron/toast-preload'
 import type { ToastItem } from '../../electron/toast-stack'
 import { uiStringsOf, type UiStrings } from '../../shared/i18n'
+import { CLOSE_PATHS, GO_PATHS, KIND_PATHS, kindOf } from '../notify/kind'
 
 declare global {
   interface Window {
@@ -21,29 +22,62 @@ declare global {
 const bridge = window.toast
 const stack = document.getElementById('stack')!
 
-/** what a card is about, for its colour: a request needs the user, a finished turn just tells */
-const KIND: Record<ToastItem['tag'], string> = { permission: 'ask', question: 'ask', turn: 'done' }
-
 /** the page's few fixed words, in the language each state names — this window reads no preferences of its own */
 type Words = UiStrings['toast']
 
+const SVG = 'http://www.w3.org/2000/svg'
+
+/** One icon in the app's icon frame (src/widgets/icons.tsx), built by hand: there is no React here. */
+function icon(paths: readonly string[], size: number, className: string): SVGSVGElement {
+  const svg = document.createElementNS(SVG, 'svg')
+  const attrs: Record<string, string> = {
+    class: className,
+    width: String(size),
+    height: String(size),
+    viewBox: '0 0 16 16',
+    fill: 'none',
+    stroke: 'currentColor',
+    'stroke-width': '1.5',
+    'stroke-linecap': 'round',
+    'stroke-linejoin': 'round',
+    'aria-hidden': 'true',
+    focusable: 'false',
+  }
+  for (const [k, v] of Object.entries(attrs)) svg.setAttribute(k, v)
+  for (const d of paths) {
+    const p = document.createElementNS(SVG, 'path')
+    p.setAttribute('d', d)
+    svg.append(p)
+  }
+  return svg
+}
+
 function card(item: ToastItem, words: Words): HTMLElement {
+  const kind = kindOf(item.tag)
   const el = document.createElement('div')
-  el.className = `toast-card is-${KIND[item.tag] ?? 'ask'}`
+  // the kind is the colour of the stripe down the left edge and of the icon before the title
+  el.className = `toast-card is-${kind}`
   el.dataset.id = String(item.id)
   el.dataset.tag = item.tag
 
+  // the whole card is the button that goes to the tab; the chevron on its right edge says so
   const main = document.createElement('button')
   main.className = 'tc-main'
   main.type = 'button'
   main.title = words.goToTab
+  const text = document.createElement('span')
+  text.className = 'tc-text'
+  const head = document.createElement('span')
+  head.className = 'tc-head'
   const title = document.createElement('span')
   title.className = 'tc-title'
   title.textContent = item.title
+  head.append(icon(KIND_PATHS[kind], 14, 'tc-kind'), title)
   const body = document.createElement('span')
   body.className = 'tc-body'
   body.textContent = item.body
-  main.append(title, body)
+  text.append(head, body)
+  main.append(text, icon(GO_PATHS, 14, 'tc-go'))
   main.addEventListener('click', () => bridge?.click(item.id))
 
   const x = document.createElement('button')
@@ -51,7 +85,7 @@ function card(item: ToastItem, words: Words): HTMLElement {
   x.type = 'button'
   x.setAttribute('aria-label', words.closeNotification)
   x.title = words.close
-  x.textContent = '×'
+  x.append(icon(CLOSE_PATHS, 12, 'tc-x-ico'))
   x.addEventListener('click', (e) => {
     e.stopPropagation()
     bridge?.close(item.id)

@@ -34,6 +34,8 @@ export interface BannerItem {
   id: number
   title: string
   body: string
+  /** what it is about — the banner wears the same kind stripe and icon as the popup card */
+  tag: NotifyRequest['tag']
   /** the tab to open when the banner is clicked */
   tab: string
   ptyId: number | null
@@ -170,9 +172,9 @@ function raise(req: Omit<NotifyRequest, 'theme'>, ptyId: number | null): void {
     .show({ ...req, theme: painted() })
     .then((result) => {
       if (result === 'shown') return
-      showBanner({ title: req.title, body: req.body, tab: req.tab, ptyId, reason: result })
+      showBanner({ title: req.title, body: req.body, tag: req.tag, tab: req.tab, ptyId, reason: result })
     })
-    .catch(() => showBanner({ title: req.title, body: req.body, tab: req.tab, ptyId, reason: 'failed' }))
+    .catch(() => showBanner({ title: req.title, body: req.body, tag: req.tag, tab: req.tab, ptyId, reason: 'failed' }))
 }
 
 // ---- watching the store ----------------------------------------------------------------------

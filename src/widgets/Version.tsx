@@ -26,7 +26,9 @@ export function UpdatePill({ onUpdate }: { onUpdate: () => void }) {
   return (
     <button className="pill alert" onClick={onUpdate} title={u.update.claudeUpdateTip(latest)}>
       <IconDownload size={14} />
-      {u.update.claudeUpdate}
+      {/* a short word in every language, so it never folds to the icon like the app-update pill
+          does — two orange download icons side by side would not say which update is which */}
+      <span className="pill-text">{u.update.claudeUpdate}</span>
     </button>
   )
 }

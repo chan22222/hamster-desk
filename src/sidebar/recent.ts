@@ -4,7 +4,7 @@
 // own prompt history (`~/.claude/history.jsonl`), which meant the list was full of folders the user
 // had never opened here; that file is no longer read anywhere in the app.
 
-import { ui } from '../i18n'
+import { formatDate, ui } from '../i18n'
 import { uiGet, uiSet } from '../store'
 
 const MAX_RECENT = 40
@@ -126,7 +126,7 @@ export function recentEntries(limit = MAX_RECENT): RecentEntry[] {
   return [...byKey.values()].sort((a, b) => (a.fav === b.fav ? b.at - a.at : a.fav ? -1 : 1)).slice(0, limit)
 }
 
-/** "방금", "12분 전", "3시간 전", "어제", "9/12" */
+/** "방금", "12분 전", "3시간 전", "어제", "9월 12일" (`Sep 12`, `12. Sept.` — src/i18n.ts formatDate) */
 export function relTime(ts: number): string {
   if (!ts) return ''
   const diff = Date.now() - ts
@@ -135,8 +135,7 @@ export function relTime(ts: number): string {
   if (diff < 3600_000) return u.minutesAgo(Math.floor(diff / 60_000))
   if (diff < 86400_000) return u.hoursAgo(Math.floor(diff / 3600_000))
   if (diff < 172800_000) return u.yesterday
-  const d = new Date(ts)
-  return `${d.getMonth() + 1}/${d.getDate()}`
+  return formatDate(ts)
 }
 
 /** Shorten a path in the middle, so both the drive and the folder stay readable. */

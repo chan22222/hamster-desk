@@ -74,9 +74,11 @@
 .acct-login { height: 22px; padding: 0 8px; margin-right: 2px; font-size: 11px; }
 
 /* ---- per-account rows in the usage popover ----------------------------------------------- */
+/* whose numbers the chip next to it shows: a caption, not a control. It wore the pressed-button
+   fill (--surface-3) and read as a button that did nothing when clicked. */
 .um-acct {
-  flex: none; max-width: 72px; padding: 0 6px; border-radius: 4px;
-  background: var(--surface-3); color: var(--text-2); font-size: 11px; line-height: 18px;
+  flex: none; max-width: 72px; padding: 0 2px;
+  color: var(--text-3); font-size: 11px; line-height: 18px; cursor: default;
   overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
 }
 .au-row {

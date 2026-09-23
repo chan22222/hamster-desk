@@ -1,7 +1,7 @@
 import { useEffect, useState } from 'react'
 import type { FiveHourAccount, FiveHourState, Profile } from '@shared/events'
 import { useDesk, type DeskSide, type ThemeMode } from '../store'
-import { langOptions, useUi, type PrefLang, type UiStrings } from '../i18n'
+import { formatDate, langOptions, useUi, type PrefLang, type UiStrings } from '../i18n'
 import { bubbleAvailability, resetBubbleStats, type BubbleAvailability } from '../bubbles/summarize'
 import { Popover } from './Popover'
 import { IconCheck, IconMore } from './icons'
@@ -86,9 +86,8 @@ function money(usd: number): string {
 function UsageRow({ stats, onReset }: { stats: BubbleAvailability['stats']; onReset: () => void }) {
   const u = useUi()
   if (stats.calls === 0) return <p className="pop-note">{u.settings.noSummaryYet}</p>
-  const since = stats.since ? new Date(stats.since) : null
   return (
-    <div className="pop-usage" title={since ? u.settings.since(`${since.getMonth() + 1}/${since.getDate()}`) : undefined}>
+    <div className="pop-usage" title={stats.since ? u.settings.since(formatDate(stats.since)) : undefined}>
       <span>{u.settings.summaryStats(stats.calls, compact(stats.inputTokens + stats.outputTokens), compact(stats.inputTokens), compact(stats.outputTokens), money(stats.costUSD))}</span>
       <button onClick={onReset} title={u.settings.resetCounterTip}>
         {u.settings.reset}

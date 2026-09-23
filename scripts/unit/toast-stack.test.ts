@@ -14,6 +14,7 @@ import {
   toastBounds,
   ttlFor,
 } from '../../electron/toast-stack'
+import { KIND_PATHS, kindOf } from '../../src/notify/kind'
 
 /** a 1920×1080 screen with the Windows taskbar along the bottom */
 const WORK_AREA = { x: 0, y: 0, width: 1920, height: 1040 }
@@ -24,6 +25,17 @@ test('a question or permission request stays longer than a finished turn', () =>
   assert.ok(ttlFor('question') > ttlFor('turn'))
   assert.equal(ttlFor('permission'), ttlFor('question'))
   assert.equal(ttlFor('turn'), TTL_MS.turn)
+})
+
+test('every tag is a kind of its own, with a lifetime and an icon', () => {
+  // permission and question used to share one amber card; the page and the banner tell them apart
+  // through kindOf (src/notify/kind.ts), and a tag added to the stack must land somewhere there too
+  const tags = Object.keys(TTL_MS) as (keyof typeof TTL_MS)[]
+  assert.deepEqual(new Set(tags.map(kindOf)), new Set(['permission', 'question', 'done']), 'three tags, three kinds')
+  for (const tag of tags) {
+    assert.ok(ttlFor(tag) > 0, `${tag} has a lifetime`)
+    assert.ok(KIND_PATHS[kindOf(tag)].length > 0, `${tag} has an icon`)
+  }
 })
 
 test('the stack keeps the newest three, oldest first', () => {

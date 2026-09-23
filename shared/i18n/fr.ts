@@ -113,7 +113,7 @@ export const fr: UiStrings = {
     cannotSummarize: 'Résumé indisponible pour le moment.',
     noSummaryYet: 'Rien de résumé pour l’instant.',
     since: (date) => `depuis le ${date}`,
-    summaryStats: (calls, total, input, output, cost) => `${calls} résumés · ${total} tokens (entrée ${input} · sortie ${output}) · ≈ ${cost}`,
+    summaryStats: (calls, total, input, output, cost) => `${calls} résumé${calls > 1 ? 's' : ''} · ${total} tokens (entrée ${input} · sortie ${output}) · ≈ ${cost}`,
     resetCounterTip: 'Réinitialiser le compteur d’utilisation',
     reset: 'Réinitialiser',
     language: 'Langue',

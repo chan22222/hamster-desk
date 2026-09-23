@@ -113,7 +113,7 @@ export const en: UiStrings = {
     cannotSummarize: 'Summaries are not available right now.',
     noSummaryYet: 'Nothing summarized yet.',
     since: (date) => `since ${date}`,
-    summaryStats: (calls, total, input, output, cost) => `${calls} summaries · ${total} tokens (in ${input} · out ${output}) · ≈ ${cost}`,
+    summaryStats: (calls, total, input, output, cost) => `${calls} ${calls === 1 ? 'summary' : 'summaries'} · ${total} tokens (in ${input} · out ${output}) · ≈ ${cost}`,
     resetCounterTip: 'Reset the usage counter',
     reset: 'Reset',
     language: 'Language',

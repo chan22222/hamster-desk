@@ -1,32 +1,40 @@
 /* The in-app fallback for when the popup window could not be made (plan §3.1, R1). It sits at the
    top of the column, above the studio, and takes the same click as the notification would have.
-   The popup's cards (src/toast/toast.css) are drawn in this same look. */
+   The popup's cards (src/toast/toast.css) are drawn in this same look: a neutral surface, the kind
+   down the left edge and on the icon before the title (src/notify/kind.ts), a chevron that says
+   the whole strip is a button. */
 
 .notify-banner {
+  --nb-kind: var(--warn);   /* a question */
+  --nb-ink: var(--warn);
   display: flex;
   align-items: stretch;
   gap: 2px;
   flex: none;
   margin: 8px 10px 0;
-  border: 1px solid var(--warn);
+  border: 1px solid var(--line-strong);
   border-radius: var(--radius);
-  background: var(--warn-soft);
+  background: var(--surface);
   color: var(--text);
   box-shadow: var(--shadow-1);
   overflow: hidden;
 }
+.notify-banner.is-permission { --nb-kind: var(--danger); --nb-ink: var(--danger); }
+.notify-banner.is-done { --nb-kind: var(--ok); --nb-ink: var(--ok-text); }
+.notify-banner::before { content: ''; flex: none; width: 3px; background: var(--nb-kind); }
 
 .notify-banner .nb-main {
   display: flex;
-  align-items: baseline;
+  align-items: center;
   gap: 8px;
   flex: 1;
   min-width: 0;
-  padding: 7px 10px;
+  padding: 7px 6px 7px 8px;
   text-align: left;
   color: inherit;
 }
-.notify-banner .nb-main:hover { background: #8a5a081a; }
+.notify-banner .nb-main:hover { background: color-mix(in srgb, var(--nb-kind) 10%, transparent); }
+.notify-banner .nb-kind { flex: none; color: var(--nb-ink); }
 
 /* the title keeps its full width while the body has room to give; only a title that is too long on
    its own (`I have a question · <28-char tab name>` in a narrow column) is cut, and with an ellipsis
@@ -41,15 +49,18 @@
   text-overflow: ellipsis;
   white-space: nowrap;
 }
+.notify-banner .nb-go { flex: none; color: var(--text-3); }
+.notify-banner .nb-main:hover .nb-go { color: var(--text); }
 
 .notify-banner .nb-x {
+  display: flex;
+  align-items: center;
+  justify-content: center;
   width: 28px;
   flex: none;
   color: var(--text-2);
-  font-size: 14px;
-  line-height: 1;
 }
-.notify-banner .nb-x:hover { background: #8a5a081a; color: var(--text); }
+.notify-banner .nb-x:hover { background: var(--surface-2); color: var(--text); }
 
 /* mini mode has no room for a banner; its status line says the same thing in one line */
 .app.is-mini .notify-banner { display: none; }

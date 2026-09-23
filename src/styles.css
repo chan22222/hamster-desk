@@ -19,6 +19,10 @@
   /* Status green — usage under 70 %, added lines. Not the accent any more: a healthy gauge must
      not look like a button, and orange next to the amber of --warn would read as the same step. */
   --ok: #559a70;
+  /* --ok is a fill (gauge segments, a stripe): as the colour of `+12` it was 3.4:1 on white and
+     3.0:1 on a hovered row. Words and numbers in green take this one — 5.9 on white, 5.2 on
+     --surface-2, 4.8 on --surface-3. */
+  --ok-text: #36704f;
   --warn: #8a5a08;  --warn-soft: #fbf0da;
   --danger: #a33a25; --danger-soft: #fae7e2;
   --info: #2c5f7a;
@@ -73,6 +77,7 @@
   --accent: #e0855f;
   --accent-soft: #3a2b23;
   --ok: #6dbb8c;
+  --ok-text: #6dbb8c;    /* the fill already reads as text here: 7.6:1 on --surface, 5.9 on --surface-3 */
   --warn: #e3b168;  --warn-soft: #342a1a;
   --danger: #f0a08c; --danger-soft: #3a241e;
   --info: #93c6df;
@@ -160,7 +165,18 @@ button:focus-visible, select:focus-visible, input:focus-visible { outline: 2px s
 
 .status { display: flex; align-items: center; gap: 6px; flex: none; }
 .pill { display: flex; align-items: center; gap: 6px; height: 28px; padding: 0 9px; border-radius: var(--radius); border: 1px solid var(--line); background: var(--surface); color: var(--text-2); font-size: 12px; white-space: nowrap; }
+/* `.dim` alone (above) loses to `.pill` on colour — same specificity, earlier in the file — so a
+   dim pill needs its own rule; it sits before the hover and open states so those still win */
+.pill.dim { color: var(--text-3); }
 .pill:hover { background: var(--surface-2); color: var(--text); }
+/* The top bar's pills are capped: `.status` never shrinks, so a long translation (`Utilisation en
+   attente · <account>`, `Загрузка обновления 100%`) used to take its width straight out of the
+   tab row. The words go in `.pill-text`, which gives way with an ellipsis — the full label is the
+   pill's title. The usage chip is not one of them: it folds by parts instead (narrow windows, below). */
+.status .pill:not(.um) { max-width: 220px; }
+.pill-text { min-width: 0; overflow: hidden; text-overflow: ellipsis; }
+/* the short form of a pill that folds to its icon in a narrow window (`45%` while downloading) */
+.pill-short { display: none; }
 .pill.on, .pill.is-open { background: var(--surface-3); border-color: var(--line-strong); color: var(--text); }
 .pill.alert { background: var(--accent); border-color: transparent; color: var(--on-accent); }
 .pill.alert:hover { background: var(--accent-hover); color: var(--on-accent); }
@@ -223,7 +239,11 @@ button:focus-visible, select:focus-visible, input:focus-visible { outline: 2px s
 .pop-primary:disabled { opacity: 0.5; cursor: default; }
 .pop-ghost { display: inline-flex; align-items: center; justify-content: center; gap: 6px; height: 32px; padding: 0 12px; border-radius: var(--radius); border: 1px solid var(--line-strong); background: var(--surface); color: var(--text-2); font-size: 13px; }
 .pop-ghost:hover { color: var(--text); background: var(--surface-2); }
-.pop-field { display: flex; align-items: center; justify-content: space-between; gap: 8px; height: 32px; font-size: 13px; color: var(--text-2); }
+/* min-height and wrap, like `.pop-check`: a long label next to its choices (`Schreibtisch-Position`
+   in a 268px menu) puts the choices on a line of their own, right-aligned, instead of spilling out
+   of a 32px row over the next one */
+.pop-field { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 4px 8px; min-height: 32px; font-size: 13px; color: var(--text-2); }
+.pop-field > .seg, .pop-field > select { margin-left: auto; }
 .pop-field select, .side-crumbs select { background: var(--surface-2); color: var(--text); border: 1px solid var(--line); border-radius: var(--radius); padding: 4px 6px; font: inherit; font-size: 12px; }
 /* two or three exclusive choices, side by side — a stack of radio rows would double the menu */
 .seg { display: inline-flex; flex: none; padding: 2px; gap: 2px; border: 1px solid var(--line); border-radius: var(--radius); background: var(--surface-2); }
@@ -414,7 +434,7 @@ body.is-row-resizing * { cursor: row-resize !important; }
 /* rtl keeps the *end* of the path (the folder you are in), which is the half that identifies it */
 .file-dir { font-size: 11px; color: var(--text-3); font-family: ui-monospace, Consolas, monospace; max-width: 100%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; direction: rtl; text-align: left; }
 .file-meta { flex: none; font-size: 11px; color: var(--text-3); font-variant-numeric: tabular-nums; }
-.file-meta .add { color: var(--ok); }
+.file-meta .add { color: var(--ok-text); }
 .file-meta .rem { color: var(--danger); }
 .file-preview { padding: 0 8px 10px; }
 .pv-label { font-size: 11px; color: var(--text-3); margin: 6px 0; }
@@ -534,6 +554,24 @@ body.is-row-resizing * { cursor: row-resize !important; }
 .ob-item.tone-edit .ob-text { color: var(--accent); }
 .ob-count { flex: none; padding: 0 5px; border-radius: 999px; background: var(--overlay-bg); color: var(--bubble-dim); font-size: 10px; line-height: 15px; font-variant-numeric: tabular-nums; }
 
+/* ---- reduced motion -------------------------------------------------------------------- */
+/* The OS's "reduce motion" setting (Windows: Settings › Accessibility › Visual effects › Animation
+   effects) for all of the chrome at once: popovers, the turn card, the bubbles coming in, the
+   update bar, the pane that slides shut. Only the loading screen, the notification cards and the
+   fold story (src/desk/useFold.ts) used to ask. The durations go to next to nothing rather than to
+   `none`, so anything that waits for an animation or a transition to end still hears it end; the
+   3D studio moves in JavaScript and is not reached from here. */
+@media (prefers-reduced-motion: reduce) {
+  *, *::before, *::after {
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    animation-delay: 0s !important;
+    transition-duration: 0.01ms !important;
+    transition-delay: 0s !important;
+    scroll-behavior: auto !important;
+  }
+}
+
 /* ---- narrow windows -------------------------------------------------------------------- */
 /* The usage chip gives up its parts in order of how much each one adds: the countdown first (it
    is the longest piece and the popover still has it), then the segments (redundant with the
@@ -552,6 +590,12 @@ body.is-row-resizing * { cursor: row-resize !important; }
   .topbar { gap: 6px; padding: 0 8px; }
   .status { gap: 4px; }
   .pill { padding: 0 8px; }
+  /* the app-update pill keeps its icon (and a download's percentage); its name is its aria-label and
+     title. The usage pills drop the ` · <account>` they add once there are two accounts — the name
+     before the chip goes at this width too (src/accounts/accounts.css `.um-acct`). */
+  .pill-fold .pill-text { display: none; }
+  .pill-fold .pill-short { display: inline; }
+  .pill-who { display: none; }
   .tab { max-width: 150px; }
 }
 @container office (max-width: 560px) {
