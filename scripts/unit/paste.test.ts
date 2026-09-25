@@ -1,7 +1,7 @@
 // src/term/paste.ts: what a paste or a file drop may put in front of the shell.
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
-import { pathsForPaste, sanitizePaste } from '../../src/term/paste'
+import { pathsForPaste, programOwnsClick, sanitizePaste } from '../../src/term/paste'
 
 test('a paste cannot end its own bracket and run what follows', () => {
   // the clipboard closes the bracketed paste early, then "types" a command and Enter
@@ -24,4 +24,16 @@ test('dropped files are typed as their paths, quoted when they hold a space', ()
   assert.equal(pathsForPaste(['C:\\my shots\\a b.png', 'D:\\x.txt']), '"C:\\my shots\\a b.png" D:\\x.txt')
   // a file with no path behind it (dragged out of a browser) gives nothing to type
   assert.equal(pathsForPaste(['', '']), '')
+})
+
+test('a right click is left to a program that has the mouse, as Windows Terminal leaves it', () => {
+  // Claude Code asks for mouse reports and, on a right press, copies its selection or pastes the
+  // clipboard itself — a paste from the app on top of that arrived twice
+  assert.equal(programOwnsClick('vt200', false), true)
+  assert.equal(programOwnsClick('any', false), true)
+  assert.equal(programOwnsClick('x10', false), true)
+  // Shift keeps the click in xterm (its own selection), so the app copies or pastes as usual
+  assert.equal(programOwnsClick('any', true), false)
+  // a plain shell has not asked for the mouse: the app pastes
+  assert.equal(programOwnsClick('none', false), false)
 })

@@ -6,7 +6,7 @@ import '@xterm/xterm/css/xterm.css'
 import { ui } from './i18n'
 import { runInTerminal, useDesk, type Workspace } from './store'
 import { usePainted, type Painted } from './widgets/theme'
-import { pathsForPaste, sanitizePaste } from './term/paste'
+import { pathsForPaste, programOwnsClick, sanitizePaste } from './term/paste'
 import { throttleTrailing } from './term/fit'
 import { createSearchAddon, probeTermVerbose, searchOptions, termLog, type TermSearcher } from './term/search'
 import { TermSearch } from './term/TermSearch'
@@ -289,8 +289,14 @@ export const TerminalPane = memo(function TerminalPane({ ws, visible }: { ws: Wo
       if (isWindowShortcut(e)) return false
       return true
     })
+    // Right-click the way Windows Terminal does it: copy the selection, else paste — unless the
+    // program in the terminal has taken the mouse. xterm has then already reported this click to
+    // it on mousedown (only a Shift+click is kept back, for selecting), and the program copies or
+    // pastes for itself: Claude Code reads the clipboard on a right press and pastes what it
+    // finds, so a paste from here as well put the text in twice (src/term/paste.ts).
     const onContextMenu = (e: MouseEvent): void => {
       e.preventDefault()
+      if (programOwnsClick(term.modes.mouseTrackingMode, e.shiftKey)) return
       if (!copySelection()) paste()
     }
     host.addEventListener('contextmenu', onContextMenu)

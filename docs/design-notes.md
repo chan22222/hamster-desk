@@ -140,6 +140,8 @@ PSReadLine 과 Claude Code 입력줄이 둘 다 `Ctrl+W` 를 "앞 단어 지우�
 
 그리고 붙여넣는 글을 거른다. xterm 6 은 붙여넣기를 `ESC[200~ … ESC[201~` 로 감싸지만(bracketed paste) 글 **안의** `ESC[201~` 는 그대로 둔다. 그런 글이 클립보드에 있으면 붙여넣기가 거기서 끝나고, 그 뒤의 명령과 CR 은 직접 친 것처럼 셸로 간다. Windows Terminal 은 붙여넣기 전에 탭·LF·CR 말고는 C0·C1 제어 문자를 모두 지운다(`FilterStringForPaste`). 같은 규칙을 `src/term/paste.ts` 에 두고, 표식은 통째로 먼저 지워 `[201~` 같은 찌꺼기가 남지 않게 했다. 끌어 놓은 파일의 경로도 같은 길로 들어간다.
 
+**우클릭은 따로 두 번이었다.** Claude Code(2.1.282 에서 확인)는 Windows·Linux 에서 **오른쪽 버튼 눌림을 받으면 스스로** 자기 선택을 복사하거나, 선택이 없으면 PowerShell `Get-Clipboard` 로 클립보드를 읽어 붙여넣는다 — Windows Terminal 이 프로그램이 마우스를 잡은 동안에는 우클릭을 그대로 넘기고 붙여넣지 않기 때문이다. xterm.js 위에서 도는 걸 알아채면(`TERM_PROGRAM=vscode`, 또는 XTVERSION 응답이 `xterm.js` 로 시작) 건너뛰지만, xterm 6 은 XTVERSION 에 답하지 않고 이 앱은 TERM_PROGRAM 을 바꾸지 않으므로 Claude Code 는 이 터미널을 Windows Terminal 로 본다. 앱의 `contextmenu` 처리기도 붙여넣었으니 둘이었다. `Ctrl+V` 는 마우스 이벤트가 없어 한 번이었고, 마우스를 잡지 않는 PowerShell 프롬프트에서도 한 번이었다. 이제 앱은 xterm 이 클릭을 보내는 조건 그대로 판단한다: 마우스 추적이 켜져 있고(`term.modes.mouseTrackingMode`) Shift 가 없으면 xterm 이 이미 `mousedown` 에서 그 클릭을 프로그램에 보냈으니 앱은 아무것도 하지 않는다(`programOwnsClick`, `src/term/paste.ts`). Shift+우클릭은 xterm 이 자기 선택용으로 잡아 두므로 앱의 복사·붙여넣기다. 우클릭을 마우스 보고에서 빼고 앱이 붙여넣는 쪽은 택하지 않았다 — 그러면 Claude Code 의 "우클릭 = 내 선택 복사" 가 사라진다.
+
 ## 터미널은 앞에 있는 탭만 GPU 로 그린다
 
 지금의 동작은 [기능 › 터미널](features.md#터미널).

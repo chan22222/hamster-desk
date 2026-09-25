@@ -27,3 +27,19 @@ export function pathsForPaste(paths: string[]): string {
     .map((p) => (p.includes(' ') ? `"${p}"` : p))
     .join(' ')
 }
+
+/** what xterm reports about the mouse: `term.modes.mouseTrackingMode` */
+export type MouseTracking = 'none' | 'x10' | 'vt200' | 'drag' | 'any'
+
+/**
+ * Whether a right click in the terminal belongs to the program running there, not to this app.
+ *
+ * A program that has asked for mouse reports (Claude Code, vim with `mouse=a`) is sent every click
+ * xterm sees, except a Shift+click, which xterm keeps for its own selection. Windows Terminal lets
+ * such a click through untouched as well, and Claude Code counts on that: on a right press it
+ * copies its own selection or, with nothing selected, reads the clipboard itself and pastes. A
+ * paste made here on top of that put the text in twice.
+ */
+export function programOwnsClick(mouseTrackingMode: MouseTracking, shiftKey: boolean): boolean {
+  return mouseTrackingMode !== 'none' && !shiftKey
+}
