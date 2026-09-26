@@ -148,3 +148,5 @@
 .tl-meta { display: flex; align-items: center; gap: 8px; font-size: 11px; color: var(--text-3); }
 .tl-branch { display: inline-flex; align-items: center; gap: 3px; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .tl-live { padding: 0 6px; border-radius: 999px; background: var(--accent-soft); color: var(--accent); line-height: 16px; }
+/* another account's conversation: the tab badge (accounts.css), kept to the row's right edge */
+.tl-acct { margin-left: auto; }

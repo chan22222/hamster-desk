@@ -1,5 +1,5 @@
-// The `지난 대화` popover: every conversation Claude Code has had in this folder, newest first,
-// and one click to carry one on in a new terminal — plan §3.4. Owner: B.
+// The `지난 대화` popover: every conversation Claude Code has had in this folder, under every
+// account, newest first, and one click to carry one on in a new terminal — plan §3.4. Owner: B.
 //
 // The rows come straight from the transcript files (electron/transcripts.ts); nothing here talks to
 // `~/.claude/history.jsonl`, which docs/architecture.md ("읽기만 한다") promises never to read.
@@ -7,7 +7,7 @@
 import { useEffect, useLayoutEffect, useRef, useState, type KeyboardEvent as ReactKeyboardEvent } from 'react'
 import type { TranscriptEntry } from '@shared/events'
 import { useUi } from '../i18n'
-import { useDesk } from '../store'
+import { resolveProfileId, useDesk } from '../store'
 import { relTime } from '../sidebar/recent'
 import { termLog } from '../term/search'
 import { IconBranch, IconSearch } from '../widgets/icons'
@@ -36,14 +36,24 @@ function sameText(subtitle: string, title: string): boolean {
 }
 
 /**
- * `profileId`: each account keeps its own conversations, and a resumed one has to open under the
- * same account. `run`, when given, types the command into a terminal of the caller's choosing (the
- * studio's welcome card: the idle shell under it) instead of opening a new tab for it.
+ * `profileId`: the tab's account. The list holds every account's conversations (someone with
+ * several switches between them, and yesterday's may well be under another login), but a resumed
+ * one has to open under the account that keeps it — `claude --resume` looks nowhere else. So a row
+ * of another account carries that account's badge and always opens in a new tab of that account.
+ * `run`, when given, types the command into a terminal of the caller's choosing (the studio's
+ * welcome card: the idle shell under it) instead of opening a new tab for it — for this account's rows.
  */
 export function TranscriptList({ cwd, profileId, onPick, run }: { cwd: string; profileId: string; onPick: () => void; run?: (cmd: string) => void }) {
   // every word comes from the dictionary at render time, so a language change applies to the open list
   const u = useUi()
   const addWorkspace = useDesk((s) => s.addWorkspace)
+  const profiles = useDesk((s) => s.profiles)
+  const mine = resolveProfileId(profileId)
+  /** the account's name when the row is kept under another account than this tab's, else null */
+  const otherAccount = (e: TranscriptEntry): string | null => {
+    const pid = resolveProfileId(e.profileId)
+    return pid === mine ? null : (profiles.find((p) => p.id === pid)?.name ?? pid)
+  }
   const [rows, setRows] = useState<TranscriptEntry[] | null>(null)
   const [filter, setFilter] = useState('')
 
@@ -54,7 +64,7 @@ export function TranscriptList({ cwd, profileId, onPick, run }: { cwd: string; p
       return
     }
     void window.desk.transcripts
-      .list(cwd, profileId)
+      .list(cwd)
       .then((r) => {
         if (alive) setRows(r)
       })
@@ -64,7 +74,7 @@ export function TranscriptList({ cwd, profileId, onPick, run }: { cwd: string; p
     return () => {
       alive = false
     }
-  }, [cwd, profileId])
+  }, [cwd])
 
   // `Popover` opens under its trigger and never flips upward, and this trigger sits in the middle of
   // the window with the studio above it. So the list takes exactly the height that is left, and the
@@ -101,13 +111,16 @@ export function TranscriptList({ cwd, profileId, onPick, run }: { cwd: string; p
     else all[j].focus()
   }
 
-  /** Carry a conversation on: in the caller's terminal, or in a new one that types the command itself. */
+  /**
+   * Carry a conversation on: in the caller's terminal, or in a new one that types the command itself.
+   * Another account's conversation needs a shell of that account, so it never goes to `run`.
+   */
   const resume = (e: TranscriptEntry): void => {
     if (e.live) return
-    termLog(`[history] resume ${e.sessionId}`)
+    termLog(`[history] resume ${e.sessionId} (${e.profileId})`)
     const cmd = `claude --resume ${e.sessionId}`
-    if (run) run(cmd)
-    else addWorkspace(cwd, e.title, cmd, profileId)
+    if (run && !otherAccount(e)) run(cmd)
+    else addWorkspace(cwd, e.title, cmd, otherAccount(e) ? e.profileId : profileId)
     onPick()
   }
 
@@ -148,31 +161,36 @@ export function TranscriptList({ cwd, profileId, onPick, run }: { cwd: string; p
         {rows === null && <p className="pop-note">{u.common.loading}</p>}
         {rows !== null && rows.length === 0 && <p className="pop-note">{u.history.empty}</p>}
         {rows !== null && rows.length > 0 && shown && shown.length === 0 && <p className="pop-note">{u.common.noResults}</p>}
-        {(shown ?? []).map((e, i) => (
-          <button
-            key={e.sessionId}
-            className={`tl-row ${e.live ? 'is-live' : ''}`}
-            data-debug-click={`history-${i}`}
-            disabled={e.live}
-            title={e.live ? u.history.live : u.history.rowTip(e.title, e.path, where)}
-            onClick={() => resume(e)}
-            onKeyDown={onRowKey}
-          >
-            <span className="tl-title">{e.title}</span>
-            {/* a conversation that is one prompt long has that prompt as both; saying it twice is noise */}
-            {e.subtitle && !sameText(e.subtitle, e.title) && <span className="tl-sub">{e.subtitle}</span>}
-            <span className="tl-meta">
-              <span>{relTime(e.lastAt)}</span>
-              {e.branch && (
-                <span className="tl-branch">
-                  <IconBranch size={11} />
-                  {e.branch}
-                </span>
-              )}
-              {e.live && <span className="tl-live">{u.history.running}</span>}
-            </span>
-          </button>
-        ))}
+        {(shown ?? []).map((e, i) => {
+          const other = otherAccount(e)
+          return (
+            <button
+              key={e.sessionId}
+              className={`tl-row ${e.live ? 'is-live' : ''}`}
+              data-debug-click={`history-${i}`}
+              disabled={e.live}
+              title={e.live ? u.history.live : u.history.rowTip(e.title, e.path, other ? u.history.inAccountTerminal(other) : where)}
+              onClick={() => resume(e)}
+              onKeyDown={onRowKey}
+            >
+              <span className="tl-title">{e.title}</span>
+              {/* a conversation that is one prompt long has that prompt as both; saying it twice is noise */}
+              {e.subtitle && !sameText(e.subtitle, e.title) && <span className="tl-sub">{e.subtitle}</span>}
+              <span className="tl-meta">
+                <span>{relTime(e.lastAt)}</span>
+                {e.branch && (
+                  <span className="tl-branch">
+                    <IconBranch size={11} />
+                    {e.branch}
+                  </span>
+                )}
+                {e.live && <span className="tl-live">{u.history.running}</span>}
+                {/* this tab's own rows go unmarked, so the badge reads as "not this account" */}
+                {other && <span className="acct-badge tl-acct">{other}</span>}
+              </span>
+            </button>
+          )
+        })}
       </div>
       <button className="pop-ghost" data-debug-click="history-continue" onClick={continueLast} title="claude --continue">
         {u.history.continueLast}

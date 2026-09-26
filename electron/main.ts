@@ -1140,9 +1140,15 @@ handle('win:mini', (_e, on: boolean) => setMini(win, on === true))
 
 // ---- IPC: past conversations of a folder (electron/transcripts.ts)
 // `live` is the set the watcher already knows is running, so the list can grey those rows out.
+// Every account on the list, not just the tab's: a folder's conversations are spread over all of
+// them. `withEmails` leaves out ~/.claude while it is folded into its twin, as the account list does.
 
-handle('transcripts:list', (_e, cwd: string, profileId?: string) =>
-  listTranscripts(String(cwd ?? ''), new Set(liveSessions().map((s) => s.sessionId)), configDirOf(profileId) ?? undefined),
+handle('transcripts:list', (_e, cwd: string) =>
+  listTranscripts(
+    String(cwd ?? ''),
+    new Set(liveSessions().map((s) => s.sessionId)),
+    withEmails(loadProfiles()).list.map((p) => ({ profileId: p.id, ...(p.dir ? { baseDir: p.dir } : {}) })),
+  ),
 )
 
 // ---- IPC: git, read-only (electron/git.ts)

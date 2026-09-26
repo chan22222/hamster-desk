@@ -158,9 +158,9 @@ export interface DeskBridge {
     /** the user clicked a notification: its `tab` is the one to open */
     onClick(cb: (tab: string) => void): () => void
   }
-  /** past conversations of one folder, from the transcript files (electron/transcripts.ts) */
+  /** past conversations of one folder under every account, from the transcript files (electron/transcripts.ts) */
   transcripts: {
-    list(cwd: string, profileId?: string): Promise<TranscriptEntry[]>
+    list(cwd: string): Promise<TranscriptEntry[]>
   }
   /** read-only git for one folder (electron/git.ts) */
   git: {
@@ -315,7 +315,7 @@ const bridge: DeskBridge = {
     },
   },
   transcripts: {
-    list: (cwd, profileId) => ipcRenderer.invoke('transcripts:list', cwd, profileId),
+    list: (cwd) => ipcRenderer.invoke('transcripts:list', cwd),
   },
   git: {
     info: (cwd) => ipcRenderer.invoke('git:info', cwd),

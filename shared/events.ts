@@ -399,6 +399,8 @@ export interface TranscriptEntry {
   size: number
   /** a claude is running this session right now */
   live: boolean
+  /** the account whose config folder holds it — `claude --resume` finds it only there */
+  profileId: string
 }
 
 // ---- git (electron/git.ts — read-only commands only)

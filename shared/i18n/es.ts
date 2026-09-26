@@ -419,6 +419,7 @@ export const es: UiStrings = {
     running: 'en marcha',
     inThisTerminal: 'en esta terminal',
     inNewTerminal: 'en una terminal nueva',
+    inAccountTerminal: (account) => `en una terminal nueva de la cuenta ${account}`,
     rowTip: (title, path, where) => `${title}\n${path}\nClic: continuar ${where}`,
     continueLast: 'Continuar la última conversación de esta carpeta (--continue)',
   },

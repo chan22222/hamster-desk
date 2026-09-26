@@ -419,6 +419,7 @@ export const de: UiStrings = {
     running: 'läuft',
     inThisTerminal: 'in diesem Terminal',
     inNewTerminal: 'in neuem Terminal',
+    inAccountTerminal: (account) => `in neuem Terminal unter ${account}`,
     rowTip: (title, path, where) => `${title}\n${path}\nKlick: ${where} fortsetzen`,
     continueLast: 'Letztes Gespräch dieses Ordners fortsetzen (--continue)',
   },

@@ -12,7 +12,7 @@
 
 import { promises as fsp } from 'node:fs'
 import { join } from 'node:path'
-import type { TranscriptEntry } from '../shared/events'
+import { DEFAULT_PROFILE_ID, type TranscriptEntry } from '../shared/events'
 import { projectsDir, projectSlug } from './watcher/paths'
 import { Tailer } from './watcher/tail'
 
@@ -27,8 +27,14 @@ const TITLE_MAX = 60
 /** the subtitle (the last prompt) is cut here */
 const SUB_MAX = 120
 
-/** Everything about one transcript except whether it happens to be running right now. */
-type Row = Omit<TranscriptEntry, 'live'>
+/** Everything about one transcript except whether it happens to be running right now, and whose it is. */
+type Row = Omit<TranscriptEntry, 'live' | 'profileId'>
+
+/** One account's config folder; no `baseDir` = the CLI's own (~/.claude, or `CLAUDE_CONFIG_DIR`). */
+export interface TranscriptSource {
+  profileId: string
+  baseDir?: string
+}
 
 /** `path` → the row, plus the `size:mtime` stamp it was read at. */
 const cache = new Map<string, { stamp: string; row: Row | null }>()
@@ -187,35 +193,47 @@ async function readOne(path: string, sessionId: string, size: number, mtimeMs: n
 }
 
 /**
- * The past conversations of one folder, newest first.
+ * The past conversations of one folder, newest first, from every account at once.
+ *
+ * Each account keeps its own transcripts, and someone with several accounts switches between them —
+ * so a folder's conversations are scattered over them all. Listing only the tab's account showed
+ * whatever that account happened to hold (often weeks old) and hid yesterday's conversation because
+ * it ran under another login. Each row says whose it is (`profileId`), and resuming it has to happen
+ * under that account: `claude --resume` only looks in its own config folder.
  *
  * `live` = the session ids a claude is running right now (watcher.liveSessions); those rows are
  * shown but not resumable, because two claudes on one transcript would fight over the file.
- * `baseDir` = another account's config folder: each account keeps its own conversations.
  */
-export async function listTranscripts(cwd: string, live: Set<string>, baseDir?: string): Promise<TranscriptEntry[]> {
+export async function listTranscripts(
+  cwd: string,
+  live: Set<string>,
+  sources: TranscriptSource[] = [{ profileId: DEFAULT_PROFILE_ID }],
+): Promise<TranscriptEntry[]> {
   if (!cwd) return []
   const t0 = Date.now()
-  const dir = join(projectsDir(baseDir), projectSlug(cwd))
-  let names: string[]
-  try {
-    names = (await fsp.readdir(dir, { withFileTypes: true })).filter((d) => d.isFile() && d.name.endsWith('.jsonl')).map((d) => d.name)
-  } catch {
-    return [] // no folder means this project has never been opened in Claude Code
-  }
-
-  const stats: { path: string; sessionId: string; size: number; mtimeMs: number }[] = []
-  for (const name of names) {
-    const path = join(dir, name)
+  const stats: { path: string; sessionId: string; size: number; mtimeMs: number; profileId: string }[] = []
+  for (const src of sources) {
+    const dir = join(projectsDir(src.baseDir), projectSlug(cwd))
+    let names: string[]
     try {
-      const st = await fsp.stat(path)
-      if (st.size > 0) stats.push({ path, sessionId: name.slice(0, -6), size: st.size, mtimeMs: st.mtimeMs })
+      names = (await fsp.readdir(dir, { withFileTypes: true })).filter((d) => d.isFile() && d.name.endsWith('.jsonl')).map((d) => d.name)
     } catch {
-      /* vanished between readdir and stat */
+      continue // no folder means this project has never been opened in Claude Code under this account
+    }
+    for (const name of names) {
+      const path = join(dir, name)
+      try {
+        const st = await fsp.stat(path)
+        if (st.size > 0) stats.push({ path, sessionId: name.slice(0, -6), size: st.size, mtimeMs: st.mtimeMs, profileId: src.profileId })
+      } catch {
+        /* vanished between readdir and stat */
+      }
     }
   }
   stats.sort((a, b) => b.mtimeMs - a.mtimeMs)
-  const take = stats.slice(0, MAX_FILES)
+  // the same id under two accounts is one conversation copied over; the newer copy is the one that went on
+  const seen = new Set<string>()
+  const take = stats.filter((f) => !seen.has(f.sessionId) && seen.add(f.sessionId)).slice(0, MAX_FILES)
 
   let cached = 0
   const out: TranscriptEntry[] = []
@@ -234,7 +252,7 @@ export async function listTranscripts(cwd: string, live: Set<string>, baseDir?: 
       }
       cache.set(f.path, { stamp, row })
     }
-    if (row) out.push({ ...row, live: live.has(row.sessionId) })
+    if (row) out.push({ ...row, profileId: f.profileId, live: live.has(row.sessionId) })
   }
   // the folder may have shrunk; do not let the cache grow forever
   if (cache.size > MAX_FILES * 4) for (const k of [...cache.keys()].slice(0, cache.size - MAX_FILES * 2)) cache.delete(k)

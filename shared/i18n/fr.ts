@@ -419,6 +419,7 @@ export const fr: UiStrings = {
     running: 'en cours',
     inThisTerminal: 'dans ce terminal',
     inNewTerminal: 'dans un nouveau terminal',
+    inAccountTerminal: (account) => `dans un nouveau terminal du compte ${account}`,
     rowTip: (title, path, where) => `${title}\n${path}\nClic : reprendre ${where}`,
     continueLast: 'Reprendre la dernière conversation de ce dossier (--continue)',
   },

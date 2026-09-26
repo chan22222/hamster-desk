@@ -7,25 +7,40 @@
 
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
-import { mkdtempSync, mkdirSync, writeFileSync } from 'node:fs'
+import { mkdtempSync, mkdirSync, utimesSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { listTranscripts } from '../../electron/transcripts'
 import { projectSlug } from '../../electron/watcher/paths'
+import { DEFAULT_PROFILE_ID } from '../../shared/events'
 
 const CWD = 'C:\\Users\\tester\\proj'
 
+/** Another account's throwaway config folder, reached through `baseDir` rather than the env. */
+function makeAccount(): string {
+  const base = mkdtempSync(join(tmpdir(), 'hd-transcripts-'))
+  mkdirSync(join(base, 'projects', projectSlug(CWD)), { recursive: true })
+  return base
+}
+
 /** A throwaway `~/.claude` whose `projects/<slug>` folder holds the fixtures of one test. */
 function makeHome(): string {
-  const home = mkdtempSync(join(tmpdir(), 'hd-transcripts-'))
-  mkdirSync(join(home, 'projects', projectSlug(CWD)), { recursive: true })
+  const home = makeAccount()
   process.env.CLAUDE_CONFIG_DIR = home
   return home
 }
 
-function writeFixture(home: string, sessionId: string, records: unknown[]): void {
+function writeFixture(home: string, sessionId: string, records: unknown[]): string {
   const lines = records.map((r) => JSON.stringify(r)).join('\n') + '\n'
-  writeFileSync(join(home, 'projects', projectSlug(CWD), `${sessionId}.jsonl`), lines, 'utf8')
+  const path = join(home, 'projects', projectSlug(CWD), `${sessionId}.jsonl`)
+  writeFileSync(path, lines, 'utf8')
+  return path
+}
+
+/** mtime is what orders the list (and picks between two copies of one id), so pin it */
+function touch(path: string, at: string): void {
+  const t = new Date(at)
+  utimesSync(path, t, t)
 }
 
 /** the one record shape that makes a transcript listable: a typed prompt from a human */
@@ -193,4 +208,63 @@ test('a first prompt too long for the head (a pasted image) still lists, by its 
   assert.equal(e.startedAt, Date.parse('2026-09-20T10:00:00.000Z'))
   assert.equal(e.branch, 'main')
   assert.equal(e.lastAt, Date.parse('2026-09-20T10:00:09.000Z'))
+})
+
+test('a caller that names no accounts still reads the CLI’s own folder, and every row says it is the default account’s', async () => {
+  const home = makeHome()
+  writeFixture(home, ID_A, [userRecord('계정을 안 넘긴 호출', '2026-09-21T00:00:00.000Z')])
+
+  const list = await listTranscripts(CWD, new Set())
+  assert.deepEqual(list.map((e) => [e.sessionId, e.profileId]), [[ID_A, DEFAULT_PROFILE_ID]])
+})
+
+test('a folder’s conversations from every account come back together, newest first, each with its own account', async () => {
+  // the regression: only the tab's account was read, so yesterday's conversation under another
+  // login never showed and the list looked weeks old
+  const home = makeHome()
+  const acc2 = makeAccount()
+  touch(writeFixture(home, ID_A, [userRecord('기본 계정의 오래된 대화', '2026-09-21T01:00:00.000Z')]), '2026-09-21T01:00:00.000Z')
+  touch(writeFixture(acc2, ID_B, [userRecord('다른 계정에서 어제 한 대화', '2026-09-22T01:00:00.000Z')]), '2026-09-22T01:00:00.000Z')
+  touch(writeFixture(home, ID_C, [userRecord('기본 계정의 오늘 대화', '2026-09-23T01:00:00.000Z')]), '2026-09-23T01:00:00.000Z')
+
+  const list = await listTranscripts(CWD, new Set(), [{ profileId: DEFAULT_PROFILE_ID }, { profileId: 'acc-2', baseDir: acc2 }])
+  // one order across both folders, not one folder after the other
+  assert.deepEqual(
+    list.map((e) => [e.sessionId, e.profileId]),
+    [
+      [ID_C, DEFAULT_PROFILE_ID],
+      [ID_B, 'acc-2'],
+      [ID_A, DEFAULT_PROFILE_ID],
+    ],
+  )
+  assert.equal(list[1].title, '다른 계정에서 어제 한 대화')
+})
+
+test('an account that never opened this folder is skipped, and the others still list', async () => {
+  const home = makeHome()
+  // a config folder with no `projects/<slug>` in it at all; put first so a throw or an early stop would show
+  const bare = mkdtempSync(join(tmpdir(), 'hd-transcripts-'))
+  writeFixture(home, ID_A, [userRecord('기본 계정에만 있는 대화', '2026-09-21T02:00:00.000Z')])
+
+  const list = await listTranscripts(CWD, new Set(), [{ profileId: 'acc-2', baseDir: bare }, { profileId: DEFAULT_PROFILE_ID }])
+  assert.deepEqual(list.map((e) => [e.sessionId, e.profileId]), [[ID_A, DEFAULT_PROFILE_ID]])
+})
+
+test('one session id under two accounts lists once, from whichever copy was written last', async () => {
+  const home = makeHome()
+  const acc2 = makeAccount()
+  // ID_A went on under acc-2; ID_B went on under the default account — so neither source order wins by itself
+  touch(writeFixture(home, ID_A, [userRecord('A 의 기본 계정 사본', '2026-09-21T03:00:00.000Z')]), '2026-09-21T03:00:00.000Z')
+  touch(writeFixture(acc2, ID_A, [userRecord('A 를 다른 계정에서 이어 감', '2026-09-21T04:00:00.000Z')]), '2026-09-21T04:00:00.000Z')
+  touch(writeFixture(home, ID_B, [userRecord('B 를 기본 계정에서 이어 감', '2026-09-21T06:00:00.000Z')]), '2026-09-21T06:00:00.000Z')
+  touch(writeFixture(acc2, ID_B, [userRecord('B 의 다른 계정 사본', '2026-09-21T05:00:00.000Z')]), '2026-09-21T05:00:00.000Z')
+
+  const list = await listTranscripts(CWD, new Set(), [{ profileId: DEFAULT_PROFILE_ID }, { profileId: 'acc-2', baseDir: acc2 }])
+  assert.deepEqual(
+    list.map((e) => [e.sessionId, e.profileId, e.title]),
+    [
+      [ID_B, DEFAULT_PROFILE_ID, 'B 를 기본 계정에서 이어 감'],
+      [ID_A, 'acc-2', 'A 를 다른 계정에서 이어 감'],
+    ],
+  )
 })

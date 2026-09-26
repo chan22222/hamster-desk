@@ -472,6 +472,8 @@ export const ko = {
     running: '실행 중',
     inThisTerminal: '이 터미널에서',
     inNewTerminal: '새 터미널에서',
+    /** a row kept under another account than the tab's: `claude --resume` finds it only under that one */
+    inAccountTerminal: (account: string) => `${account} 계정의 새 터미널에서`,
     rowTip: (title: string, path: string, where: string) => `${title}\n${path}\n클릭: ${where} 이어서`,
     continueLast: '이 폴더의 마지막 대화 이어서 (--continue)',
   },

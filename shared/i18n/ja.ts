@@ -419,6 +419,7 @@ export const ja: UiStrings = {
     running: '実行中',
     inThisTerminal: 'このターミナルで',
     inNewTerminal: '新しいターミナルで',
+    inAccountTerminal: (account) => `${account} アカウントの新しいターミナルで`,
     rowTip: (title, path, where) => `${title}\n${path}\nクリック: ${where}続ける`,
     continueLast: 'このフォルダーの最後の会話を続ける (--continue)',
   },

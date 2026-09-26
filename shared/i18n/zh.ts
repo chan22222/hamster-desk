@@ -418,6 +418,7 @@ export const zh: UiStrings = {
     running: '运行中',
     inThisTerminal: '在此终端',
     inNewTerminal: '在新终端',
+    inAccountTerminal: (account) => `在 ${account} 账号的新终端`,
     rowTip: (title, path, where) => `${title}\n${path}\n单击：${where}继续`,
     continueLast: '继续此文件夹的最后一次对话 (--continue)',
   },

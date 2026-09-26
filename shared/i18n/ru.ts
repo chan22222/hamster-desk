@@ -419,6 +419,7 @@ export const ru: UiStrings = {
     running: 'запущен',
     inThisTerminal: 'в этом терминале',
     inNewTerminal: 'в новом терминале',
+    inAccountTerminal: (account) => `в новом терминале аккаунта ${account}`,
     rowTip: (title, path, where) => `${title}\n${path}\nКлик: продолжить ${where}`,
     continueLast: 'Продолжить последний диалог этой папки (--continue)',
   },

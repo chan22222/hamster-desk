@@ -51,7 +51,7 @@ electron/toast-window.ts 앱의 알림 창(투명·항상 위·포커스 없음,
 electron/toast-stack.ts  알림 창의 순수 부분: 카드 최대 3·수명(15초/8초)·정지/재개·창 위치(toastBounds, 미니 창 피하기) — 단위 테스트
 electron/toast-preload.ts 알림 창 페이지의 브리지(ready·state·click·close) — 앱 브리지(preload.ts)는 넘기지 않는다
 electron/window-state.ts 창 위치 저장·복원(fitBounds) · 미니 모드(setMini·miniPlacement) — 순수 함수는 단위 테스트
-electron/transcripts.ts 지난 대화 목록: 트랜스크립트 앞 64KB + 꼬리 512KB 만, `경로:크기:mtime` 캐시
+electron/transcripts.ts 지난 대화 목록: 모든 계정 폴더를 한 목록으로(행마다 profileId), 트랜스크립트 앞 64KB + 꼬리 512KB 만, `경로:크기:mtime` 캐시
 electron/project-actions.ts 사이드바 실행 메뉴의 판정: 폴더 맨 윗단의 표식 파일(package.json · pyproject · Cargo.toml · go.mod · Makefile …)로 종류·배지·명령을 정하고 표식의 mtime 으로 캐시 — electron 의존 없음
 electron/git.ts         읽기 전용 git: info(브랜치·바뀐 수·ahead/behind) · diff(작업 트리 → staged → untracked), 5초 타임아웃
 electron/version.ts     claude --version / npm 최신 비교
